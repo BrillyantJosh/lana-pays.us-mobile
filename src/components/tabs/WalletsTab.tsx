@@ -204,20 +204,30 @@ const WalletsTab = ({ onPayWithCash }: WalletsTabProps) => {
 
     try {
       const ids = await convertWifToIds(trimmed);
+
+      // Pre-check: if already registered, redirect to Check flow
+      setCheckingRegistration(true);
+      const regResult = await checkWalletRegistration(ids.walletId);
+      setCheckingRegistration(false);
+
+      if (regResult?.registered) {
+        // Already registered — redirect to Check flow with this wallet
+        setIsVerifying(false);
+        setView("check");
+        handleWalletScan(ids.walletId);
+        return;
+      }
+
       setScannedWallet({
         walletId: ids.walletId,
         nostrHexId: ids.nostrHexId,
         nostrNpubId: ids.nostrNpubId,
       });
 
-      // Check registration status
-      setCheckingRegistration(true);
-      const regResult = await checkWalletRegistration(ids.walletId);
       if (regResult) {
         setWalletRegistered(regResult.registered);
         setWalletFrozen(regResult.frozen);
       }
-      setCheckingRegistration(false);
     } catch (err) {
       setScanError(err instanceof Error ? err.message : 'Invalid WIF Private Key. Make sure you are scanning a valid LanaCoin private key.');
     } finally {
