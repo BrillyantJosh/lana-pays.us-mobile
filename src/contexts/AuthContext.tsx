@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { convertWifToIds } from '@/lib/crypto';
-import { SimplePool } from 'nostr-tools';
 
 declare global {
   interface Document {
@@ -30,10 +29,6 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const SESSION_KEY = 'lana_pays_session';
-const LANA_RELAYS = [
-  'wss://relay.lanavault.space',
-  'wss://relay.lanacoin-eternity.com'
-];
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<UserSession | null>(null);
@@ -125,38 +120,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let profileDisplayName: string | undefined;
       let profilePicture: string | undefined;
 
-      // Fetch KIND 0 profile from relays
-      const pool = new SimplePool();
+      // Fetch KIND 0 profile via server (avoids nostr-tools buffer issues in browser)
       try {
-        const timeoutPromise = new Promise<null>((_, reject) =>
-          setTimeout(() => reject(new Error('TIMEOUT')), 5000)
-        );
-
-        const profileEvent = await Promise.race([
-          pool.get(LANA_RELAYS, {
-            kinds: [0],
-            authors: [derivedIds.nostrHexId],
-            limit: 1
-          }),
-          timeoutPromise
-        ]);
-
-        if (profileEvent && profileEvent.kind === 0) {
-          try {
-            const content = JSON.parse(profileEvent.content);
-            profileName = content.name;
-            profileDisplayName = content.display_name;
-            profilePicture = content.picture;
-          } catch (e) {
-            console.warn('Could not parse profile content:', e);
-          }
+        const profileRes = await fetch('/api/profile-lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hex_id: derivedIds.nostrHexId }),
+        });
+        const profileData = await profileRes.json();
+        if (profileData.profile) {
+          profileName = profileData.profile.name;
+          profileDisplayName = profileData.profile.display_name;
+          profilePicture = profileData.profile.picture;
         }
-      } catch (profileError) {
-        if (profileError instanceof Error && profileError.message === 'TIMEOUT') {
-          console.warn('Profile fetch timed out, continuing without profile data');
-        }
-      } finally {
-        pool.close(LANA_RELAYS);
+      } catch (e) {
+        console.warn('Profile lookup failed, continuing without profile data:', e);
       }
 
       // Register user on backend

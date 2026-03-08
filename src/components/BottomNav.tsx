@@ -9,7 +9,7 @@ interface BottomNavProps {
 }
 
 const tabs: { id: Tab; label: string; icon?: typeof Wallet; img?: string }[] = [
-  { id: "cash", label: "Cash", icon: HandCoins },
+  { id: "cash", label: "Cash", icon: PoundSterling },
   { id: "wallets", label: "Wallets", icon: Wallet },
   { id: "lana", label: "$Lana", img: lanaIcon },
 ];

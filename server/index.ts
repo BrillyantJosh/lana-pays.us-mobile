@@ -9,12 +9,13 @@ import { fileURLToPath } from 'url';
 import { getDb, closeDb } from './db/connection.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, type ElectrumServer } from './lib/electrum.js';
+import { fetchKind0Profile } from './lib/nostr.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = parseInt(process.env.PORT || '3005');
+const PORT = parseInt(process.env.SERVER_PORT || process.env.PORT || '3005');
 
 app.use(express.json());
 
@@ -143,6 +144,25 @@ app.post('/api/users', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE hex_id = ?').get(hex_id);
 
   res.json({ user });
+});
+
+/**
+ * Look up Nostr KIND 0 profile by hex pubkey
+ */
+app.post('/api/profile-lookup', async (req, res) => {
+  const { hex_id } = req.body;
+
+  if (!hex_id) {
+    return res.status(400).json({ error: 'Missing required field: hex_id' });
+  }
+
+  try {
+    const profile = await fetchKind0Profile(hex_id);
+    res.json({ profile });
+  } catch (error: any) {
+    console.error(`Profile lookup failed for ${hex_id}:`, error.message);
+    res.json({ profile: null });
+  }
 });
 
 /**

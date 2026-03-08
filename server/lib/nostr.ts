@@ -183,6 +183,64 @@ export async function fetchKind38888(): Promise<Kind38888Data | null> {
   return parseKind38888Event(newestEvent);
 }
 
+/**
+ * Fetch KIND 0 (profile metadata) for a given hex pubkey from Lana relays
+ */
+export async function fetchKind0Profile(hexId: string): Promise<{ name?: string; display_name?: string; picture?: string } | null> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(null), 5000);
+    let resolved = false;
+
+    for (const relayUrl of LANA_RELAYS) {
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(relayUrl);
+      } catch {
+        continue;
+      }
+
+      const subId = `kind0_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify(['REQ', subId, {
+          kinds: [0],
+          authors: [hexId],
+          limit: 1
+        }]));
+      });
+
+      ws.on('message', (data: Buffer) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg[0] === 'EVENT' && msg[1] === subId && !resolved) {
+            const event = msg[2];
+            if (event.kind === 0) {
+              resolved = true;
+              clearTimeout(timeout);
+              ws.close();
+              try {
+                const content = JSON.parse(event.content);
+                resolve({
+                  name: content.name,
+                  display_name: content.display_name,
+                  picture: content.picture,
+                });
+              } catch {
+                resolve(null);
+              }
+            }
+          }
+          if (msg[0] === 'EOSE' && !resolved) {
+            ws.close();
+          }
+        } catch {}
+      });
+
+      ws.on('error', () => ws.close());
+    }
+  });
+}
+
 export function getLanaRelays(): string[] {
   return LANA_RELAYS;
 }
