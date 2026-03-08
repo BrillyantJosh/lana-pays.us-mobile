@@ -1,4 +1,4 @@
-import { Banknote, Wallet } from "lucide-react";
+import { HandCoins, Wallet } from "lucide-react";
 import lanaIcon from "@/assets/lana-icon.png";
 
 type Tab = "cash" | "wallets" | "lana";
@@ -9,7 +9,7 @@ interface BottomNavProps {
 }
 
 const tabs: { id: Tab; label: string; icon?: typeof Wallet; img?: string }[] = [
-  { id: "cash", label: "Cash", icon: Banknote },
+  { id: "cash", label: "Cash", icon: HandCoins },
   { id: "wallets", label: "Wallets", icon: Wallet },
   { id: "lana", label: "$Lana", img: lanaIcon },
 ];
@@ -30,12 +30,12 @@ const BottomNav = ({ active, onChange }: BottomNavProps) => {
             }`}
           >
             {Icon ? (
-              <Icon className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
+              <Icon className="w-6 h-6" strokeWidth={isActive ? 2.5 : 2} />
             ) : img ? (
               <img
                 src={img}
                 alt={label}
-                className={`w-5 h-5 object-contain transition-opacity ${
+                className={`w-6 h-6 object-contain transition-opacity ${
                   isActive ? "opacity-100" : "opacity-60"
                 }`}
               />
