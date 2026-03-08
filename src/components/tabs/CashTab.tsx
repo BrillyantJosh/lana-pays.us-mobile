@@ -1,4 +1,4 @@
-import { Camera, HandCoins } from "lucide-react";
+import { Camera, PoundSterling } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,7 +8,7 @@ const CashTab = () => {
     <div className="flex flex-col gap-6 px-6 py-4">
       <div className="flex items-center gap-4">
         <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0">
-          <HandCoins className="w-7 h-7 text-primary" />
+          <PoundSterling className="w-7 h-7 text-primary" />
         </div>
         <div>
           <h2 className="font-display text-xl font-bold text-foreground">Cash</h2>

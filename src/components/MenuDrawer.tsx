@@ -1,18 +1,28 @@
 import { X, Settings, HelpCircle, LogOut, Shield } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 interface MenuDrawerProps {
   open: boolean;
   onClose: () => void;
 }
 
-const menuItems = [
-  { label: "Settings", icon: Settings },
-  { label: "Security", icon: Shield },
-  { label: "Help", icon: HelpCircle },
-  { label: "Sign Out", icon: LogOut },
-];
-
 const MenuDrawer = ({ open, onClose }: MenuDrawerProps) => {
+  const { session, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = () => {
+    logout();
+    onClose();
+    navigate('/login');
+  };
+
+  const menuItems = [
+    { label: "Settings", icon: Settings, action: () => {} },
+    { label: "Security", icon: Shield, action: () => {} },
+    { label: "Help", icon: HelpCircle, action: () => {} },
+  ];
+
   return (
     <>
       {/* Overlay */}
@@ -37,16 +47,40 @@ const MenuDrawer = ({ open, onClose }: MenuDrawerProps) => {
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* User info */}
+        {session && (
+          <div className="px-4 py-3 border-b border-border">
+            <p className="text-sm font-medium text-foreground truncate">
+              {session.profileDisplayName || session.profileName || 'Lana User'}
+            </p>
+            <p className="text-xs text-muted-foreground truncate">
+              {session.nostrNpubId.slice(0, 20)}...
+            </p>
+          </div>
+        )}
+
         <div className="p-3 flex flex-col gap-1">
-          {menuItems.map(({ label, icon: Icon }) => (
+          {menuItems.map(({ label, icon: Icon, action }) => (
             <button
               key={label}
+              onClick={action}
               className="flex items-center gap-3 px-4 py-3 rounded-xl text-foreground hover:bg-secondary transition-colors text-sm font-medium"
             >
               <Icon className="w-5 h-5 text-muted-foreground" />
               {label}
             </button>
           ))}
+
+          <div className="border-t border-border my-2" />
+
+          <button
+            onClick={handleSignOut}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl text-destructive hover:bg-destructive/10 transition-colors text-sm font-medium"
+          >
+            <LogOut className="w-5 h-5" />
+            Sign Out
+          </button>
         </div>
       </div>
     </>

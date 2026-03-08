@@ -1,4 +1,4 @@
-import { HandCoins, Wallet } from "lucide-react";
+import { PoundSterling, Wallet } from "lucide-react";
 import lanaIcon from "@/assets/lana-icon.png";
 
 type Tab = "cash" | "wallets" | "lana";

@@ -7,8 +7,11 @@ services:
     restart: unless-stopped
     environment:
       - VIRTUAL_HOST=mobile.lanapays.us
+      - VIRTUAL_PORT=3005
       - LETSENCRYPT_HOST=mobile.lanapays.us
       - LETSENCRYPT_EMAIL=josh@lanaworld.app
+    volumes:
+      - ./data:/app/data
     networks:
       - webproxy
 
