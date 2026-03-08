@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, UserPlus, Loader2, CheckCircle2, X, Coins, Banknote, ArrowLeft } from "lucide-react";
+import { Search, UserPlus, Loader2, CheckCircle2, X, Banknote, ArrowLeft, AlertCircle, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { QRScanner } from "@/components/QRScanner";
@@ -79,6 +79,9 @@ const WalletsTab = () => {
   const [scanError, setScanError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [regSubmitted, setRegSubmitted] = useState(false);
+  const [walletRegistered, setWalletRegistered] = useState<boolean | null>(null);
+  const [walletFrozen, setWalletFrozen] = useState(false);
+  const [checkingRegistration, setCheckingRegistration] = useState(false);
 
   // Form fields
   const [fullName, setFullName] = useState("");
@@ -93,6 +96,9 @@ const WalletsTab = () => {
     setScannedWallet(null);
     setScanError(null);
     setRegSubmitted(false);
+    setWalletRegistered(null);
+    setWalletFrozen(false);
+    setCheckingRegistration(false);
     setFullName("");
     setEmail("");
     setCountryCode("+44");
@@ -123,6 +129,8 @@ const WalletsTab = () => {
   const handleWifScan = async (data: string) => {
     setIsVerifying(true);
     setScanError(null);
+    setWalletRegistered(null);
+    setWalletFrozen(false);
 
     try {
       const ids = await convertWifToIds(data);
@@ -131,6 +139,28 @@ const WalletsTab = () => {
         nostrHexId: ids.nostrHexId,
         nostrNpubId: ids.nostrNpubId,
       });
+
+      // Check registration status
+      setCheckingRegistration(true);
+      try {
+        const res = await fetch('/api/check-wallet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet_id: ids.walletId }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          setWalletRegistered(json.registered === true);
+          if (json.registered && json.wallet?.frozen) {
+            setWalletFrozen(true);
+          }
+        }
+      } catch {
+        // Non-critical — registration check failed, continue with form
+        console.warn('Wallet registration check failed');
+      } finally {
+        setCheckingRegistration(false);
+      }
     } catch (err) {
       setScanError(err instanceof Error ? err.message : 'Invalid WIF key');
     } finally {
@@ -408,7 +438,7 @@ const WalletsTab = () => {
             <div className="flex items-center justify-between">
               <p className="text-xs font-medium text-muted-foreground">Derived Keys</p>
               <button
-                onClick={() => { setScannedWallet(null); setRegScannerOpen(true); }}
+                onClick={() => { setScannedWallet(null); setWalletRegistered(null); setWalletFrozen(false); setRegScannerOpen(true); }}
                 className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-background/50 transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -427,6 +457,35 @@ const WalletsTab = () => {
               <p className="text-xs font-mono text-foreground break-all">{scannedWallet.nostrNpubId}</p>
             </div>
           </div>
+
+          {/* Registration status */}
+          {checkingRegistration && (
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-secondary">
+              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Checking registration...</p>
+            </div>
+          )}
+
+          {walletRegistered === true && !walletFrozen && (
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-primary/10">
+              <ShieldCheck className="w-5 h-5 text-primary flex-shrink-0" />
+              <p className="text-sm font-medium text-foreground">Wallet is registered</p>
+            </div>
+          )}
+
+          {walletRegistered === true && walletFrozen && (
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-destructive/10 border border-destructive/20">
+              <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
+              <p className="text-sm font-medium text-destructive">Wallet is frozen</p>
+            </div>
+          )}
+
+          {walletRegistered === false && (
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+              <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+              <p className="text-sm font-medium text-amber-700 dark:text-amber-400">Wallet is not registered</p>
+            </div>
+          )}
 
           {/* Name */}
           <div className="space-y-1.5">

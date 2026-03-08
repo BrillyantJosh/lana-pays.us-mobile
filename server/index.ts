@@ -3,6 +3,7 @@
  * Port 3005 | Heartbeat every 5 min | SQLite persistence
  */
 
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -164,6 +165,46 @@ app.post('/api/profile-lookup', async (req, res) => {
   } catch (error: any) {
     console.error(`Profile lookup failed for ${hex_id}:`, error.message);
     res.json({ profile: null });
+  }
+});
+
+/**
+ * Check if wallet is registered via Lana Register API
+ * Uses simple_check_wallet_registration (read-only)
+ */
+app.post('/api/check-wallet', async (req, res) => {
+  const { wallet_id } = req.body;
+
+  if (!wallet_id) {
+    return res.status(400).json({ error: 'Missing required field: wallet_id' });
+  }
+
+  const apiKey = process.env.LANA_REGISTER_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'Lana Register API key not configured' });
+  }
+
+  try {
+    const response = await fetch('https://laluxmwarlejdwyboudz.supabase.co/functions/v1/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        method: 'simple_check_wallet_registration',
+        api_key: apiKey,
+        data: { wallet_id },
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.message || 'API request failed' });
+    }
+
+    res.json(data);
+  } catch (error: any) {
+    console.error('Wallet check failed:', error.message);
+    res.status(500).json({ error: 'Failed to check wallet registration' });
   }
 });
 

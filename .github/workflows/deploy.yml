@@ -17,5 +17,6 @@ jobs:
           script: |
             cd /opt/apps/lana-pays.us-mobile
             git pull origin main
+            echo "LANA_REGISTER_API_KEY=${{ secrets.LANA_REGISTER_API_KEY }}" > .env
             docker compose -f docker-compose.prod.yml build
             docker compose -f docker-compose.prod.yml up -d
