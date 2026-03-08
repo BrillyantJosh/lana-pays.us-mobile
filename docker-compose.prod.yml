@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  lana-pays-mobile-web:
+    build: .
+    container_name: lana-pays-mobile-web
+    restart: unless-stopped
+    environment:
+      - VIRTUAL_HOST=mobile.lanapays.us
+      - LETSENCRYPT_HOST=mobile.lanapays.us
+      - LETSENCRYPT_EMAIL=josh@lanaworld.app
+    networks:
+      - webproxy
+
+networks:
+  webproxy:
+    external: true
