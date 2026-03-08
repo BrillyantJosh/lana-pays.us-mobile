@@ -408,28 +408,28 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
             {/* Frozen wallet */}
             {checkWalletFrozen && <FrozenBanner />}
 
-            {/* Payment buttons — only if not frozen */}
-            {!checkWalletFrozen && (
-              <div className="space-y-3">
-                {balance.lana > 0 && (
-                  <Button
-                    onClick={() => onPayWithLana?.(balance.address)}
-                    className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
-                  >
-                    <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain" />
-                    Pay with $Lanas
-                  </Button>
-                )}
+            {/* Payment buttons */}
+            <div className="space-y-3">
+              {/* Pay with $Lanas — hidden when frozen */}
+              {balance.lana > 0 && !checkWalletFrozen && (
                 <Button
-                  onClick={() => onPayWithCash?.(balance.address)}
-                  variant="outline"
-                  className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 border-2"
+                  onClick={() => onPayWithLana?.(balance.address)}
+                  className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
                 >
-                  <Banknote className="w-7 h-7" />
-                  Pay with {currencySymbol}
+                  <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain" />
+                  Pay with $Lanas
                 </Button>
-              </div>
-            )}
+              )}
+              {/* Pay with Cash — always available */}
+              <Button
+                onClick={() => onPayWithCash?.(balance.address)}
+                variant="outline"
+                className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 border-2"
+              >
+                <Banknote className="w-7 h-7" />
+                Pay with {currencySymbol}
+              </Button>
+            </div>
 
             {/* Scan another */}
             <Button

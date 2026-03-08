@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { ArrowLeft, Loader2, CheckCircle2, AlertCircle, Snowflake, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,6 +40,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
   const [isCheckingBalance, setIsCheckingBalance] = useState(false);
   const [customerWalletId, setCustomerWalletId] = useState<string | null>(null);
   const [customerBalance, setCustomerBalance] = useState<number | null>(null);
+  const [isFrozen, setIsFrozen] = useState(false);
 
   // Processing/paid state
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -105,10 +106,28 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
 
     setScanError(null);
     setIsCheckingBalance(true);
+    setIsFrozen(false);
 
     try {
       const ids = await convertWifToIds(trimmed);
       setCustomerWalletId(ids.walletId);
+
+      // Check if wallet is frozen
+      try {
+        const checkRes = await fetch('/api/check-wallet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet_id: ids.walletId }),
+        });
+        const checkJson = await checkRes.json();
+        if (checkJson.success && checkJson.wallet?.frozen) {
+          setIsFrozen(true);
+          setIsCheckingBalance(false);
+          return;
+        }
+      } catch {
+        // If check fails, continue anyway — balance check is more important
+      }
 
       // Check balance
       const res = await fetch(`/api/balance/${encodeURIComponent(ids.walletId)}?currency=${currency}`);
@@ -168,6 +187,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
     setIsCheckingBalance(false);
     setCustomerWalletId(null);
     setCustomerBalance(null);
+    setIsFrozen(false);
     setTxHash(null);
     onClearRequest?.();
   };
@@ -278,8 +298,38 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
           </div>
         )}
 
+        {/* Frozen wallet */}
+        {isFrozen && !isCheckingBalance && (
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 space-y-3 dark:bg-blue-950/30 dark:border-blue-800">
+              <div className="flex items-center gap-3">
+                <Snowflake className="w-5 h-5 text-blue-500 flex-shrink-0" />
+                <p className="text-sm font-medium text-blue-700 dark:text-blue-400">This wallet is frozen</p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Frozen wallets cannot be used for $Lana payments. Visit the unfreeze portal to resolve this.
+              </p>
+              <a
+                href="https://unfreeze.lanapays.us"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full h-11 rounded-xl bg-blue-100 text-blue-700 text-sm font-semibold hover:bg-blue-200 transition-colors dark:bg-blue-900/40 dark:text-blue-400 dark:hover:bg-blue-900/60"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Go to Unfreeze Portal
+              </a>
+            </div>
+            <Button
+              onClick={() => { setIsFrozen(false); setWifScannerOpen(true); }}
+              className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              Scan Another WIF
+            </Button>
+          </div>
+        )}
+
         {/* Scan error / insufficient balance */}
-        {scanError && !isCheckingBalance && (
+        {scanError && !isCheckingBalance && !isFrozen && (
           <div className="space-y-4">
             <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
               <div className="flex items-start gap-3">
@@ -297,7 +347,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
         )}
 
         {/* Prompt to scan — when idle */}
-        {!scanError && !isCheckingBalance && (
+        {!scanError && !isCheckingBalance && !isFrozen && (
           <div className="flex flex-col items-center gap-4">
             <p className="text-sm text-muted-foreground text-center">
               Ask the customer to show their WIF Private Key QR code

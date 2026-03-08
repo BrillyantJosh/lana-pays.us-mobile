@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Camera, PoundSterling, DollarSign, Euro, Loader2, Snowflake, ExternalLink, CheckCircle2 } from "lucide-react";
+import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,7 +37,6 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
-  const [isFrozen, setIsFrozen] = useState(false);
 
   // Step 2 state
   const [invoiceNumber, setInvoiceNumber] = useState("");
@@ -50,13 +49,12 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
       setWalletId(selectedWallet);
       setStep(2);
       setCheckError(null);
-      setIsFrozen(false);
     }
   }, [selectedWallet]);
 
   // Auto-open scanner on step 1 entry (only when no wallet set)
   useEffect(() => {
-    if (step === 1 && !walletId && !checkError && !isChecking && !isFrozen) {
+    if (step === 1 && !walletId && !checkError && !isChecking) {
       setScannerOpen(true);
     }
   }, [step]);
@@ -65,7 +63,6 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
     setStep(1);
     setWalletId(null);
     setCheckError(null);
-    setIsFrozen(false);
     setInvoiceNumber("");
     setAmount("");
     setSubmitted(false);
@@ -84,7 +81,6 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
 
     setIsChecking(true);
     setCheckError(null);
-    setIsFrozen(false);
 
     try {
       const res = await fetch('/api/check-wallet', {
@@ -99,11 +95,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
           setCheckError('This wallet is not registered. Only registered wallets can be used for cash payments.');
           return;
         }
-        if (json.wallet?.frozen) {
-          setIsFrozen(true);
-          return;
-        }
-        // Registered and not frozen — advance to step 2
+        // Registered — advance to step 2 (frozen doesn't matter for cash/fiat)
         setWalletId(trimmed);
         setStep(2);
       } else {
@@ -130,35 +122,6 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
 
     setSubmitted(true);
   };
-
-  // ─── Frozen Banner ──────────────────────────
-  const FrozenBanner = () => (
-    <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 space-y-3 dark:bg-blue-950/30 dark:border-blue-800">
-      <div className="flex items-center gap-3">
-        <Snowflake className="w-5 h-5 text-blue-500 flex-shrink-0" />
-        <p className="text-sm font-medium text-blue-700 dark:text-blue-400">This wallet is frozen</p>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Spending is disabled for this wallet. Visit the unfreeze portal to resolve this.
-      </p>
-      <a
-        href="https://unfreeze.lanapays.us"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center justify-center gap-2 w-full h-11 rounded-xl bg-blue-100 text-blue-700 text-sm font-semibold hover:bg-blue-200 transition-colors dark:bg-blue-900/40 dark:text-blue-400 dark:hover:bg-blue-900/60"
-      >
-        <ExternalLink className="w-4 h-4" />
-        Go to Unfreeze Portal
-      </a>
-      <Button
-        onClick={resetToStep1}
-        variant="ghost"
-        className="w-full h-10 rounded-xl text-sm text-muted-foreground"
-      >
-        Scan Another Wallet
-      </Button>
-    </div>
-  );
 
   // ─── STEP 1: Scan Wallet ────────────────────
   if (step === 1) {
@@ -198,11 +161,8 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
           </div>
         )}
 
-        {/* Frozen */}
-        {isFrozen && !isChecking && <FrozenBanner />}
-
         {/* Idle — show scan button */}
-        {!isChecking && !checkError && !isFrozen && (
+        {!isChecking && !checkError && (
           <div className="flex flex-col items-center gap-4 py-8">
             <Button
               onClick={() => setScannerOpen(true)}
