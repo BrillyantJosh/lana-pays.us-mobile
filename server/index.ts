@@ -6,7 +6,10 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import multer from 'multer';
 import { getDb, closeDb } from './db/connection.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, type ElectrumServer } from './lib/electrum.js';
@@ -219,6 +222,54 @@ app.get('/api/users/:hexId', (req, res) => {
   }
 
   res.json({ user });
+});
+
+// ─── Invoice Image Uploads ────────────────────────────
+
+const uploadsDir = path.resolve(__dirname, '../data/uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: uploadsDir,
+    filename: (_req, file, cb) => {
+      const id = crypto.randomBytes(12).toString('hex');
+      const ext = path.extname(file.originalname) || '.jpg';
+      cb(null, `${id}${ext}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  },
+});
+
+// Serve uploaded files publicly
+app.use('/uploads', express.static(uploadsDir));
+
+/**
+ * Upload invoice images (up to 5 at once)
+ * Returns array of public URLs
+ */
+app.post('/api/upload', upload.array('images', 5), (req, res) => {
+  const files = req.files as Express.Multer.File[];
+  if (!files || files.length === 0) {
+    return res.status(400).json({ error: 'No images provided' });
+  }
+
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const baseUrl = `${protocol}://${host}`;
+
+  const urls = files.map(f => `${baseUrl}/uploads/${f.filename}`);
+
+  res.json({ urls });
 });
 
 // ─── Static Frontend ───────────────────────────────────

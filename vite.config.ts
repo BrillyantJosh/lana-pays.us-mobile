@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => ({
     proxy: {
       '/api': 'http://localhost:3005',
       '/health': 'http://localhost:3005',
+      '/uploads': 'http://localhost:3005',
     },
   },
   plugins: [

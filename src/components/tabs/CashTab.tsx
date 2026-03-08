@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Camera, PoundSterling, DollarSign, Euro, Loader2, ArrowLeft, AlertCircle, ExternalLink, CheckCircle2, X } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Camera, PoundSterling, DollarSign, Euro, Loader2, AlertCircle, ExternalLink, CheckCircle2, X, ImagePlus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +18,11 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
+interface UploadedImage {
+  url: string;
+  preview: string; // local blob URL for thumbnail
+}
+
 interface CashTabProps {
   selectedWallet?: string | null;
   onClearWallet?: () => void;
@@ -28,6 +33,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
   const currency = session?.currency || 'GBP';
   const CurrencyIcon = currencyIcons[currency] || PoundSterling;
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Step state
   const [step, setStep] = useState<1 | 2>(1);
@@ -42,8 +48,9 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
   // Step 2 state
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [amount, setAmount] = useState("");
-  const [invoiceScannerOpen, setInvoiceScannerOpen] = useState(false);
-  const [invoiceData, setInvoiceData] = useState<string | null>(null);
+  const [images, setImages] = useState<UploadedImage[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
   // Cross-tab entry: if selectedWallet is set, skip to step 2
@@ -70,7 +77,10 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
     setIsFrozen(false);
     setInvoiceNumber("");
     setAmount("");
-    setInvoiceData(null);
+    // Revoke blob URLs
+    images.forEach(img => URL.revokeObjectURL(img.preview));
+    setImages([]);
+    setUploadError(null);
     setSubmitted(false);
     onClearWallet?.();
     setScannerOpen(true);
@@ -119,11 +129,59 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
     }
   };
 
-  const handleInvoiceScan = (data: string) => {
-    setInvoiceData(data.trim());
+  // Handle file selection and upload
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append('images', files[i]);
+      }
+
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json.error || 'Upload failed');
+      }
+
+      // Create local preview URLs and pair with server URLs
+      const newImages: UploadedImage[] = [];
+      for (let i = 0; i < files.length; i++) {
+        newImages.push({
+          url: json.urls[i],
+          preview: URL.createObjectURL(files[i]),
+        });
+      }
+
+      setImages(prev => [...prev, ...newImages]);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Failed to upload images');
+    } finally {
+      setIsUploading(false);
+      // Reset file input so same file can be selected again
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
-  const canConfirm = invoiceNumber.trim() && amount.trim() && invoiceData;
+  const removeImage = (index: number) => {
+    setImages(prev => {
+      const removed = prev[index];
+      if (removed) URL.revokeObjectURL(removed.preview);
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const canConfirm = invoiceNumber.trim() && amount.trim() && images.length > 0;
 
   const handleConfirm = () => {
     if (!canConfirm || !walletId) return;
@@ -133,7 +191,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
       invoiceNumber: invoiceNumber.trim(),
       amount: parseFloat(amount),
       currency,
-      invoiceData,
+      imageUrls: images.map(img => img.url),
     });
 
     setSubmitted(true);
@@ -233,7 +291,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
     );
   }
 
-  // ─── STEP 2: Invoice Details ─────────────────
+  // ─── STEP 2: Submitted ──────────────────────
   if (submitted) {
     return (
       <div className="flex flex-col gap-5 px-6 py-4">
@@ -245,6 +303,9 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
           </p>
           <p className="text-xs text-muted-foreground truncate max-w-full">
             Wallet: {walletId}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {images.length} invoice image{images.length !== 1 ? 's' : ''} attached
           </p>
         </div>
 
@@ -258,6 +319,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
     );
   }
 
+  // ─── STEP 2: Invoice Details ─────────────────
   return (
     <div className="flex flex-col gap-5 px-6 py-4">
       {/* Header with wallet info */}
@@ -308,29 +370,69 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
         </div>
       </div>
 
-      {/* Invoice scan */}
+      {/* Invoice images */}
       <div className="space-y-3">
-        {invoiceData ? (
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-primary/10">
-            <CheckCircle2 className="w-5 h-5 text-primary flex-shrink-0" />
-            <p className="text-sm font-medium text-foreground flex-1 truncate">Invoice scanned</p>
-            <button
-              onClick={() => setInvoiceData(null)}
-              className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-background/50 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
+        <Label className="text-sm font-medium text-foreground">
+          Invoice Photos <span className="text-destructive">*</span>
+        </Label>
+
+        {/* Image thumbnails */}
+        {images.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            {images.map((img, i) => (
+              <div key={i} className="relative aspect-square rounded-xl overflow-hidden border border-border">
+                <img
+                  src={img.preview}
+                  alt={`Invoice ${i + 1}`}
+                  className="w-full h-full object-cover"
+                />
+                <button
+                  onClick={() => removeImage(i)}
+                  className="absolute top-1 right-1 w-6 h-6 rounded-full bg-destructive/90 text-white flex items-center justify-center"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
           </div>
-        ) : (
-          <Button
-            onClick={() => setInvoiceScannerOpen(true)}
-            variant="outline"
-            className="w-full h-14 rounded-2xl text-base font-semibold gap-3 border-2"
-          >
-            <Camera className="w-5 h-5" />
-            Scan Invoice <span className="text-destructive">*</span>
-          </Button>
         )}
+
+        {/* Upload error */}
+        {uploadError && (
+          <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3">
+            <p className="text-xs text-destructive text-center">{uploadError}</p>
+          </div>
+        )}
+
+        {/* Add photo button */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          multiple
+          onChange={handleFileChange}
+          className="hidden"
+        />
+
+        <Button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isUploading}
+          variant="outline"
+          className="w-full h-14 rounded-2xl text-base font-semibold gap-3 border-2"
+        >
+          {isUploading ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Uploading...
+            </>
+          ) : (
+            <>
+              <ImagePlus className="w-5 h-5" />
+              {images.length === 0 ? 'Scan Invoice' : 'Add Another Photo'}
+            </>
+          )}
+        </Button>
       </div>
 
       {/* Confirm button */}
@@ -341,14 +443,6 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
       >
         Confirm Payment
       </Button>
-
-      <QRScanner
-        isOpen={invoiceScannerOpen}
-        onClose={() => setInvoiceScannerOpen(false)}
-        onScan={handleInvoiceScan}
-        title="Scan Invoice"
-        description="Scan the invoice QR code"
-      />
     </div>
   );
 };
