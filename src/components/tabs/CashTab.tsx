@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { Camera, PoundSterling, DollarSign, Euro, Loader2, AlertCircle, ExternalLink, CheckCircle2, X, ImagePlus, Trash2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Camera, PoundSterling, DollarSign, Euro, Loader2, Snowflake, ExternalLink, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,11 +18,6 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
-interface UploadedImage {
-  url: string;
-  preview: string; // local blob URL for thumbnail
-}
-
 interface CashTabProps {
   selectedWallet?: string | null;
   onClearWallet?: () => void;
@@ -33,7 +28,6 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
   const currency = session?.currency || 'GBP';
   const CurrencyIcon = currencyIcons[currency] || PoundSterling;
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Step state
   const [step, setStep] = useState<1 | 2>(1);
@@ -48,9 +42,6 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
   // Step 2 state
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [amount, setAmount] = useState("");
-  const [images, setImages] = useState<UploadedImage[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
   // Cross-tab entry: if selectedWallet is set, skip to step 2
@@ -77,10 +68,6 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
     setIsFrozen(false);
     setInvoiceNumber("");
     setAmount("");
-    // Revoke blob URLs
-    images.forEach(img => URL.revokeObjectURL(img.preview));
-    setImages([]);
-    setUploadError(null);
     setSubmitted(false);
     onClearWallet?.();
     setScannerOpen(true);
@@ -129,59 +116,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
     }
   };
 
-  // Handle file selection and upload
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    setIsUploading(true);
-    setUploadError(null);
-
-    try {
-      const formData = new FormData();
-      for (let i = 0; i < files.length; i++) {
-        formData.append('images', files[i]);
-      }
-
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const json = await res.json();
-
-      if (!res.ok) {
-        throw new Error(json.error || 'Upload failed');
-      }
-
-      // Create local preview URLs and pair with server URLs
-      const newImages: UploadedImage[] = [];
-      for (let i = 0; i < files.length; i++) {
-        newImages.push({
-          url: json.urls[i],
-          preview: URL.createObjectURL(files[i]),
-        });
-      }
-
-      setImages(prev => [...prev, ...newImages]);
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Failed to upload images');
-    } finally {
-      setIsUploading(false);
-      // Reset file input so same file can be selected again
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  const removeImage = (index: number) => {
-    setImages(prev => {
-      const removed = prev[index];
-      if (removed) URL.revokeObjectURL(removed.preview);
-      return prev.filter((_, i) => i !== index);
-    });
-  };
-
-  const canConfirm = invoiceNumber.trim() && amount.trim() && images.length > 0;
+  const canConfirm = invoiceNumber.trim() && amount.trim();
 
   const handleConfirm = () => {
     if (!canConfirm || !walletId) return;
@@ -191,7 +126,6 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
       invoiceNumber: invoiceNumber.trim(),
       amount: parseFloat(amount),
       currency,
-      imageUrls: images.map(img => img.url),
     });
 
     setSubmitted(true);
@@ -199,10 +133,10 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
 
   // ─── Frozen Banner ──────────────────────────
   const FrozenBanner = () => (
-    <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4 space-y-3">
+    <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 space-y-3 dark:bg-blue-950/30 dark:border-blue-800">
       <div className="flex items-center gap-3">
-        <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
-        <p className="text-sm font-medium text-destructive">This wallet is frozen</p>
+        <Snowflake className="w-5 h-5 text-blue-500 flex-shrink-0" />
+        <p className="text-sm font-medium text-blue-700 dark:text-blue-400">This wallet is frozen</p>
       </div>
       <p className="text-xs text-muted-foreground">
         Spending is disabled for this wallet. Visit the unfreeze portal to resolve this.
@@ -211,7 +145,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
         href="https://unfreeze.lanapays.us"
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center justify-center gap-2 w-full h-11 rounded-xl bg-destructive/10 text-destructive text-sm font-semibold hover:bg-destructive/20 transition-colors"
+        className="flex items-center justify-center gap-2 w-full h-11 rounded-xl bg-blue-100 text-blue-700 text-sm font-semibold hover:bg-blue-200 transition-colors dark:bg-blue-900/40 dark:text-blue-400 dark:hover:bg-blue-900/60"
       >
         <ExternalLink className="w-4 h-4" />
         Go to Unfreeze Portal
@@ -295,17 +229,17 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
   if (submitted) {
     return (
       <div className="flex flex-col gap-5 px-6 py-4">
-        <div className="flex flex-col items-center gap-3 py-8">
-          <CheckCircle2 className="w-12 h-12 text-primary" />
-          <h2 className="text-xl font-bold text-foreground">Payment Confirmed</h2>
-          <p className="text-sm text-muted-foreground text-center">
-            Invoice #{invoiceNumber} — {currencySymbol}{amount}
+        <div className="flex flex-col items-center gap-4 py-10">
+          <CheckCircle2 className="w-16 h-16 text-primary" />
+          <h2 className="text-3xl font-black text-foreground">Payment Confirmed</h2>
+          <p className="text-2xl font-bold text-primary text-center">
+            {currencySymbol}{parseFloat(amount).toFixed(2)}
+          </p>
+          <p className="text-lg text-muted-foreground text-center">
+            Invoice #{invoiceNumber}
           </p>
           <p className="text-xs text-muted-foreground truncate max-w-full">
             Wallet: {walletId}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {images.length} invoice image{images.length !== 1 ? 's' : ''} attached
           </p>
         </div>
 
@@ -368,71 +302,6 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
             className="h-12 rounded-xl bg-background border-input"
           />
         </div>
-      </div>
-
-      {/* Invoice images */}
-      <div className="space-y-3">
-        <Label className="text-sm font-medium text-foreground">
-          Invoice Photos <span className="text-destructive">*</span>
-        </Label>
-
-        {/* Image thumbnails */}
-        {images.length > 0 && (
-          <div className="grid grid-cols-3 gap-2">
-            {images.map((img, i) => (
-              <div key={i} className="relative aspect-square rounded-xl overflow-hidden border border-border">
-                <img
-                  src={img.preview}
-                  alt={`Invoice ${i + 1}`}
-                  className="w-full h-full object-cover"
-                />
-                <button
-                  onClick={() => removeImage(i)}
-                  className="absolute top-1 right-1 w-6 h-6 rounded-full bg-destructive/90 text-white flex items-center justify-center"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Upload error */}
-        {uploadError && (
-          <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3">
-            <p className="text-xs text-destructive text-center">{uploadError}</p>
-          </div>
-        )}
-
-        {/* Add photo button */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          multiple
-          onChange={handleFileChange}
-          className="hidden"
-        />
-
-        <Button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
-          variant="outline"
-          className="w-full h-14 rounded-2xl text-base font-semibold gap-3 border-2"
-        >
-          {isUploading ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              Uploading...
-            </>
-          ) : (
-            <>
-              <ImagePlus className="w-5 h-5" />
-              {images.length === 0 ? 'Scan Invoice' : 'Add Another Photo'}
-            </>
-          )}
-        </Button>
       </div>
 
       {/* Confirm button */}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, UserPlus, Loader2, CheckCircle2, X, Banknote, ArrowLeft, AlertCircle, ShieldCheck, ExternalLink } from "lucide-react";
+import { Search, UserPlus, Loader2, CheckCircle2, X, Banknote, ArrowLeft, AlertCircle, ShieldCheck, ExternalLink, Snowflake } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { QRScanner } from "@/components/QRScanner";
@@ -253,10 +253,10 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
 
   // Frozen wallet banner component
   const FrozenBanner = () => (
-    <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4 space-y-3">
+    <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 space-y-3 dark:bg-blue-950/30 dark:border-blue-800">
       <div className="flex items-center gap-3">
-        <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
-        <p className="text-sm font-medium text-destructive">This wallet is frozen</p>
+        <Snowflake className="w-5 h-5 text-blue-500 flex-shrink-0" />
+        <p className="text-sm font-medium text-blue-700 dark:text-blue-400">This wallet is frozen</p>
       </div>
       <p className="text-xs text-muted-foreground">
         Spending is disabled for this wallet. Visit the unfreeze portal to resolve this.
@@ -265,7 +265,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
         href="https://unfreeze.lanapays.us"
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center justify-center gap-2 w-full h-11 rounded-xl bg-destructive/10 text-destructive text-sm font-semibold hover:bg-destructive/20 transition-colors"
+        className="flex items-center justify-center gap-2 w-full h-11 rounded-xl bg-blue-100 text-blue-700 text-sm font-semibold hover:bg-blue-200 transition-colors dark:bg-blue-900/40 dark:text-blue-400 dark:hover:bg-blue-900/60"
       >
         <ExternalLink className="w-4 h-4" />
         Go to Unfreeze Portal
