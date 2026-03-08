@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, UserPlus, Loader2, CheckCircle2, X, Banknote, ArrowLeft, AlertCircle, ShieldCheck } from "lucide-react";
+import { Search, UserPlus, Loader2, CheckCircle2, X, Banknote, ArrowLeft, AlertCircle, ShieldCheck, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { QRScanner } from "@/components/QRScanner";
@@ -73,6 +73,11 @@ const WalletsTab = () => {
   const [balance, setBalance] = useState<BalanceResult | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
 
+  // Check flow registration state
+  const [checkWalletRegistered, setCheckWalletRegistered] = useState<boolean | null>(null);
+  const [checkWalletFrozen, setCheckWalletFrozen] = useState(false);
+  const [checkingCheckWallet, setCheckingCheckWallet] = useState(false);
+
   // Registration state
   const [regScannerOpen, setRegScannerOpen] = useState(false);
   const [scannedWallet, setScannedWallet] = useState<ScannedWallet | null>(null);
@@ -93,6 +98,9 @@ const WalletsTab = () => {
     setView("home");
     setBalance(null);
     setBalanceError(null);
+    setCheckWalletRegistered(null);
+    setCheckWalletFrozen(false);
+    setCheckingCheckWallet(false);
     setScannedWallet(null);
     setScanError(null);
     setRegSubmitted(false);
@@ -105,35 +113,93 @@ const WalletsTab = () => {
     setMobile("");
   };
 
-  const fetchBalance = async (address: string) => {
+  // Helper: check wallet registration via API
+  const checkWalletRegistration = async (walletId: string) => {
+    try {
+      const res = await fetch('/api/check-wallet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet_id: walletId }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        return {
+          registered: json.registered === true,
+          frozen: json.registered && json.wallet?.frozen === true,
+        };
+      }
+    } catch {
+      console.warn('Wallet registration check failed');
+    }
+    return null;
+  };
+
+  // Validate and fetch balance for a wallet address
+  const handleWalletScan = async (data: string) => {
+    const trimmed = data.trim();
+
+    // Validate: must start with 'L' and be 26-35 chars
+    if (!trimmed.startsWith('L') || trimmed.length < 26 || trimmed.length > 35) {
+      setBalanceError('Invalid Wallet ID. A valid Lana wallet address starts with "L" and is 26-35 characters long.');
+      return;
+    }
+
     setIsLoadingBalance(true);
     setBalanceError(null);
     setBalance(null);
+    setCheckWalletRegistered(null);
+    setCheckWalletFrozen(false);
 
     try {
-      const res = await fetch(`/api/balance/${encodeURIComponent(address)}?currency=${userCurrency}`);
-      const json = await res.json();
+      // Check registration in parallel with balance
+      setCheckingCheckWallet(true);
+      const [balanceRes, regResult] = await Promise.all([
+        fetch(`/api/balance/${encodeURIComponent(trimmed)}?currency=${userCurrency}`).then(r => r.json().then(j => ({ ok: r.ok, json: j }))),
+        checkWalletRegistration(trimmed),
+      ]);
+      setCheckingCheckWallet(false);
 
-      if (!res.ok) {
-        throw new Error(json.error || 'Failed to fetch balance');
+      if (regResult) {
+        setCheckWalletRegistered(regResult.registered);
+        setCheckWalletFrozen(regResult.frozen);
       }
 
-      setBalance(json);
+      if (!balanceRes.ok) {
+        throw new Error(balanceRes.json.error || 'Failed to fetch balance');
+      }
+
+      setBalance(balanceRes.json);
     } catch (err) {
       setBalanceError(err instanceof Error ? err.message : 'Failed to check balance');
     } finally {
       setIsLoadingBalance(false);
+      setCheckingCheckWallet(false);
     }
   };
 
+  // Validate and process WIF key scan
   const handleWifScan = async (data: string) => {
+    const trimmed = data.trim();
+
+    // Basic WIF validation: LanaCoin WIF keys start with '6' or '7' (0xb0 prefix)
+    // and are typically 51-52 characters (base58)
+    if (trimmed.startsWith('L') && trimmed.length >= 26 && trimmed.length <= 35) {
+      setScanError('This looks like a Wallet Address, not a Private Key. Please scan the WIF Private Key instead.');
+      return;
+    }
+
+    if (trimmed.startsWith('npub') || trimmed.startsWith('nsec')) {
+      setScanError('This is a Nostr key, not a LanaCoin WIF Private Key.');
+      return;
+    }
+
     setIsVerifying(true);
     setScanError(null);
     setWalletRegistered(null);
     setWalletFrozen(false);
 
     try {
-      const ids = await convertWifToIds(data);
+      const ids = await convertWifToIds(trimmed);
       setScannedWallet({
         walletId: ids.walletId,
         nostrHexId: ids.nostrHexId,
@@ -142,29 +208,17 @@ const WalletsTab = () => {
 
       // Check registration status
       setCheckingRegistration(true);
-      try {
-        const res = await fetch('/api/check-wallet', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ wallet_id: ids.walletId }),
-        });
-        const json = await res.json();
-        if (json.success) {
-          setWalletRegistered(json.registered === true);
-          if (json.registered && json.wallet?.frozen) {
-            setWalletFrozen(true);
-          }
-        }
-      } catch {
-        // Non-critical — registration check failed, continue with form
-        console.warn('Wallet registration check failed');
-      } finally {
-        setCheckingRegistration(false);
+      const regResult = await checkWalletRegistration(ids.walletId);
+      if (regResult) {
+        setWalletRegistered(regResult.registered);
+        setWalletFrozen(regResult.frozen);
       }
+      setCheckingRegistration(false);
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : 'Invalid WIF key');
+      setScanError(err instanceof Error ? err.message : 'Invalid WIF Private Key. Make sure you are scanning a valid LanaCoin private key.');
     } finally {
       setIsVerifying(false);
+      setCheckingRegistration(false);
     }
   };
 
@@ -181,6 +235,28 @@ const WalletsTab = () => {
 
     setRegSubmitted(true);
   };
+
+  // Frozen wallet banner component
+  const FrozenBanner = () => (
+    <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4 space-y-3">
+      <div className="flex items-center gap-3">
+        <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
+        <p className="text-sm font-medium text-destructive">This wallet is frozen</p>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Spending is disabled for this wallet. Visit the unfreeze portal to resolve this.
+      </p>
+      <a
+        href="https://unfreeze.lanapays.us"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center justify-center gap-2 w-full h-11 rounded-xl bg-destructive/10 text-destructive text-sm font-semibold hover:bg-destructive/20 transition-colors"
+      >
+        <ExternalLink className="w-4 h-4" />
+        Go to Unfreeze Portal
+      </a>
+    </div>
+  );
 
   // ─── HOME VIEW: Two big buttons ───────────────────
   if (view === "home") {
@@ -216,7 +292,7 @@ const WalletsTab = () => {
         <QRScanner
           isOpen={walletScannerOpen}
           onClose={() => { setWalletScannerOpen(false); if (!balance) setView("home"); }}
-          onScan={(data) => fetchBalance(data)}
+          onScan={(data) => handleWalletScan(data)}
           title="Scan Wallet ID"
           description="Scan a customer's Lana Wallet ID QR code"
         />
@@ -292,30 +368,57 @@ const WalletsTab = () => {
               </p>
             </div>
 
-            {/* Payment buttons */}
-            <div className="space-y-3">
-              {balance.lana > 0 && (
+            {/* Registration status */}
+            {checkingCheckWallet && (
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-secondary">
+                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Checking registration...</p>
+              </div>
+            )}
+
+            {checkWalletRegistered === true && !checkWalletFrozen && (
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-primary/10">
+                <ShieldCheck className="w-5 h-5 text-primary flex-shrink-0" />
+                <p className="text-sm font-medium text-foreground">Wallet is registered</p>
+              </div>
+            )}
+
+            {checkWalletRegistered === false && (
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                <p className="text-sm font-medium text-amber-700 dark:text-amber-400">Wallet is not registered</p>
+              </div>
+            )}
+
+            {/* Frozen wallet */}
+            {checkWalletFrozen && <FrozenBanner />}
+
+            {/* Payment buttons — only if not frozen */}
+            {!checkWalletFrozen && (
+              <div className="space-y-3">
+                {balance.lana > 0 && (
+                  <Button
+                    onClick={() => console.log('Pay with $Lanas', balance.address)}
+                    className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
+                  >
+                    <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain" />
+                    Pay with $Lanas
+                  </Button>
+                )}
                 <Button
-                  onClick={() => console.log('Pay with $Lanas', balance.address)}
-                  className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
+                  onClick={() => console.log('Pay with', userCurrency)}
+                  variant="outline"
+                  className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 border-2"
                 >
-                  <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain" />
-                  Pay with $Lanas
+                  <Banknote className="w-7 h-7" />
+                  Pay with {currencySymbol}
                 </Button>
-              )}
-              <Button
-                onClick={() => console.log('Pay with', userCurrency)}
-                variant="outline"
-                className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 border-2"
-              >
-                <Banknote className="w-7 h-7" />
-                Pay with {currencySymbol} {userCurrency}
-              </Button>
-            </div>
+              </div>
+            )}
 
             {/* Scan another */}
             <Button
-              onClick={() => { setBalance(null); setWalletScannerOpen(true); }}
+              onClick={() => { setBalance(null); setCheckWalletRegistered(null); setCheckWalletFrozen(false); setWalletScannerOpen(true); }}
               variant="ghost"
               className="w-full h-12 rounded-2xl text-sm font-medium text-muted-foreground"
             >
@@ -341,7 +444,7 @@ const WalletsTab = () => {
         <QRScanner
           isOpen={walletScannerOpen}
           onClose={() => setWalletScannerOpen(false)}
-          onScan={(data) => fetchBalance(data)}
+          onScan={(data) => handleWalletScan(data)}
           title="Scan Wallet ID"
           description="Scan a customer's Lana Wallet ID QR code"
         />
@@ -416,16 +519,7 @@ const WalletsTab = () => {
             className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 border-2"
           >
             <Banknote className="w-7 h-7" />
-            Pay with {currencySymbol} {userCurrency}
-          </Button>
-
-          <Button
-            onClick={goHome}
-            variant="ghost"
-            className="w-full h-12 rounded-2xl text-sm font-medium text-muted-foreground"
-          >
-            <UserPlus className="w-4 h-4 mr-2" />
-            Register Another
+            Pay with {currencySymbol}
           </Button>
         </div>
       )}
@@ -473,12 +567,7 @@ const WalletsTab = () => {
             </div>
           )}
 
-          {walletRegistered === true && walletFrozen && (
-            <div className="flex items-center gap-3 p-3 rounded-xl bg-destructive/10 border border-destructive/20">
-              <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
-              <p className="text-sm font-medium text-destructive">Wallet is frozen</p>
-            </div>
-          )}
+          {walletRegistered === true && walletFrozen && <FrozenBanner />}
 
           {walletRegistered === false && (
             <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
