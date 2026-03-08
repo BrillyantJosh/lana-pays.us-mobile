@@ -1,5 +1,5 @@
 import { Menu } from "lucide-react";
-import lanaLogo from "@/assets/lana-logo.png";
+import lanaLogo from "@/assets/lana-icon-green.png";
 
 interface TopBarProps {
   onMenuOpen: () => void;

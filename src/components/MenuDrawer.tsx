@@ -6,10 +6,10 @@ interface MenuDrawerProps {
 }
 
 const menuItems = [
-  { label: "Nastavitve", icon: Settings },
-  { label: "Varnost", icon: Shield },
-  { label: "Pomoč", icon: HelpCircle },
-  { label: "Odjava", icon: LogOut },
+  { label: "Settings", icon: Settings },
+  { label: "Security", icon: Shield },
+  { label: "Help", icon: HelpCircle },
+  { label: "Sign Out", icon: LogOut },
 ];
 
 const MenuDrawer = ({ open, onClose }: MenuDrawerProps) => {
@@ -29,7 +29,7 @@ const MenuDrawer = ({ open, onClose }: MenuDrawerProps) => {
         }`}
       >
         <div className="flex items-center justify-between p-4 border-b border-border">
-          <span className="font-display font-semibold text-foreground">Meni</span>
+          <span className="font-display font-semibold text-foreground">Menu</span>
           <button
             onClick={onClose}
             className="w-9 h-9 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"

@@ -2,22 +2,20 @@ import { useState } from "react";
 import TopBar from "@/components/TopBar";
 import BottomNav from "@/components/BottomNav";
 import MenuDrawer from "@/components/MenuDrawer";
-import RegisterTab from "@/components/tabs/RegisterTab";
-import CheckTab from "@/components/tabs/CheckTab";
-import DiscountTab from "@/components/tabs/DiscountTab";
-import PayUsTab from "@/components/tabs/PayUsTab";
+import CashTab from "@/components/tabs/CashTab";
+import WalletsTab from "@/components/tabs/WalletsTab";
+import LanaTab from "@/components/tabs/LanaTab";
 
-type Tab = "register" | "check" | "discount" | "payus";
+type Tab = "cash" | "wallets" | "lana";
 
 const tabComponents: Record<Tab, React.FC> = {
-  register: RegisterTab,
-  check: CheckTab,
-  discount: DiscountTab,
-  payus: PayUsTab,
+  cash: CashTab,
+  wallets: WalletsTab,
+  lana: LanaTab,
 };
 
 const Index = () => {
-  const [activeTab, setActiveTab] = useState<Tab>("register");
+  const [activeTab, setActiveTab] = useState<Tab>("wallets");
   const [menuOpen, setMenuOpen] = useState(false);
 
   const ActiveComponent = tabComponents[activeTab];
