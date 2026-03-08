@@ -1,5 +1,6 @@
-import { PoundSterling, Wallet } from "lucide-react";
+import { PoundSterling, DollarSign, Euro, Wallet } from "lucide-react";
 import lanaIcon from "@/assets/lana-icon.png";
+import { useAuth } from "@/contexts/AuthContext";
 
 type Tab = "cash" | "wallets" | "lana";
 
@@ -8,13 +9,22 @@ interface BottomNavProps {
   onChange: (tab: Tab) => void;
 }
 
-const tabs: { id: Tab; label: string; icon?: typeof Wallet; img?: string }[] = [
-  { id: "cash", label: "Cash", icon: PoundSterling },
-  { id: "wallets", label: "Wallets", icon: Wallet },
-  { id: "lana", label: "$Lana", img: lanaIcon },
-];
+const currencyIcons: Record<string, typeof PoundSterling> = {
+  GBP: PoundSterling,
+  USD: DollarSign,
+  EUR: Euro,
+};
 
 const BottomNav = ({ active, onChange }: BottomNavProps) => {
+  const { session } = useAuth();
+  const CurrencyIcon = currencyIcons[session?.currency || 'GBP'] || PoundSterling;
+
+  const tabs: { id: Tab; label: string; icon?: typeof Wallet; img?: string }[] = [
+    { id: "cash", label: "Cash", icon: CurrencyIcon },
+    { id: "wallets", label: "Wallets", icon: Wallet },
+    { id: "lana", label: "$Lana", img: lanaIcon },
+  ];
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 h-[var(--nav-height)] bg-card border-t border-border flex items-center justify-around px-2 z-50">
       {tabs.map(({ id, label, icon: Icon, img }) => {

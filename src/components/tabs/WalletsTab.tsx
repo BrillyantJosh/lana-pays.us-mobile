@@ -4,14 +4,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { QRScanner } from "@/components/QRScanner";
 import { convertWifToIds } from "@/lib/crypto";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface BalanceResult {
   address: string;
   lana: number;
-  gbp: number;
+  fiatValue: number;
   confirmed: number;
   unconfirmed: number;
   rate: number;
+  currency: string;
 }
 
 interface ScannedWallet {
@@ -43,7 +45,16 @@ const COUNTRY_CODES = [
   { code: "+359", country: "BG" },
 ];
 
+const CURRENCY_LOCALE: Record<string, { locale: string; code: string }> = {
+  GBP: { locale: 'en-GB', code: 'GBP' },
+  USD: { locale: 'en-US', code: 'USD' },
+  EUR: { locale: 'de-DE', code: 'EUR' },
+};
+
 const WalletsTab = () => {
+  const { session } = useAuth();
+  const userCurrency = session?.currency || 'GBP';
+
   // Balance check state
   const [walletScannerOpen, setWalletScannerOpen] = useState(false);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
@@ -69,7 +80,7 @@ const WalletsTab = () => {
     setBalance(null);
 
     try {
-      const res = await fetch(`/api/balance/${encodeURIComponent(address)}`);
+      const res = await fetch(`/api/balance/${encodeURIComponent(address)}?currency=${userCurrency}`);
       const json = await res.json();
 
       if (!res.ok) {
@@ -313,11 +324,14 @@ const WalletsTab = () => {
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-xl font-semibold text-primary">
-              {balance.gbp.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' })}
+              {balance.fiatValue.toLocaleString(
+                CURRENCY_LOCALE[balance.currency]?.locale || 'en-GB',
+                { style: 'currency', currency: balance.currency || 'GBP' }
+              )}
             </span>
           </div>
           <p className="text-xs text-muted-foreground">
-            Rate: 1 LANA = {balance.rate} GBP
+            Rate: 1 LANA = {balance.rate} {balance.currency}
           </p>
           <p className="text-xs text-muted-foreground truncate">
             {balance.address}

@@ -100,7 +100,8 @@ app.get('/api/balance/:address', async (req, res) => {
   }
 
   const exchangeRates = JSON.parse(sysRow.exchange_rates || '{}');
-  const gbpRate = exchangeRates.GBP || 0;
+  const currency = (req.query.currency as string || 'GBP').toUpperCase();
+  const rate = exchangeRates[currency] || exchangeRates.GBP || 0;
 
   try {
     const result = await fetchSingleBalance(electrumServers, address);
@@ -110,8 +111,9 @@ app.get('/api/balance/:address', async (req, res) => {
       confirmed: result.confirmed,
       unconfirmed: result.unconfirmed,
       lana: result.balance,
-      gbp: Math.round(result.balance * gbpRate * 100) / 100,
-      rate: gbpRate,
+      fiatValue: Math.round(result.balance * rate * 100) / 100,
+      rate,
+      currency,
       status: result.status,
     });
   } catch (error: any) {

@@ -186,7 +186,7 @@ export async function fetchKind38888(): Promise<Kind38888Data | null> {
 /**
  * Fetch KIND 0 (profile metadata) for a given hex pubkey from Lana relays
  */
-export async function fetchKind0Profile(hexId: string): Promise<{ name?: string; display_name?: string; picture?: string } | null> {
+export async function fetchKind0Profile(hexId: string): Promise<{ name?: string; display_name?: string; picture?: string; currency?: string } | null> {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => resolve(null), 5000);
     let resolved = false;
@@ -224,6 +224,7 @@ export async function fetchKind0Profile(hexId: string): Promise<{ name?: string;
                   name: content.name,
                   display_name: content.display_name,
                   picture: content.picture,
+                  currency: content.currency,
                 });
               } catch {
                 resolve(null);

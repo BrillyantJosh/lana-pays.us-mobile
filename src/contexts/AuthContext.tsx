@@ -14,6 +14,7 @@ interface UserSession {
   profileName?: string;
   profileDisplayName?: string;
   profilePicture?: string;
+  currency: string;
   expiresAt: number;
 }
 
@@ -117,6 +118,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let profileName: string | undefined;
       let profileDisplayName: string | undefined;
       let profilePicture: string | undefined;
+      let currency = 'GBP';
 
       // Fetch KIND 0 profile via server (avoids nostr-tools buffer issues in browser)
       try {
@@ -130,6 +132,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           profileName = profileData.profile.name;
           profileDisplayName = profileData.profile.display_name;
           profilePicture = profileData.profile.picture;
+          if (profileData.profile.currency) {
+            currency = profileData.profile.currency.toUpperCase();
+          }
         }
       } catch (e) {
         console.warn('Profile lookup failed, continuing without profile data:', e);
@@ -161,6 +166,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         profileName,
         profileDisplayName,
         profilePicture,
+        currency,
         expiresAt,
       };
 

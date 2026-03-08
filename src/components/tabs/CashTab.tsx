@@ -1,14 +1,25 @@
-import { Camera, PoundSterling } from "lucide-react";
+import { Camera, PoundSterling, DollarSign, Euro } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAuth } from "@/contexts/AuthContext";
+
+const currencyIcons: Record<string, typeof PoundSterling> = {
+  GBP: PoundSterling,
+  USD: DollarSign,
+  EUR: Euro,
+};
 
 const CashTab = () => {
+  const { session } = useAuth();
+  const currency = session?.currency || 'GBP';
+  const CurrencyIcon = currencyIcons[currency] || PoundSterling;
+
   return (
     <div className="flex flex-col gap-6 px-6 py-4">
       <div className="flex items-center gap-4">
         <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0">
-          <PoundSterling className="w-7 h-7 text-primary" />
+          <CurrencyIcon className="w-7 h-7 text-primary" />
         </div>
         <div>
           <h2 className="font-display text-xl font-bold text-foreground">Cash</h2>
@@ -25,7 +36,7 @@ const CashTab = () => {
           />
         </div>
         <div className="space-y-2">
-          <Label className="text-sm font-medium text-foreground">Amount (EUR)</Label>
+          <Label className="text-sm font-medium text-foreground">Amount ({currency})</Label>
           <Input
             type="number"
             placeholder="0.00"
