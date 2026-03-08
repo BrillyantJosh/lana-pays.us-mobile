@@ -368,7 +368,19 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
           onScan={handleWifScan}
           title="Scan WIF Key"
           description="Scan the customer's Lana WIF Private Key"
-        />
+        >
+          <div className="flex items-center justify-between rounded-xl bg-secondary p-3">
+            <span className="text-sm text-muted-foreground">
+              {currencySymbol}{parseFloat(amount).toFixed(2)}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <img src={lanaIcon} alt="Lana" className="w-5 h-5 object-contain" />
+              <span className="text-lg font-bold text-primary">
+                {lanaAmount.toLocaleString()} LANA
+              </span>
+            </div>
+          </div>
+        </QRScanner>
       </div>
     );
   }

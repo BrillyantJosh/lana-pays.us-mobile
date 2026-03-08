@@ -10,9 +10,10 @@ interface QRScannerProps {
   onScan: (data: string) => void;
   title?: string;
   description?: string;
+  children?: React.ReactNode;
 }
 
-export function QRScanner({ isOpen, onClose, onScan, title = 'Scan QR Code', description = 'Position the QR code within the frame' }: QRScannerProps) {
+export function QRScanner({ isOpen, onClose, onScan, title = 'Scan QR Code', description = 'Position the QR code within the frame', children }: QRScannerProps) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -115,6 +116,8 @@ export function QRScanner({ isOpen, onClose, onScan, title = 'Scan QR Code', des
             {description}
           </DialogDescription>
         </DialogHeader>
+
+        {children}
 
         <div className="space-y-4">
           <div id="qr-reader" className="w-full rounded-lg overflow-hidden" />
