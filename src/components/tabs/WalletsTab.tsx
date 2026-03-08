@@ -58,9 +58,13 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
+interface WalletsTabProps {
+  onPayWithCash?: (walletId: string) => void;
+}
+
 type View = "home" | "check" | "register";
 
-const WalletsTab = () => {
+const WalletsTab = ({ onPayWithCash }: WalletsTabProps) => {
   const { session } = useAuth();
   const userCurrency = session?.currency || 'GBP';
   const currencySymbol = CURRENCY_SYMBOL[userCurrency] || '£';
@@ -406,7 +410,7 @@ const WalletsTab = () => {
                   </Button>
                 )}
                 <Button
-                  onClick={() => console.log('Pay with', userCurrency)}
+                  onClick={() => onPayWithCash?.(balance.address)}
                   variant="outline"
                   className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 border-2"
                 >
@@ -514,7 +518,7 @@ const WalletsTab = () => {
 
           {/* Payment button */}
           <Button
-            onClick={() => console.log('Pay with', userCurrency, scannedWallet.walletId)}
+            onClick={() => onPayWithCash?.(scannedWallet.walletId)}
             variant="outline"
             className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 border-2"
           >

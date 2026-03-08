@@ -8,17 +8,20 @@ import LanaTab from "@/components/tabs/LanaTab";
 
 type Tab = "cash" | "wallets" | "lana";
 
-const tabComponents: Record<Tab, React.FC> = {
-  cash: CashTab,
-  wallets: WalletsTab,
-  lana: LanaTab,
-};
-
 const Index = () => {
   const [activeTab, setActiveTab] = useState<Tab>("wallets");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
 
-  const ActiveComponent = tabComponents[activeTab];
+  const handlePayWithCash = (walletId: string) => {
+    setSelectedWallet(walletId);
+    setActiveTab("cash");
+  };
+
+  const handleTabChange = (tab: Tab) => {
+    setSelectedWallet(null);
+    setActiveTab(tab);
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -26,10 +29,16 @@ const Index = () => {
       <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} />
 
       <main className="pt-14 pb-[var(--nav-height)]">
-        <ActiveComponent />
+        {activeTab === "cash" && (
+          <CashTab selectedWallet={selectedWallet} onClearWallet={() => setSelectedWallet(null)} />
+        )}
+        {activeTab === "wallets" && (
+          <WalletsTab onPayWithCash={handlePayWithCash} />
+        )}
+        {activeTab === "lana" && <LanaTab />}
       </main>
 
-      <BottomNav active={activeTab} onChange={setActiveTab} />
+      <BottomNav active={activeTab} onChange={handleTabChange} />
     </div>
   );
 };
