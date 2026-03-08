@@ -149,21 +149,17 @@ export async function convertWifToIds(wif: string) {
   try {
     const privateKeyHex = await wifToPrivateKey(wif);
 
-    const uncompressedPublicKeyHex = generatePublicKey(privateKeyHex);
-    const compressedPublicKeyHex = generateCompressedPublicKey(privateKeyHex);
+    const publicKeyHex = generatePublicKey(privateKeyHex);
     const nostrHexId = deriveNostrPublicKey(privateKeyHex);
 
-    const walletId = await generateLanaAddress(compressedPublicKeyHex);
-    const walletIdUncompressed = await generateLanaAddress(uncompressedPublicKeyHex);
+    const walletId = await generateLanaAddress(publicKeyHex);
     const nostrNpubId = hexToNpub(nostrHexId);
 
     return {
-      lanaPrivateKey: wif,
       walletId,
-      walletIdUncompressed,
       nostrHexId,
       nostrNpubId,
-      nostrPrivateKey: privateKeyHex
+      privateKeyHex,
     };
 
   } catch (error) {
