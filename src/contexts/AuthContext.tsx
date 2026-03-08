@@ -8,11 +8,9 @@ declare global {
 }
 
 interface UserSession {
-  lanaPrivateKey: string;
   walletId: string;
   nostrHexId: string;
   nostrNpubId: string;
-  nostrPrivateKey: string;
   profileName?: string;
   profileDisplayName?: string;
   profilePicture?: string;
@@ -157,11 +155,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const expiresAt = Date.now() + (30 * 24 * 60 * 60 * 1000); // 30 days
 
       const userSession: UserSession = {
-        lanaPrivateKey: derivedIds.lanaPrivateKey,
         walletId: derivedIds.walletId,
         nostrHexId: derivedIds.nostrHexId,
         nostrNpubId: derivedIds.nostrNpubId,
-        nostrPrivateKey: derivedIds.nostrPrivateKey,
         profileName,
         profileDisplayName,
         profilePicture,
