@@ -139,15 +139,19 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
     return null;
   };
 
-  // Validate and fetch balance for a wallet address
+  // Resolve scanned data to wallet address (accepts wallet ID or WIF key)
+  const resolveWalletAddress = async (data: string): Promise<string> => {
+    const isWalletAddress = data.startsWith('L') && data.length >= 26 && data.length <= 35;
+    if (isWalletAddress) return data;
+
+    // Try to derive wallet from WIF key
+    const ids = await convertWifToIds(data);
+    return ids.walletId;
+  };
+
+  // Validate and fetch balance for a wallet address (or WIF key)
   const handleWalletScan = async (data: string) => {
     const trimmed = data.trim();
-
-    // Validate: must start with 'L' and be 26-35 chars
-    if (!trimmed.startsWith('L') || trimmed.length < 26 || trimmed.length > 35) {
-      setBalanceError('Invalid Wallet ID. A valid Lana wallet address starts with "L" and is 26-35 characters long.');
-      return;
-    }
 
     setIsLoadingBalance(true);
     setBalanceError(null);
@@ -156,11 +160,13 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
     setCheckWalletFrozen(false);
 
     try {
+      const walletAddress = await resolveWalletAddress(trimmed);
+
       // Check registration in parallel with balance
       setCheckingCheckWallet(true);
       const [balanceRes, regResult] = await Promise.all([
-        fetch(`/api/balance/${encodeURIComponent(trimmed)}?currency=${userCurrency}`).then(r => r.json().then(j => ({ ok: r.ok, json: j }))),
-        checkWalletRegistration(trimmed),
+        fetch(`/api/balance/${encodeURIComponent(walletAddress)}?currency=${userCurrency}`).then(r => r.json().then(j => ({ ok: r.ok, json: j }))),
+        checkWalletRegistration(walletAddress),
       ]);
       setCheckingCheckWallet(false);
 
@@ -175,7 +181,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
 
       setBalance(balanceRes.json);
     } catch (err) {
-      setBalanceError(err instanceof Error ? err.message : 'Failed to check balance');
+      setBalanceError(err instanceof Error ? err.message : 'Invalid scan. Please scan a valid Lana Wallet ID or WIF Private Key.');
     } finally {
       setIsLoadingBalance(false);
       setCheckingCheckWallet(false);

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { QRScanner } from "@/components/QRScanner";
+import { convertWifToIds } from "@/lib/crypto";
 import { useAuth } from "@/contexts/AuthContext";
 
 const currencyIcons: Record<string, typeof PoundSterling> = {
@@ -70,23 +71,30 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
     setScannerOpen(true);
   };
 
+  // Resolve scanned data to wallet address (accepts wallet ID or WIF key)
+  const resolveWalletAddress = async (data: string): Promise<string> => {
+    const isWalletAddress = data.startsWith('L') && data.length >= 26 && data.length <= 35;
+    if (isWalletAddress) return data;
+
+    // Try to derive wallet from WIF key
+    const ids = await convertWifToIds(data);
+    return ids.walletId;
+  };
+
   // Validate and check wallet registration
   const handleWalletScan = async (data: string) => {
     const trimmed = data.trim();
-
-    if (!trimmed.startsWith('L') || trimmed.length < 26 || trimmed.length > 35) {
-      setCheckError('Invalid Wallet ID. A valid Lana wallet address starts with "L" and is 26-35 characters long.');
-      return;
-    }
 
     setIsChecking(true);
     setCheckError(null);
 
     try {
+      const walletAddress = await resolveWalletAddress(trimmed);
+
       const res = await fetch('/api/check-wallet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet_id: trimmed }),
+        body: JSON.stringify({ wallet_id: walletAddress }),
       });
       const json = await res.json();
 
@@ -96,13 +104,13 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
           return;
         }
         // Registered — advance to step 2 (frozen doesn't matter for cash/fiat)
-        setWalletId(trimmed);
+        setWalletId(walletAddress);
         setStep(2);
       } else {
         setCheckError(json.message || 'Failed to verify wallet registration.');
       }
     } catch {
-      setCheckError('Failed to check wallet registration. Please try again.');
+      setCheckError('Invalid scan. Please scan a valid Lana Wallet ID or WIF Private Key.');
     } finally {
       setIsChecking(false);
     }
