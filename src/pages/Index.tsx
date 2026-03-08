@@ -12,14 +12,21 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState<Tab>("wallets");
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
+  const [lanaPaymentRequest, setLanaPaymentRequest] = useState<{ walletAddress: string } | null>(null);
 
   const handlePayWithCash = (walletId: string) => {
     setSelectedWallet(walletId);
     setActiveTab("cash");
   };
 
+  const handlePayWithLana = (walletAddress: string) => {
+    setLanaPaymentRequest({ walletAddress });
+    setActiveTab("lana");
+  };
+
   const handleTabChange = (tab: Tab) => {
     setSelectedWallet(null);
+    setLanaPaymentRequest(null);
     setActiveTab(tab);
   };
 
@@ -33,9 +40,11 @@ const Index = () => {
           <CashTab selectedWallet={selectedWallet} onClearWallet={() => setSelectedWallet(null)} />
         )}
         {activeTab === "wallets" && (
-          <WalletsTab onPayWithCash={handlePayWithCash} />
+          <WalletsTab onPayWithCash={handlePayWithCash} onPayWithLana={handlePayWithLana} />
         )}
-        {activeTab === "lana" && <LanaTab />}
+        {activeTab === "lana" && (
+          <LanaTab paymentRequest={lanaPaymentRequest} onClearRequest={() => setLanaPaymentRequest(null)} />
+        )}
       </main>
 
       <BottomNav active={activeTab} onChange={handleTabChange} />

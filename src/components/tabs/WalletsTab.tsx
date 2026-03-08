@@ -60,11 +60,12 @@ const CURRENCY_SYMBOL: Record<string, string> = {
 
 interface WalletsTabProps {
   onPayWithCash?: (walletId: string) => void;
+  onPayWithLana?: (walletAddress: string) => void;
 }
 
 type View = "home" | "check" | "register";
 
-const WalletsTab = ({ onPayWithCash }: WalletsTabProps) => {
+const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
   const { session } = useAuth();
   const userCurrency = session?.currency || 'GBP';
   const currencySymbol = CURRENCY_SYMBOL[userCurrency] || '£';
@@ -412,7 +413,7 @@ const WalletsTab = ({ onPayWithCash }: WalletsTabProps) => {
               <div className="space-y-3">
                 {balance.lana > 0 && (
                   <Button
-                    onClick={() => console.log('Pay with $Lanas', balance.address)}
+                    onClick={() => onPayWithLana?.(balance.address)}
                     className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
                   >
                     <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain" />

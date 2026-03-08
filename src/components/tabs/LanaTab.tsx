@@ -1,43 +1,388 @@
-import { Camera } from "lucide-react";
+import { useState, useEffect } from "react";
+import { ArrowLeft, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { QRScanner } from "@/components/QRScanner";
+import { convertWifToIds } from "@/lib/crypto";
+import { useAuth } from "@/contexts/AuthContext";
 import lanaIcon from "@/assets/lana-icon.png";
 
-const LanaTab = () => {
+const CURRENCY_SYMBOL: Record<string, string> = {
+  GBP: '£',
+  USD: '$',
+  EUR: '€',
+};
+
+interface LanaTabProps {
+  paymentRequest?: { walletAddress: string; invoiceNumber?: string; amount?: number } | null;
+  onClearRequest?: () => void;
+}
+
+type Step = "entry" | "display" | "processing" | "paid";
+
+const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
+  const { session } = useAuth();
+  const currency = session?.currency || 'GBP';
+  const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
+
+  const [step, setStep] = useState<Step>("entry");
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [amount, setAmount] = useState("");
+  const [lanaAmount, setLanaAmount] = useState<number>(0);
+  const [exchangeRate, setExchangeRate] = useState<number>(0);
+  const [rateError, setRateError] = useState<string | null>(null);
+  const [isLoadingRate, setIsLoadingRate] = useState(false);
+
+  // Display step state
+  const [wifScannerOpen, setWifScannerOpen] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [isCheckingBalance, setIsCheckingBalance] = useState(false);
+  const [customerWalletId, setCustomerWalletId] = useState<string | null>(null);
+  const [customerBalance, setCustomerBalance] = useState<number | null>(null);
+
+  // Processing/paid state
+  const [txHash, setTxHash] = useState<string | null>(null);
+
+  // Cross-tab entry
+  useEffect(() => {
+    if (paymentRequest?.walletAddress) {
+      setCustomerWalletId(paymentRequest.walletAddress);
+      if (paymentRequest.invoiceNumber) setInvoiceNumber(paymentRequest.invoiceNumber);
+      if (paymentRequest.amount) {
+        setAmount(String(paymentRequest.amount));
+        // Auto-advance to display if we have all data
+        fetchRateAndAdvance(paymentRequest.amount);
+      }
+    }
+  }, [paymentRequest]);
+
+  const fetchRateAndAdvance = async (fiatAmount: number) => {
+    setIsLoadingRate(true);
+    setRateError(null);
+    try {
+      const res = await fetch('/api/system-params');
+      const json = await res.json();
+      const rates = json.data?.exchangeRates;
+      const rate = rates?.[currency] || 0;
+      if (!rate || rate <= 0) {
+        setRateError('Exchange rate not available. Please try again later.');
+        setIsLoadingRate(false);
+        return;
+      }
+      setExchangeRate(rate);
+      const lana = Math.round(fiatAmount / rate);
+      setLanaAmount(lana);
+      setStep("display");
+      setWifScannerOpen(true);
+    } catch {
+      setRateError('Failed to fetch exchange rate. Please try again.');
+    } finally {
+      setIsLoadingRate(false);
+    }
+  };
+
+  const handleContinue = () => {
+    const fiat = parseFloat(amount);
+    if (!invoiceNumber.trim() || isNaN(fiat) || fiat <= 0) return;
+    fetchRateAndAdvance(fiat);
+  };
+
+  const handleWifScan = async (data: string) => {
+    const trimmed = data.trim();
+
+    // Reject wallet addresses
+    if (trimmed.startsWith('L') && trimmed.length >= 26 && trimmed.length <= 35) {
+      setScanError('This looks like a Wallet Address, not a Private Key. The customer needs to show their WIF Private Key.');
+      return;
+    }
+
+    // Reject Nostr keys
+    if (trimmed.startsWith('npub') || trimmed.startsWith('nsec')) {
+      setScanError('This is a Nostr key, not a LanaCoin WIF Private Key.');
+      return;
+    }
+
+    setScanError(null);
+    setIsCheckingBalance(true);
+
+    try {
+      const ids = await convertWifToIds(trimmed);
+      setCustomerWalletId(ids.walletId);
+
+      // Check balance
+      const res = await fetch(`/api/balance/${encodeURIComponent(ids.walletId)}?currency=${currency}`);
+      const balanceData = await res.json();
+
+      if (!res.ok) {
+        throw new Error(balanceData.error || 'Failed to check balance');
+      }
+
+      const walletLana = balanceData.lana || 0;
+      setCustomerBalance(walletLana);
+
+      if (walletLana < lanaAmount) {
+        setScanError(`Insufficient balance. Wallet has ${walletLana.toLocaleString()} LANA but ${lanaAmount.toLocaleString()} LANA is required.`);
+        setIsCheckingBalance(false);
+        return;
+      }
+
+      // Sufficient balance — proceed to processing
+      setIsCheckingBalance(false);
+      setStep("processing");
+
+      // Mock transaction: 2s delay
+      const mockHash = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+
+      console.log('$Lana payment (mock transaction):', {
+        invoiceNumber: invoiceNumber.trim(),
+        fiatAmount: parseFloat(amount),
+        currency,
+        lanaAmount,
+        exchangeRate,
+        customerWallet: ids.walletId,
+        customerBalance: walletLana,
+        recipientWallet: 'MOCK_MERCHANT_WALLET',
+        txHash: mockHash,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      setTxHash(mockHash);
+      setStep("paid");
+
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : 'Invalid WIF Private Key.');
+      setIsCheckingBalance(false);
+    }
+  };
+
+  const resetAll = () => {
+    setStep("entry");
+    setInvoiceNumber("");
+    setAmount("");
+    setLanaAmount(0);
+    setExchangeRate(0);
+    setRateError(null);
+    setScanError(null);
+    setIsCheckingBalance(false);
+    setCustomerWalletId(null);
+    setCustomerBalance(null);
+    setTxHash(null);
+    onClearRequest?.();
+  };
+
+  // ─── STEP: Entry ─────────────────────────────
+  if (step === "entry") {
+    return (
+      <div className="flex flex-col gap-5 px-6 py-4">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0">
+            <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain" />
+          </div>
+          <div>
+            <h2 className="font-display text-xl font-bold text-foreground">$Lana Payment</h2>
+            <p className="text-muted-foreground text-sm">Enter invoice details</p>
+          </div>
+        </div>
+
+        <div className="glass-card rounded-2xl p-5 space-y-4">
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-foreground">
+              Invoice Number <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              placeholder="e.g. 2024-001234"
+              value={invoiceNumber}
+              onChange={(e) => setInvoiceNumber(e.target.value)}
+              className="h-12 rounded-xl bg-background border-input"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-foreground">
+              Amount ({currencySymbol}) <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              type="number"
+              placeholder="0.00"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="h-12 rounded-xl bg-background border-input"
+            />
+          </div>
+        </div>
+
+        {rateError && (
+          <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
+            <p className="text-sm text-destructive text-center">{rateError}</p>
+          </div>
+        )}
+
+        <Button
+          onClick={handleContinue}
+          disabled={!invoiceNumber.trim() || !amount.trim() || parseFloat(amount) <= 0 || isLoadingRate}
+          className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
+        >
+          {isLoadingRate ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Loading rate...
+            </>
+          ) : (
+            'Continue to Payment'
+          )}
+        </Button>
+      </div>
+    );
+  }
+
+  // ─── STEP: Display (customer-facing) ─────────
+  if (step === "display") {
+    return (
+      <div className="flex flex-col gap-5 px-6 py-4">
+        {/* Back to entry */}
+        <button
+          onClick={() => { setStep("entry"); setScanError(null); setIsCheckingBalance(false); }}
+          className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors self-start"
+        >
+          <ArrowLeft className="w-5 h-5" />
+          <span className="text-sm font-medium">Back</span>
+        </button>
+
+        {/* Payment amounts — designed for customer to read */}
+        <div className="flex flex-col items-center gap-2 py-4">
+          <p className="text-sm text-muted-foreground">Invoice #{invoiceNumber}</p>
+
+          <p className="text-2xl font-semibold text-foreground">
+            {currencySymbol}{parseFloat(amount).toFixed(2)}
+          </p>
+
+          <div className="flex items-center gap-3 py-3">
+            <img src={lanaIcon} alt="Lana" className="w-10 h-10 object-contain" />
+            <span className="text-5xl font-black text-primary tracking-tight">
+              {lanaAmount.toLocaleString()}
+            </span>
+            <span className="text-2xl font-bold text-primary/70">LANA</span>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            1 LANA = {currencySymbol}{exchangeRate.toFixed(6)}
+          </p>
+        </div>
+
+        {/* Balance check loading */}
+        {isCheckingBalance && (
+          <div className="flex flex-col items-center gap-3 py-6">
+            <Loader2 className="w-10 h-10 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">Checking wallet balance...</p>
+          </div>
+        )}
+
+        {/* Scan error / insufficient balance */}
+        {scanError && !isCheckingBalance && (
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-destructive">{scanError}</p>
+              </div>
+            </div>
+            <Button
+              onClick={() => { setScanError(null); setWifScannerOpen(true); }}
+              className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              Scan Again
+            </Button>
+          </div>
+        )}
+
+        {/* Prompt to scan — when idle */}
+        {!scanError && !isCheckingBalance && (
+          <div className="flex flex-col items-center gap-4">
+            <p className="text-sm text-muted-foreground text-center">
+              Ask the customer to show their WIF Private Key QR code
+            </p>
+            <Button
+              onClick={() => setWifScannerOpen(true)}
+              className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
+            >
+              <img src={lanaIcon} alt="Lana" className="w-5 h-5 object-contain" />
+              Scan Customer WIF
+            </Button>
+          </div>
+        )}
+
+        <QRScanner
+          isOpen={wifScannerOpen}
+          onClose={() => setWifScannerOpen(false)}
+          onScan={handleWifScan}
+          title="Scan WIF Key"
+          description="Scan the customer's Lana WIF Private Key"
+        />
+      </div>
+    );
+  }
+
+  // ─── STEP: Processing ────────────────────────
+  if (step === "processing") {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 px-6 py-16">
+        <Loader2 className="w-14 h-14 animate-spin text-primary" />
+        <h2 className="text-xl font-bold text-foreground">Processing Payment</h2>
+        <p className="text-sm text-muted-foreground text-center">
+          Sending {lanaAmount.toLocaleString()} LANA...
+        </p>
+      </div>
+    );
+  }
+
+  // ─── STEP: Paid ──────────────────────────────
   return (
-    <div className="flex flex-col gap-6 px-6 py-4">
-      <div className="flex items-center gap-4">
-        <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0">
-          <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain" />
-        </div>
-        <div>
-          <h2 className="font-display text-xl font-bold text-foreground">$Lana</h2>
-          <p className="text-muted-foreground text-sm">Enter payment details</p>
-        </div>
+    <div className="flex flex-col gap-5 px-6 py-4">
+      <div className="flex flex-col items-center gap-3 py-8">
+        <CheckCircle2 className="w-14 h-14 text-primary" />
+        <h2 className="text-2xl font-bold text-foreground">Paid</h2>
+        <p className="text-lg text-muted-foreground">
+          Invoice #{invoiceNumber}
+        </p>
       </div>
 
-      <div className="glass-card rounded-2xl p-5 space-y-4">
-        <div className="space-y-2">
-          <Label className="text-sm font-medium text-foreground">Invoice Number</Label>
-          <Input
-            placeholder="e.g. 2024-001234"
-            className="h-12 rounded-xl bg-background border-input"
-          />
+      <div className="glass-card rounded-2xl p-5 space-y-3">
+        <div className="flex justify-between items-baseline">
+          <span className="text-sm text-muted-foreground">Amount</span>
+          <span className="text-base font-semibold text-foreground">
+            {currencySymbol}{parseFloat(amount).toFixed(2)}
+          </span>
         </div>
-        <div className="space-y-2">
-          <Label className="text-sm font-medium text-foreground">Amount (EUR)</Label>
-          <Input
-            type="number"
-            placeholder="0.00"
-            className="h-12 rounded-xl bg-background border-input"
-          />
+        <div className="flex justify-between items-baseline">
+          <span className="text-sm text-muted-foreground">LANA</span>
+          <span className="text-base font-bold text-primary">
+            {lanaAmount.toLocaleString()} LANA
+          </span>
         </div>
+        <div className="flex justify-between items-baseline">
+          <span className="text-sm text-muted-foreground">Rate</span>
+          <span className="text-sm text-foreground">
+            1 LANA = {currencySymbol}{exchangeRate.toFixed(6)}
+          </span>
+        </div>
+        <div className="pt-2 border-t border-border space-y-1">
+          <p className="text-xs text-muted-foreground">Customer Wallet</p>
+          <p className="text-xs font-mono text-foreground break-all">{customerWalletId}</p>
+        </div>
+        {txHash && (
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Transaction ID</p>
+            <p className="text-xs font-mono text-foreground break-all">{txHash}</p>
+          </div>
+        )}
       </div>
 
-      <Button className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
-        <Camera className="w-5 h-5" />
-        Scan Invoice
+      <Button
+        onClick={resetAll}
+        className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
+      >
+        New Payment
       </Button>
     </div>
   );
