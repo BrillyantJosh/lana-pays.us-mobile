@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2 } from "lucide-react";
+import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,10 +19,51 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
+const CURRENCY_LOCALE: Record<string, { locale: string; code: string }> = {
+  GBP: { locale: 'en-GB', code: 'GBP' },
+  USD: { locale: 'en-US', code: 'USD' },
+  EUR: { locale: 'de-DE', code: 'EUR' },
+};
+
+const COUNTRY_CODES = [
+  { code: "+44", country: "UK" },
+  { code: "+386", country: "SI" },
+  { code: "+1", country: "US" },
+  { code: "+49", country: "DE" },
+  { code: "+33", country: "FR" },
+  { code: "+39", country: "IT" },
+  { code: "+34", country: "ES" },
+  { code: "+43", country: "AT" },
+  { code: "+385", country: "HR" },
+  { code: "+381", country: "RS" },
+  { code: "+387", country: "BA" },
+  { code: "+382", country: "ME" },
+  { code: "+355", country: "AL" },
+  { code: "+30", country: "GR" },
+  { code: "+36", country: "HU" },
+  { code: "+48", country: "PL" },
+  { code: "+420", country: "CZ" },
+  { code: "+421", country: "SK" },
+  { code: "+40", country: "RO" },
+  { code: "+359", country: "BG" },
+];
+
+interface BalanceResult {
+  address: string;
+  lana: number;
+  fiatValue: number;
+  confirmed: number;
+  unconfirmed: number;
+  rate: number;
+  currency: string;
+}
+
 interface CashTabProps {
   selectedWallet?: string | null;
   onClearWallet?: () => void;
 }
+
+type Step = "scan" | "register" | "invoice" | "confirmed";
 
 const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
   const { session } = useAuth();
@@ -30,84 +71,132 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
   const CurrencyIcon = currencyIcons[currency] || PoundSterling;
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
 
-  // Step state
-  const [step, setStep] = useState<1 | 2>(1);
-  const [walletId, setWalletId] = useState<string | null>(null);
+  const [step, setStep] = useState<Step>("scan");
 
-  // Step 1 state
+  // Scan state
   const [scannerOpen, setScannerOpen] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
 
-  // Step 2 state
+  // Wallet data
+  const [walletId, setWalletId] = useState<string | null>(null);
+  const [nostrHexId, setNostrHexId] = useState<string | null>(null);
+  const [nostrNpubId, setNostrNpubId] = useState<string | null>(null);
+  const [balance, setBalance] = useState<BalanceResult | null>(null);
+
+  // Registration form
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [countryCode, setCountryCode] = useState("+386");
+  const [mobile, setMobile] = useState("");
+
+  // Invoice form
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [amount, setAmount] = useState("");
-  const [submitted, setSubmitted] = useState(false);
 
-  // Cross-tab entry: if selectedWallet is set, skip to step 2
+  // Cross-tab entry: wallet already verified from WalletsTab
   useEffect(() => {
     if (selectedWallet) {
       setWalletId(selectedWallet);
-      setStep(2);
       setCheckError(null);
+      fetchBalance(selectedWallet);
+      setStep("invoice");
     }
   }, [selectedWallet]);
 
-  // Auto-open scanner on step 1 entry (only when no wallet set)
+  // Auto-open scanner on scan step
   useEffect(() => {
-    if (step === 1 && !walletId && !checkError && !isChecking) {
+    if (step === "scan" && !walletId && !checkError && !isChecking) {
       setScannerOpen(true);
     }
   }, [step]);
 
-  const resetToStep1 = () => {
-    setStep(1);
+  const fetchBalance = async (address: string) => {
+    try {
+      const res = await fetch(`/api/balance/${encodeURIComponent(address)}?currency=${currency}`);
+      const json = await res.json();
+      if (res.ok) setBalance(json);
+    } catch {
+      // Balance fetch failure is non-critical for cash payments
+    }
+  };
+
+  const resetAll = () => {
+    setStep("scan");
     setWalletId(null);
+    setNostrHexId(null);
+    setNostrNpubId(null);
+    setBalance(null);
     setCheckError(null);
+    setFullName("");
+    setEmail("");
+    setCountryCode("+386");
+    setMobile("");
     setInvoiceNumber("");
     setAmount("");
-    setSubmitted(false);
     onClearWallet?.();
     setScannerOpen(true);
   };
 
-  // Resolve scanned data to wallet address (accepts wallet ID or WIF key)
-  const resolveWalletAddress = async (data: string): Promise<string> => {
-    const isWalletAddress = data.startsWith('L') && data.length >= 26 && data.length <= 35;
-    if (isWalletAddress) return data;
-
-    // Try to derive wallet from WIF key
-    const ids = await convertWifToIds(data);
-    return ids.walletId;
-  };
-
-  // Validate and check wallet registration
-  const handleWalletScan = async (data: string) => {
+  // Main scan handler — accepts wallet address or WIF key
+  const handleScan = async (data: string) => {
     const trimmed = data.trim();
 
     setIsChecking(true);
     setCheckError(null);
+    setBalance(null);
+    setNostrHexId(null);
+    setNostrNpubId(null);
 
     try {
-      const walletAddress = await resolveWalletAddress(trimmed);
+      let resolvedWalletId: string;
+      let hasNostrKeys = false;
 
-      const res = await fetch('/api/check-wallet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet_id: walletAddress }),
-      });
-      const json = await res.json();
+      const isWalletAddress = trimmed.startsWith('L') && trimmed.length >= 26 && trimmed.length <= 35;
 
-      if (json.success) {
-        if (!json.registered) {
-          setCheckError('This wallet is not registered. Only registered wallets can be used for cash payments.');
-          return;
-        }
-        // Registered — advance to step 2 (frozen doesn't matter for cash/fiat)
-        setWalletId(walletAddress);
-        setStep(2);
+      if (isWalletAddress) {
+        resolvedWalletId = trimmed;
       } else {
-        setCheckError(json.message || 'Failed to verify wallet registration.');
+        // Derive wallet from WIF key
+        const ids = await convertWifToIds(trimmed);
+        resolvedWalletId = ids.walletId;
+        setNostrHexId(ids.nostrHexId);
+        setNostrNpubId(ids.nostrNpubId);
+        hasNostrKeys = true;
+      }
+
+      setWalletId(resolvedWalletId);
+
+      // Check registration + balance in parallel
+      const [regRes, balanceRes] = await Promise.all([
+        fetch('/api/check-wallet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet_id: resolvedWalletId }),
+        }).then(r => r.json()),
+        fetch(`/api/balance/${encodeURIComponent(resolvedWalletId)}?currency=${currency}`)
+          .then(r => r.json().then(j => ({ ok: r.ok, json: j })))
+          .catch(() => null),
+      ]);
+
+      // Store balance
+      if (balanceRes?.ok) {
+        setBalance(balanceRes.json);
+      }
+
+      // Check registration result
+      if (regRes.success) {
+        if (regRes.registered) {
+          setStep("invoice");
+        } else if (hasNostrKeys) {
+          // Not registered, but we have keys from WIF → show registration form
+          setStep("register");
+        } else {
+          // Scanned wallet address but not registered — can't register without WIF
+          setCheckError('This wallet is not registered. Scan a WIF Private Key instead to register and pay.');
+        }
+      } else {
+        setCheckError(regRes.message || 'Failed to verify wallet.');
       }
     } catch {
       setCheckError('Invalid scan. Please scan a valid Lana Wallet ID or WIF Private Key.');
@@ -116,10 +205,22 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
     }
   };
 
-  const canConfirm = invoiceNumber.trim() && amount.trim();
+  const handleRegister = () => {
+    if (!fullName.trim() || !walletId) return;
+
+    console.log('Registration (mock):', {
+      walletId,
+      nostrHexId,
+      fullName: fullName.trim(),
+      email: email.trim() || null,
+      mobile: mobile.trim() ? `${countryCode}${mobile.trim()}` : null,
+    });
+
+    setStep("invoice");
+  };
 
   const handleConfirm = () => {
-    if (!canConfirm || !walletId) return;
+    if (!invoiceNumber.trim() || !amount.trim() || !walletId) return;
 
     console.log('Cash payment (mock):', {
       walletId,
@@ -128,11 +229,36 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
       currency,
     });
 
-    setSubmitted(true);
+    setStep("confirmed");
   };
 
-  // ─── STEP 1: Scan Wallet ────────────────────
-  if (step === 1) {
+  // ─── Balance Card Component ────────────────
+  const BalanceCard = ({ compact }: { compact?: boolean }) => {
+    if (!balance) return null;
+    return (
+      <div className="glass-card rounded-2xl p-4 space-y-2">
+        {!compact && <h3 className="font-semibold text-sm text-muted-foreground">Customer Balance</h3>}
+        <div className="flex items-baseline gap-2">
+          <span className={`${compact ? 'text-xl' : 'text-2xl'} font-bold text-foreground`}>
+            {balance.lana.toLocaleString()}
+          </span>
+          <span className="text-sm text-muted-foreground">LANA</span>
+        </div>
+        <div className="flex items-baseline gap-2">
+          <span className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-primary`}>
+            {balance.fiatValue.toLocaleString(
+              CURRENCY_LOCALE[balance.currency]?.locale || 'en-GB',
+              { style: 'currency', currency: balance.currency || 'GBP' }
+            )}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground truncate">{balance.address}</p>
+      </div>
+    );
+  };
+
+  // ─── SCAN STEP ─────────────────────────────
+  if (step === "scan") {
     return (
       <div className="flex flex-col gap-5 px-6 py-4">
         <div className="flex items-center gap-4">
@@ -141,7 +267,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
           </div>
           <div>
             <h2 className="font-display text-xl font-bold text-foreground">Cash Payment</h2>
-            <p className="text-muted-foreground text-sm">Scan customer wallet to begin</p>
+            <p className="text-muted-foreground text-sm">Scan customer wallet or WIF key</p>
           </div>
         </div>
 
@@ -149,7 +275,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
         {isChecking && (
           <div className="flex flex-col items-center gap-3 py-12">
             <Loader2 className="w-10 h-10 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">Checking wallet registration...</p>
+            <p className="text-sm text-muted-foreground">Checking wallet...</p>
           </div>
         )}
 
@@ -169,7 +295,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
           </div>
         )}
 
-        {/* Idle — show scan button */}
+        {/* Idle — scan button */}
         {!isChecking && !checkError && (
           <div className="flex flex-col items-center gap-4 py-8">
             <Button
@@ -177,7 +303,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
               className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
             >
               <Camera className="w-5 h-5" />
-              Scan Wallet ID
+              Scan Customer
             </Button>
           </div>
         )}
@@ -185,16 +311,100 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
         <QRScanner
           isOpen={scannerOpen}
           onClose={() => setScannerOpen(false)}
-          onScan={handleWalletScan}
-          title="Scan Wallet ID"
-          description="Scan a customer's Lana Wallet ID for cash payment"
+          onScan={handleScan}
+          title="Scan Customer"
+          description="Scan a wallet address or WIF private key"
         />
       </div>
     );
   }
 
-  // ─── STEP 2: Submitted ──────────────────────
-  if (submitted) {
+  // ─── REGISTER STEP ─────────────────────────
+  if (step === "register") {
+    return (
+      <div className="flex flex-col gap-5 px-6 py-4">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0">
+            <UserPlus className="w-7 h-7 text-primary" />
+          </div>
+          <div>
+            <h2 className="font-display text-xl font-bold text-foreground">Register Wallet</h2>
+            <p className="text-muted-foreground text-sm">This wallet needs to be registered first</p>
+          </div>
+        </div>
+
+        {/* Balance card */}
+        <BalanceCard compact />
+
+        {/* Registration form */}
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">
+              Full Name <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              placeholder="First and last name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              className="h-11 rounded-xl"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">Email</Label>
+            <Input
+              type="email"
+              placeholder="email@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="h-11 rounded-xl"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">Mobile</Label>
+            <div className="flex gap-2">
+              <select
+                value={countryCode}
+                onChange={(e) => setCountryCode(e.target.value)}
+                className="h-11 rounded-xl border border-input bg-background px-3 text-sm min-w-[90px]"
+              >
+                {COUNTRY_CODES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.country} {c.code}
+                  </option>
+                ))}
+              </select>
+              <Input
+                type="tel"
+                placeholder="Phone number"
+                value={mobile}
+                onChange={(e) => setMobile(e.target.value)}
+                className="h-11 rounded-xl flex-1"
+              />
+            </div>
+          </div>
+        </div>
+
+        <Button
+          onClick={handleRegister}
+          disabled={!fullName.trim()}
+          className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
+        >
+          <UserPlus className="w-5 h-5" />
+          Register & Continue
+        </Button>
+
+        <button
+          onClick={resetAll}
+          className="text-sm text-muted-foreground text-center hover:text-foreground transition-colors"
+        >
+          Scan Another
+        </button>
+      </div>
+    );
+  }
+
+  // ─── CONFIRMED STEP ────────────────────────
+  if (step === "confirmed") {
     return (
       <div className="flex flex-col gap-5 px-6 py-4">
         <div className="flex flex-col items-center gap-4 py-10">
@@ -212,7 +422,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
         </div>
 
         <Button
-          onClick={resetToStep1}
+          onClick={resetAll}
           className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
         >
           New Payment
@@ -221,7 +431,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
     );
   }
 
-  // ─── STEP 2: Invoice Details ─────────────────
+  // ─── INVOICE STEP ──────────────────────────
   return (
     <div className="flex flex-col gap-5 px-6 py-4">
       {/* Header with wallet info */}
@@ -238,12 +448,15 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
           </div>
         </div>
         <button
-          onClick={resetToStep1}
+          onClick={resetAll}
           className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
         >
           Change
         </button>
       </div>
+
+      {/* Balance card */}
+      <BalanceCard />
 
       {/* Invoice form */}
       <div className="glass-card rounded-2xl p-5 space-y-4">
@@ -275,7 +488,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
       {/* Confirm button */}
       <Button
         onClick={handleConfirm}
-        disabled={!canConfirm}
+        disabled={!invoiceNumber.trim() || !amount.trim()}
         className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
       >
         Confirm Payment
