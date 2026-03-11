@@ -84,7 +84,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
   };
 
   const handleContinue = () => {
-    const fiat = parseFloat(amount);
+    const fiat = parseFloat(amount.replace(',', '.'));
     if (!invoiceNumber.trim() || isNaN(fiat) || fiat <= 0) return;
     fetchRateAndAdvance(fiat);
   };
@@ -156,7 +156,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
 
       console.log('$Lana payment (mock transaction):', {
         invoiceNumber: invoiceNumber.trim(),
-        fiatAmount: parseFloat(amount),
+        fiatAmount: parseFloat(amount.replace(',', '.')),
         currency,
         lanaAmount,
         exchangeRate,
@@ -223,10 +223,14 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
               Amount ({currencySymbol}) <span className="text-destructive">*</span>
             </Label>
             <Input
-              type="number"
+              type="text"
+              inputMode="decimal"
               placeholder="0.00"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^0-9.,]/g, '');
+                setAmount(v);
+              }}
               className="h-12 rounded-xl bg-background border-input"
             />
           </div>
@@ -240,7 +244,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
 
         <Button
           onClick={handleContinue}
-          disabled={!invoiceNumber.trim() || !amount.trim() || parseFloat(amount) <= 0 || isLoadingRate}
+          disabled={!invoiceNumber.trim() || !amount.trim() || parseFloat(amount.replace(',', '.')) <= 0 || isLoadingRate}
           className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
         >
           {isLoadingRate ? (
@@ -274,7 +278,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
           <p className="text-sm text-muted-foreground">Invoice #{invoiceNumber}</p>
 
           <p className="text-2xl font-semibold text-foreground">
-            {currencySymbol}{parseFloat(amount).toFixed(2)}
+            {currencySymbol}{parseFloat(amount.replace(',', '.')).toFixed(2)}
           </p>
 
           <div className="flex items-center gap-3 py-3">
@@ -371,7 +375,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
         >
           <div className="flex items-center justify-between rounded-xl bg-secondary p-3">
             <span className="text-sm text-muted-foreground">
-              {currencySymbol}{parseFloat(amount).toFixed(2)}
+              {currencySymbol}{parseFloat(amount.replace(',', '.')).toFixed(2)}
             </span>
             <div className="flex items-center gap-1.5">
               <img src={lanaIcon} alt="Lana" className="w-5 h-5 object-contain" />
@@ -413,7 +417,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
         <div className="flex justify-between items-baseline">
           <span className="text-sm text-muted-foreground">Amount</span>
           <span className="text-base font-semibold text-foreground">
-            {currencySymbol}{parseFloat(amount).toFixed(2)}
+            {currencySymbol}{parseFloat(amount.replace(',', '.')).toFixed(2)}
           </span>
         </div>
         <div className="flex justify-between items-baseline">

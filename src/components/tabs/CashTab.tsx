@@ -225,7 +225,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
     console.log('Cash payment (mock):', {
       walletId,
       invoiceNumber: invoiceNumber.trim(),
-      amount: parseFloat(amount),
+      amount: parseFloat(amount.replace(',', '.')),
       currency,
     });
 
@@ -411,7 +411,7 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
           <CheckCircle2 className="w-16 h-16 text-primary" />
           <h2 className="text-3xl font-black text-foreground">Payment Confirmed</h2>
           <p className="text-2xl font-bold text-primary text-center">
-            {currencySymbol}{parseFloat(amount).toFixed(2)}
+            {currencySymbol}{parseFloat(amount.replace(',', '.')).toFixed(2)}
           </p>
           <p className="text-lg text-muted-foreground text-center">
             Invoice #{invoiceNumber}
@@ -476,10 +476,14 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
             Amount ({currencySymbol}) <span className="text-destructive">*</span>
           </Label>
           <Input
-            type="number"
+            type="text"
+            inputMode="decimal"
             placeholder="0.00"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value.replace(/[^0-9.,]/g, '');
+              setAmount(v);
+            }}
             className="h-12 rounded-xl bg-background border-input"
           />
         </div>
