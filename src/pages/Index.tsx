@@ -9,7 +9,7 @@ import LanaTab from "@/components/tabs/LanaTab";
 type Tab = "cash" | "wallets" | "lana";
 
 const Index = () => {
-  const [activeTab, setActiveTab] = useState<Tab>("wallets");
+  const [activeTab, setActiveTab] = useState<Tab>("cash");
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
   const [lanaPaymentRequest, setLanaPaymentRequest] = useState<{ walletAddress: string } | null>(null);
@@ -33,7 +33,7 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       <TopBar onMenuOpen={() => setMenuOpen(true)} />
-      <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} />
+      <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onCheckWallet={() => handleTabChange("wallets")} />
 
       <main className="pt-14 pb-[var(--nav-height)]">
         {activeTab === "wallets" && (

@@ -1,13 +1,14 @@
-import { X, Settings, HelpCircle, LogOut, Shield } from "lucide-react";
+import { X, Settings, HelpCircle, LogOut, Shield, Search } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 interface MenuDrawerProps {
   open: boolean;
   onClose: () => void;
+  onCheckWallet?: () => void;
 }
 
-const MenuDrawer = ({ open, onClose }: MenuDrawerProps) => {
+const MenuDrawer = ({ open, onClose, onCheckWallet }: MenuDrawerProps) => {
   const { session, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -17,7 +18,13 @@ const MenuDrawer = ({ open, onClose }: MenuDrawerProps) => {
     navigate('/login');
   };
 
+  const handleCheckWallet = () => {
+    onClose();
+    onCheckWallet?.();
+  };
+
   const menuItems = [
+    { label: "Check Wallet", icon: Search, action: handleCheckWallet },
     { label: "Settings", icon: Settings, action: () => {} },
     { label: "Security", icon: Shield, action: () => {} },
     { label: "Help", icon: HelpCircle, action: () => {} },

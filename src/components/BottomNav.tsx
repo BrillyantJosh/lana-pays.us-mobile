@@ -20,7 +20,6 @@ const BottomNav = ({ active, onChange }: BottomNavProps) => {
   const CurrencyIcon = currencyIcons[session?.currency || 'GBP'] || PoundSterling;
 
   const tabs: { id: Tab; label: string; icon?: typeof Search; img?: string }[] = [
-    { id: "wallets", label: "Check", icon: Search },
     { id: "cash", label: "Cash", icon: CurrencyIcon },
     { id: "lana", label: "$Lana", img: lanaIcon },
   ];
