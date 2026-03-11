@@ -36,11 +36,11 @@ const Index = () => {
       <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} />
 
       <main className="pt-14 pb-[var(--nav-height)]">
-        {activeTab === "cash" && (
-          <CashTab selectedWallet={selectedWallet} onClearWallet={() => setSelectedWallet(null)} />
-        )}
         {activeTab === "wallets" && (
           <WalletsTab onPayWithCash={handlePayWithCash} onPayWithLana={handlePayWithLana} />
+        )}
+        {activeTab === "cash" && (
+          <CashTab selectedWallet={selectedWallet} onClearWallet={() => setSelectedWallet(null)} />
         )}
         {activeTab === "lana" && (
           <LanaTab paymentRequest={lanaPaymentRequest} onClearRequest={() => setLanaPaymentRequest(null)} />

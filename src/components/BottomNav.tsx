@@ -1,4 +1,4 @@
-import { PoundSterling, DollarSign, Euro, Wallet } from "lucide-react";
+import { PoundSterling, DollarSign, Euro, Search } from "lucide-react";
 import lanaIcon from "@/assets/lana-icon.png";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -19,9 +19,9 @@ const BottomNav = ({ active, onChange }: BottomNavProps) => {
   const { session } = useAuth();
   const CurrencyIcon = currencyIcons[session?.currency || 'GBP'] || PoundSterling;
 
-  const tabs: { id: Tab; label: string; icon?: typeof Wallet; img?: string }[] = [
+  const tabs: { id: Tab; label: string; icon?: typeof Search; img?: string }[] = [
+    { id: "wallets", label: "Check", icon: Search },
     { id: "cash", label: "Cash", icon: CurrencyIcon },
-    { id: "wallets", label: "Wallets", icon: Wallet },
     { id: "lana", label: "$Lana", img: lanaIcon },
   ];
 
