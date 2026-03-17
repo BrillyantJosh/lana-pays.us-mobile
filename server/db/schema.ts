@@ -30,6 +30,40 @@ export function initializeSchema(db: Database.Database): void {
       last_login TEXT DEFAULT (datetime('now'))
     );
 
+    -- KIND 30901 Business Units (from Nostr relays)
+    CREATE TABLE IF NOT EXISTS business_units (
+      unit_id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      pubkey TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      owner_hex TEXT NOT NULL,
+      authorized_hex TEXT NOT NULL DEFAULT '[]',
+      receiver_name TEXT,
+      receiver_address TEXT,
+      receiver_zip TEXT,
+      receiver_city TEXT,
+      receiver_country TEXT,
+      bank_name TEXT,
+      bank_swift TEXT,
+      bank_account TEXT,
+      longitude TEXT,
+      latitude TEXT,
+      country TEXT,
+      currency TEXT,
+      category TEXT,
+      category_detail TEXT,
+      image TEXT,
+      logo TEXT,
+      status TEXT DEFAULT 'active',
+      lanapays_payout_method TEXT DEFAULT 'fiat',
+      lanapays_payout_wallet TEXT,
+      opening_hours_json TEXT,
+      content TEXT,
+      raw_event TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Heartbeat logs
     CREATE TABLE IF NOT EXISTS heartbeat_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

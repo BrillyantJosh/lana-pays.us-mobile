@@ -242,6 +242,174 @@ export async function fetchKind0Profile(hexId: string): Promise<{ name?: string;
   });
 }
 
+/**
+ * Fetch KIND 30901 (Business Unit) events from Lana relays
+ * If sinceTimestamp is provided, only fetch events newer than that
+ * Otherwise fetch all history
+ */
+export interface Kind30901Event {
+  unit_id: string;
+  event_id: string;
+  pubkey: string;
+  created_at: number;
+  name: string;
+  owner_hex: string;
+  authorized_hex: string[];  // all p tags
+  receiver_name?: string;
+  receiver_address?: string;
+  receiver_zip?: string;
+  receiver_city?: string;
+  receiver_country?: string;
+  bank_name?: string;
+  bank_swift?: string;
+  bank_account?: string;
+  longitude?: string;
+  latitude?: string;
+  country?: string;
+  currency?: string;
+  category?: string;
+  category_detail?: string;
+  image?: string;
+  logo?: string;
+  status: string;
+  lanapays_payout_method: string;
+  lanapays_payout_wallet?: string;
+  opening_hours_json?: string;
+  content: string;
+  raw_event: string;
+}
+
+function parseKind30901Event(event: NostrEvent): Kind30901Event | null {
+  const tags = event.tags;
+  const getTag = (name: string) => tags.find(t => t[0] === name)?.[1];
+
+  const unit_id = getTag('unit_id') || getTag('d');
+  const name = getTag('name');
+  const owner_hex = getTag('owner_hex');
+
+  if (!unit_id || !name || !owner_hex) {
+    console.warn(`KIND 30901 missing required tags (unit_id/name/owner_hex), skipping event ${event.id}`);
+    return null;
+  }
+
+  // All p tags = authorized personnel (owner + staff)
+  const authorized_hex = tags.filter(t => t[0] === 'p').map(t => t[1]);
+
+  return {
+    unit_id,
+    event_id: event.id,
+    pubkey: event.pubkey,
+    created_at: event.created_at,
+    name,
+    owner_hex,
+    authorized_hex,
+    receiver_name: getTag('receiver_name'),
+    receiver_address: getTag('receiver_address'),
+    receiver_zip: getTag('receiver_zip'),
+    receiver_city: getTag('receiver_city'),
+    receiver_country: getTag('receiver_country'),
+    bank_name: getTag('bank_name'),
+    bank_swift: getTag('bank_swift'),
+    bank_account: getTag('bank_account'),
+    longitude: getTag('longitude'),
+    latitude: getTag('latitude'),
+    country: getTag('country'),
+    currency: getTag('currency'),
+    category: getTag('category'),
+    category_detail: getTag('category_detail'),
+    image: getTag('image'),
+    logo: getTag('logo'),
+    status: getTag('status') || 'active',
+    lanapays_payout_method: getTag('lanapays_payout_method') || 'fiat',
+    lanapays_payout_wallet: getTag('lanapays_payout_wallet'),
+    opening_hours_json: getTag('opening_hours_json'),
+    content: event.content || '',
+    raw_event: JSON.stringify(event),
+  };
+}
+
+export async function fetchKind30901(sinceTimestamp?: number): Promise<Kind30901Event[]> {
+  console.log(`Fetching KIND 30901 from relays${sinceTimestamp ? ` (since ${sinceTimestamp})` : ' (full history)'}...`);
+
+  const allEvents: Kind30901Event[] = [];
+
+  const fetchFromRelayKind30901 = (relayUrl: string, timeout = 15000): Promise<NostrEvent[]> => {
+    return new Promise((resolve) => {
+      const events: NostrEvent[] = [];
+      const timeoutId = setTimeout(() => {
+        console.log(`KIND 30901 timeout for ${relayUrl}`);
+        ws.close();
+        resolve(events);
+      }, timeout);
+
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(relayUrl);
+      } catch {
+        clearTimeout(timeoutId);
+        resolve([]);
+        return;
+      }
+
+      const subId = `kind30901_${Date.now()}`;
+
+      ws.on('open', () => {
+        const filter: any = { kinds: [30901] };
+        if (sinceTimestamp) filter.since = sinceTimestamp;
+        ws.send(JSON.stringify(['REQ', subId, filter]));
+      });
+
+      ws.on('message', (data: Buffer) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg[0] === 'EVENT' && msg[1] === subId) {
+            events.push(msg[2] as NostrEvent);
+          }
+          if (msg[0] === 'EOSE') {
+            clearTimeout(timeoutId);
+            ws.close();
+            resolve(events);
+          }
+        } catch {}
+      });
+
+      ws.on('error', () => {
+        clearTimeout(timeoutId);
+        resolve(events);
+      });
+
+      ws.on('close', () => {
+        clearTimeout(timeoutId);
+      });
+    });
+  };
+
+  const results = await Promise.all(
+    LANA_RELAYS.map(relay => fetchFromRelayKind30901(relay))
+  );
+
+  // Deduplicate by unit_id (d tag), keep newest event per unit_id
+  const byUnitId = new Map<string, NostrEvent>();
+  for (const relayEvents of results) {
+    for (const event of relayEvents) {
+      const dTag = event.tags.find(t => t[0] === 'd')?.[1];
+      if (!dTag) continue;
+      const existing = byUnitId.get(dTag);
+      if (!existing || event.created_at > existing.created_at) {
+        byUnitId.set(dTag, event);
+      }
+    }
+  }
+
+  for (const event of byUnitId.values()) {
+    const parsed = parseKind30901Event(event);
+    if (parsed) allEvents.push(parsed);
+  }
+
+  console.log(`KIND 30901: found ${allEvents.length} business units`);
+  return allEvents;
+}
+
 export function getLanaRelays(): string[] {
   return LANA_RELAYS;
 }

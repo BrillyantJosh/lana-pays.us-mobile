@@ -224,6 +224,37 @@ app.get('/api/users/:hexId', (req, res) => {
   res.json({ user });
 });
 
+/**
+ * Get business units where the given hex pubkey is authorized (owner or staff via p tags)
+ */
+app.get('/api/business-units/:hexId', (req, res) => {
+  const { hexId } = req.params;
+
+  // Query units where owner_hex matches OR hexId is in the authorized_hex JSON array
+  const units = db.prepare(`
+    SELECT unit_id, name, owner_hex, authorized_hex, category, category_detail,
+           currency, country, image, logo, status, receiver_city,
+           lanapays_payout_method, updated_at
+    FROM business_units
+    WHERE status = 'active'
+      AND (owner_hex = ? OR authorized_hex LIKE ?)
+    ORDER BY name ASC
+  `).all(hexId, `%${hexId}%`) as any[];
+
+  // Filter the LIKE results to ensure exact hex match in JSON array
+  const filtered = units.filter(u => {
+    if (u.owner_hex === hexId) return true;
+    try {
+      const authList: string[] = JSON.parse(u.authorized_hex || '[]');
+      return authList.includes(hexId);
+    } catch {
+      return false;
+    }
+  });
+
+  res.json({ units: filtered });
+});
+
 // ─── Invoice Image Uploads ────────────────────────────
 
 const uploadsDir = path.resolve(__dirname, '../data/uploads');
