@@ -536,3 +536,160 @@ export async function fetchKind30903(relays?: string[]): Promise<Kind30903Event[
 export function getLanaRelays(): string[] {
   return LANA_RELAYS;
 }
+
+/**
+ * Fetch full KIND 0 profile content for a given hex pubkey
+ */
+export async function fetchKind0Full(hexId: string): Promise<{ content: any; tags: string[][]; created_at: number } | null> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(null), 8000);
+    let resolved = false;
+
+    for (const relayUrl of LANA_RELAYS) {
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(relayUrl);
+      } catch {
+        continue;
+      }
+
+      const subId = `kind0full_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify(['REQ', subId, {
+          kinds: [0],
+          authors: [hexId],
+          limit: 1
+        }]));
+      });
+
+      ws.on('message', (data: Buffer) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg[0] === 'EVENT' && msg[1] === subId && !resolved) {
+            const event = msg[2];
+            if (event.kind === 0) {
+              resolved = true;
+              clearTimeout(timeout);
+              ws.close();
+              try {
+                const content = JSON.parse(event.content);
+                resolve({ content, tags: event.tags || [], created_at: event.created_at });
+              } catch {
+                resolve(null);
+              }
+            }
+          }
+          if (msg[0] === 'EOSE' && !resolved) {
+            ws.close();
+          }
+        } catch {}
+      });
+
+      ws.on('error', () => ws.close());
+    }
+  });
+}
+
+/**
+ * Broadcast a pre-signed Nostr event to relays
+ */
+export async function broadcastEvent(event: NostrEvent, relays?: string[]): Promise<{ success: string[]; failed: string[] }> {
+  const useRelays = relays && relays.length > 0 ? relays : LANA_RELAYS;
+  const success: string[] = [];
+  const failed: string[] = [];
+
+  const broadcastToRelay = (relayUrl: string, timeout = 10000): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const timeoutId = setTimeout(() => {
+        ws.close();
+        resolve(false);
+      }, timeout);
+
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(relayUrl);
+      } catch {
+        clearTimeout(timeoutId);
+        resolve(false);
+        return;
+      }
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify(['EVENT', event]));
+      });
+
+      ws.on('message', (data: Buffer) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg[0] === 'OK') {
+            clearTimeout(timeoutId);
+            ws.close();
+            resolve(msg[2] === true);
+          }
+        } catch {}
+      });
+
+      ws.on('error', () => {
+        clearTimeout(timeoutId);
+        resolve(false);
+      });
+
+      ws.on('close', () => {
+        clearTimeout(timeoutId);
+      });
+    });
+  };
+
+  const results = await Promise.all(
+    useRelays.map(async (relay) => {
+      const ok = await broadcastToRelay(relay);
+      if (ok) success.push(relay);
+      else failed.push(relay);
+    })
+  );
+
+  return { success, failed };
+}
+
+/**
+ * Languages list for KIND 0 lang tag
+ */
+export const SUPPORTED_LANGUAGES = [
+  { code: 'en', name: 'English', nativeName: 'English' },
+  { code: 'en-US', name: 'English (US)', nativeName: 'English (US)' },
+  { code: 'en-GB', name: 'English (UK)', nativeName: 'English (UK)' },
+  { code: 'sl', name: 'Slovenian', nativeName: 'Slovenščina' },
+  { code: 'de', name: 'German', nativeName: 'Deutsch' },
+  { code: 'fr', name: 'French', nativeName: 'Français' },
+  { code: 'es', name: 'Spanish', nativeName: 'Español' },
+  { code: 'es-419', name: 'Spanish (LatAm)', nativeName: 'Español (LatAm)' },
+  { code: 'it', name: 'Italian', nativeName: 'Italiano' },
+  { code: 'pt', name: 'Portuguese', nativeName: 'Português' },
+  { code: 'pt-BR', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)' },
+  { code: 'nl', name: 'Dutch', nativeName: 'Nederlands' },
+  { code: 'hr', name: 'Croatian', nativeName: 'Hrvatski' },
+  { code: 'sr', name: 'Serbian', nativeName: 'Srpski' },
+  { code: 'bs', name: 'Bosnian', nativeName: 'Bosanski' },
+  { code: 'hu', name: 'Hungarian', nativeName: 'Magyar' },
+  { code: 'cs', name: 'Czech', nativeName: 'Čeština' },
+  { code: 'sk', name: 'Slovak', nativeName: 'Slovenčina' },
+  { code: 'pl', name: 'Polish', nativeName: 'Polski' },
+  { code: 'ro', name: 'Romanian', nativeName: 'Română' },
+  { code: 'bg', name: 'Bulgarian', nativeName: 'Български' },
+  { code: 'el', name: 'Greek', nativeName: 'Ελληνικά' },
+  { code: 'tr', name: 'Turkish', nativeName: 'Türkçe' },
+  { code: 'ru', name: 'Russian', nativeName: 'Русский' },
+  { code: 'uk', name: 'Ukrainian', nativeName: 'Українська' },
+  { code: 'ja', name: 'Japanese', nativeName: '日本語' },
+  { code: 'ko', name: 'Korean', nativeName: '한국어' },
+  { code: 'zh', name: 'Chinese', nativeName: '中文' },
+  { code: 'ar', name: 'Arabic', nativeName: 'العربية' },
+  { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी' },
+  { code: 'th', name: 'Thai', nativeName: 'ไทย' },
+  { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt' },
+  { code: 'sv', name: 'Swedish', nativeName: 'Svenska' },
+  { code: 'da', name: 'Danish', nativeName: 'Dansk' },
+  { code: 'fi', name: 'Finnish', nativeName: 'Suomi' },
+  { code: 'no', name: 'Norwegian', nativeName: 'Norsk' },
+];

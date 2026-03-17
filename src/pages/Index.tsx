@@ -5,6 +5,7 @@ import MenuDrawer from "@/components/MenuDrawer";
 import CashTab from "@/components/tabs/CashTab";
 import WalletsTab from "@/components/tabs/WalletsTab";
 import LanaTab from "@/components/tabs/LanaTab";
+import EditProfile from "@/components/EditProfile";
 import { useAuth } from "@/contexts/AuthContext";
 import lanaIcon from "@/assets/lana-icon.png";
 
@@ -33,7 +34,7 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
-type View = "home" | "cash" | "wallets" | "lana";
+type View = "home" | "cash" | "wallets" | "lana" | "profile";
 
 const Index = () => {
   const { session } = useAuth();
@@ -99,10 +100,16 @@ const Index = () => {
     setActiveView("wallets");
   };
 
+  const handleEditProfile = () => {
+    setSelectedWallet(null);
+    setLanaPaymentRequest(null);
+    setActiveView("profile");
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <TopBar onMenuOpen={() => setMenuOpen(true)} />
-      <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onCheckWallet={handleCheckWallet} />
+      <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onCheckWallet={handleCheckWallet} onEditProfile={handleEditProfile} />
 
       <main className="pt-14">
         {/* ─── Home: two big buttons ─── */}
@@ -260,6 +267,9 @@ const Index = () => {
             )}
             {activeView === "lana" && (
               <LanaTab paymentRequest={lanaPaymentRequest} onClearRequest={() => setLanaPaymentRequest(null)} />
+            )}
+            {activeView === "profile" && (
+              <EditProfile />
             )}
           </div>
         )}

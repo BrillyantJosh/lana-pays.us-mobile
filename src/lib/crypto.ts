@@ -77,7 +77,7 @@ function normalizeWif(wif: string): string {
   return wif.replace(/[\s\u200B-\u200D\uFEFF\r\n\t]/g, '').trim();
 }
 
-async function wifToPrivateKey(wif: string): Promise<string> {
+async function wifToPrivateKey(wif: string): Promise<{ privateKeyHex: string; isCompressed: boolean }> {
   try {
     const normalizedWif = normalizeWif(wif);
     const decoded = base58Decode(normalizedWif);
@@ -94,13 +94,14 @@ async function wifToPrivateKey(wif: string): Promise<string> {
       }
     }
 
-    // 0xb0 prefix for LanaCoin
-    if (payload[0] !== 0xb0) {
+    // Accept both: 0xb0 (Dominate/uncompressed, prefix '6') and 0x41 (Staking/compressed, prefix 'T')
+    if (payload[0] !== 0xb0 && payload[0] !== 0x41) {
       throw new Error('Invalid WIF prefix');
     }
 
+    const isCompressed = payload.length === 34 && payload[33] === 0x01;
     const privateKey = payload.slice(1, 33);
-    return bytesToHex(privateKey);
+    return { privateKeyHex: bytesToHex(privateKey), isCompressed };
 
   } catch (error) {
     throw new Error(`Invalid WIF format: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -147,16 +148,22 @@ export function hexToNpub(hexPubKey: string): string {
 
 export async function convertWifToIds(wif: string) {
   try {
-    const privateKeyHex = await wifToPrivateKey(wif);
+    const { privateKeyHex, isCompressed } = await wifToPrivateKey(wif);
 
-    const publicKeyHex = generatePublicKey(privateKeyHex);
+    const uncompressedPubKey = generatePublicKey(privateKeyHex);
+    const compressedPubKey = generateCompressedPublicKey(privateKeyHex);
     const nostrHexId = deriveNostrPublicKey(privateKeyHex);
 
-    const walletId = await generateLanaAddress(publicKeyHex);
+    const walletIdCompressed = await generateLanaAddress(compressedPubKey);
+    const walletIdUncompressed = await generateLanaAddress(uncompressedPubKey);
     const nostrNpubId = hexToNpub(nostrHexId);
+    const walletId = isCompressed ? walletIdCompressed : walletIdUncompressed;
 
     return {
       walletId,
+      walletIdCompressed,
+      walletIdUncompressed,
+      isCompressed,
       nostrHexId,
       nostrNpubId,
       privateKeyHex,

@@ -13,7 +13,7 @@ import multer from 'multer';
 import { getDb, closeDb } from './db/connection.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, type ElectrumServer } from './lib/electrum.js';
-import { fetchKind0Profile } from './lib/nostr.js';
+import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -254,6 +254,55 @@ app.get('/api/business-units/:hexId', (req, res) => {
   });
 
   res.json({ units: filtered });
+});
+
+/**
+ * Fetch full KIND 0 profile for editing
+ */
+app.get('/api/profile-full/:hexId', async (req, res) => {
+  const { hexId } = req.params;
+
+  try {
+    const profile = await fetchKind0Full(hexId);
+    res.json({ profile });
+  } catch (error: any) {
+    console.error(`Full profile fetch failed for ${hexId}:`, error.message);
+    res.json({ profile: null });
+  }
+});
+
+/**
+ * Broadcast a pre-signed Nostr event to relays
+ */
+app.post('/api/broadcast-event', async (req, res) => {
+  const { event } = req.body;
+
+  if (!event || !event.id || !event.sig || !event.pubkey) {
+    return res.status(400).json({ error: 'Missing required event fields (id, sig, pubkey)' });
+  }
+
+  // Get relay list from KIND 38888
+  const sysRow = db.prepare(
+    'SELECT relays FROM kind_38888 ORDER BY id DESC LIMIT 1'
+  ).get() as any;
+
+  const relays = sysRow ? JSON.parse(sysRow.relays || '[]') : undefined;
+
+  try {
+    const result = await broadcastEvent(event, relays);
+    console.log(`Broadcast KIND ${event.kind}: ${result.success.length} ok, ${result.failed.length} failed`);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Broadcast failed:', error.message);
+    res.status(500).json({ error: 'Failed to broadcast event' });
+  }
+});
+
+/**
+ * Languages list for profile editing
+ */
+app.get('/i18n/languages', (_req, res) => {
+  res.json(SUPPORTED_LANGUAGES);
 });
 
 // ─── Invoice Image Uploads ────────────────────────────

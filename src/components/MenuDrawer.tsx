@@ -1,4 +1,4 @@
-import { X, Settings, HelpCircle, LogOut, Shield, Search, Store } from "lucide-react";
+import { X, HelpCircle, LogOut, Search, Store, UserPen } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 
@@ -6,9 +6,10 @@ interface MenuDrawerProps {
   open: boolean;
   onClose: () => void;
   onCheckWallet?: () => void;
+  onEditProfile?: () => void;
 }
 
-const MenuDrawer = ({ open, onClose, onCheckWallet }: MenuDrawerProps) => {
+const MenuDrawer = ({ open, onClose, onCheckWallet, onEditProfile }: MenuDrawerProps) => {
   const { session, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -28,11 +29,15 @@ const MenuDrawer = ({ open, onClose, onCheckWallet }: MenuDrawerProps) => {
     window.open('https://shop.lanapays.us', '_blank');
   };
 
+  const handleEditProfile = () => {
+    onClose();
+    onEditProfile?.();
+  };
+
   const menuItems = [
+    { label: "Edit Profile", icon: UserPen, action: handleEditProfile },
     { label: "Check Wallet", icon: Search, action: handleCheckWallet },
     { label: "Edit Shop", icon: Store, action: handleEditShop },
-    { label: "Settings", icon: Settings, action: () => {} },
-    { label: "Security", icon: Shield, action: () => {} },
     { label: "Help", icon: HelpCircle, action: () => {} },
   ];
 

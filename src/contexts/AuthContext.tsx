@@ -11,6 +11,7 @@ interface UserSession {
   walletId: string;
   nostrHexId: string;
   nostrNpubId: string;
+  privateKeyHex: string;
   profileName?: string;
   profileDisplayName?: string;
   profilePicture?: string;
@@ -163,6 +164,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         walletId: derivedIds.walletId,
         nostrHexId: derivedIds.nostrHexId,
         nostrNpubId: derivedIds.nostrNpubId,
+        privateKeyHex: derivedIds.privateKeyHex,
         profileName,
         profileDisplayName,
         profilePicture,
