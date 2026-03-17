@@ -285,17 +285,27 @@ function parseKind30901Event(event: NostrEvent): Kind30901Event | null {
 
   const unit_id = getTag('unit_id') || getTag('d');
   const name = getTag('name');
-  const owner_hex = getTag('owner_hex') || getTag('owner');
-
-  if (!unit_id || !name || !owner_hex) {
-    const pTags = tags.filter(t => t[0] === 'p').map(t => t[1]);
-    const allTagNames = tags.map(t => t[0]);
-    console.warn(`KIND 30901 missing required tags (unit_id=${!!unit_id}, name=${!!name}, owner_hex=${!!owner_hex}), skipping event ${event.id}. Tags: [${allTagNames.join(',')}], p_tags: [${pTags.map(h => h.slice(0,12)+'...').join(',')}]`);
-    return null;
-  }
 
   // All p tags = authorized personnel (owner + staff)
   const authorized_hex = tags.filter(t => t[0] === 'p').map(t => t[1]);
+
+  // owner_hex tag preferred; fall back to 'owner' tag if it's a valid 64-char hex;
+  // otherwise use the first p tag as the owner
+  let owner_hex = getTag('owner_hex');
+  if (!owner_hex) {
+    const ownerTag = getTag('owner');
+    if (ownerTag && /^[0-9a-f]{64}$/i.test(ownerTag)) {
+      owner_hex = ownerTag;
+    } else if (authorized_hex.length > 0) {
+      owner_hex = authorized_hex[0];
+    }
+  }
+
+  if (!unit_id || !name || !owner_hex) {
+    const allTagNames = tags.map(t => t[0]);
+    console.warn(`KIND 30901 missing required tags (unit_id=${!!unit_id}, name=${!!name}, owner_hex=${!!owner_hex}), skipping event ${event.id}. Tags: [${allTagNames.join(',')}], p_tags: [${authorized_hex.map(h => h.slice(0,12)+'...').join(',')}]`);
+    return null;
+  }
 
   return {
     unit_id,
