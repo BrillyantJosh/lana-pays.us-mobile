@@ -288,7 +288,9 @@ function parseKind30901Event(event: NostrEvent): Kind30901Event | null {
   const owner_hex = getTag('owner_hex');
 
   if (!unit_id || !name || !owner_hex) {
-    console.warn(`KIND 30901 missing required tags (unit_id/name/owner_hex), skipping event ${event.id}`);
+    const pTags = tags.filter(t => t[0] === 'p').map(t => t[1]);
+    const allTagNames = tags.map(t => t[0]);
+    console.warn(`KIND 30901 missing required tags (unit_id=${!!unit_id}, name=${!!name}, owner_hex=${!!owner_hex}), skipping event ${event.id}. Tags: [${allTagNames.join(',')}], p_tags: [${pTags.map(h => h.slice(0,12)+'...').join(',')}]`);
     return null;
   }
 
