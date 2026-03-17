@@ -1,4 +1,5 @@
-import { X, HelpCircle, LogOut, Search, Store, UserPen } from "lucide-react";
+import { useState } from "react";
+import { X, HelpCircle, LogOut, Search, Store, UserPen, Copy, Check } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 
@@ -12,6 +13,7 @@ interface MenuDrawerProps {
 const MenuDrawer = ({ open, onClose, onCheckWallet, onEditProfile }: MenuDrawerProps) => {
   const { session, logout } = useAuth();
   const navigate = useNavigate();
+  const [copied, setCopied] = useState(false);
 
   const handleSignOut = () => {
     logout();
@@ -72,9 +74,25 @@ const MenuDrawer = ({ open, onClose, onCheckWallet, onEditProfile }: MenuDrawerP
             <p className="text-sm font-medium text-foreground truncate">
               {session.profileDisplayName || session.profileName || 'Lana User'}
             </p>
-            <p className="text-xs text-muted-foreground truncate">
-              {session.nostrNpubId.slice(0, 20)}...
-            </p>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(session.nostrHexId).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                });
+              }}
+              className="flex items-center gap-1.5 mt-1 group"
+              title="Copy Nostr Hex ID"
+            >
+              <p className="text-xs text-muted-foreground truncate font-mono">
+                {session.nostrHexId.slice(0, 12)}...{session.nostrHexId.slice(-8)}
+              </p>
+              {copied ? (
+                <Check className="w-3 h-3 text-green-500 shrink-0" />
+              ) : (
+                <Copy className="w-3 h-3 text-muted-foreground group-hover:text-foreground shrink-0 transition-colors" />
+              )}
+            </button>
           </div>
         )}
 
