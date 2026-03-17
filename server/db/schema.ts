@@ -61,6 +61,10 @@ export function initializeSchema(db: Database.Database): void {
       opening_hours_json TEXT,
       content TEXT,
       raw_event TEXT,
+      suspension_status TEXT DEFAULT 'active',
+      suspension_reason TEXT,
+      suspension_until INTEGER,
+      suspension_content TEXT,
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -73,6 +77,17 @@ export function initializeSchema(db: Database.Database): void {
       error TEXT
     );
   `);
+
+  // Migrations: add suspension columns if missing
+  const cols = db.pragma('table_info(business_units)') as any[];
+  const colNames = cols.map((c: any) => c.name);
+  if (!colNames.includes('suspension_status')) {
+    db.exec(`ALTER TABLE business_units ADD COLUMN suspension_status TEXT DEFAULT 'active'`);
+    db.exec(`ALTER TABLE business_units ADD COLUMN suspension_reason TEXT`);
+    db.exec(`ALTER TABLE business_units ADD COLUMN suspension_until INTEGER`);
+    db.exec(`ALTER TABLE business_units ADD COLUMN suspension_content TEXT`);
+    console.log('Migrated: added suspension columns to business_units');
+  }
 
   console.log('Database schema initialized');
 }

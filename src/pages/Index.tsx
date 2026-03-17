@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Banknote, ArrowLeft, Store, MapPin } from "lucide-react";
+import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import MenuDrawer from "@/components/MenuDrawer";
 import CashTab from "@/components/tabs/CashTab";
@@ -21,6 +21,10 @@ interface BusinessUnit {
   status: string;
   receiver_city: string;
   lanapays_payout_method: string;
+  suspension_status: string;
+  suspension_reason: string | null;
+  suspension_until: number | null;
+  suspension_content: string | null;
 }
 
 const CURRENCY_SYMBOL: Record<string, string> = {
@@ -116,22 +120,40 @@ const Index = () => {
                 <span className="text-sm text-muted-foreground">No shops assigned to your account</span>
               </div>
             ) : businessUnits.length === 1 ? (
-              <div className="rounded-2xl bg-primary/5 border-2 border-primary/20 p-4 flex items-center gap-3">
-                {businessUnits[0].image ? (
-                  <img src={businessUnits[0].image} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
-                ) : (
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                    <Store className="w-5 h-5 text-primary" />
+              <div className={`rounded-2xl border-2 p-4 flex flex-col gap-2 ${
+                businessUnits[0].suspension_status === 'suspended'
+                  ? 'bg-destructive/5 border-destructive/20'
+                  : 'bg-primary/5 border-primary/20'
+              }`}>
+                <div className="flex items-center gap-3">
+                  {businessUnits[0].image ? (
+                    <img src={businessUnits[0].image} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                      <Store className="w-5 h-5 text-primary" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{businessUnits[0].name}</p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      {businessUnits[0].receiver_city && <><MapPin className="w-3 h-3" />{businessUnits[0].receiver_city}</>}
+                      {businessUnits[0].receiver_city && businessUnits[0].category && ' · '}
+                      {businessUnits[0].category}
+                    </p>
+                  </div>
+                </div>
+                {businessUnits[0].suspension_status === 'suspended' && (
+                  <div className="flex items-start gap-2 rounded-xl bg-destructive/10 p-3">
+                    <ShieldAlert className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-destructive">Suspended</p>
+                      <p className="text-xs text-destructive/80">{businessUnits[0].suspension_reason || businessUnits[0].suspension_content}</p>
+                      {businessUnits[0].suspension_until && (
+                        <p className="text-xs text-destructive/60 mt-1">Until: {new Date(businessUnits[0].suspension_until * 1000).toLocaleDateString()}</p>
+                      )}
+                    </div>
                   </div>
                 )}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-foreground truncate">{businessUnits[0].name}</p>
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    {businessUnits[0].receiver_city && <><MapPin className="w-3 h-3" />{businessUnits[0].receiver_city}</>}
-                    {businessUnits[0].receiver_city && businessUnits[0].category && ' · '}
-                    {businessUnits[0].category}
-                  </p>
-                </div>
               </div>
             ) : (
               <div className="space-y-2">
@@ -140,31 +162,48 @@ const Index = () => {
                   {businessUnits.map(unit => (
                     <button
                       key={unit.unit_id}
-                      onClick={() => setSelectedUnit(unit)}
-                      className={`rounded-2xl border-2 p-4 flex items-center gap-3 transition-all active:scale-[0.98] ${
-                        selectedUnit?.unit_id === unit.unit_id
-                          ? 'bg-primary/5 border-primary/30 shadow-md'
-                          : 'bg-card border-border hover:border-primary/20'
+                      onClick={() => unit.suspension_status !== 'suspended' && setSelectedUnit(unit)}
+                      disabled={unit.suspension_status === 'suspended'}
+                      className={`rounded-2xl border-2 p-4 flex flex-col gap-2 transition-all active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100 ${
+                        unit.suspension_status === 'suspended'
+                          ? 'bg-destructive/5 border-destructive/20'
+                          : selectedUnit?.unit_id === unit.unit_id
+                            ? 'bg-primary/5 border-primary/30 shadow-md'
+                            : 'bg-card border-border hover:border-primary/20'
                       }`}
                     >
-                      {unit.image ? (
-                        <img src={unit.image} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
-                      ) : (
-                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                          <Store className="w-5 h-5 text-primary" />
+                      <div className="flex items-center gap-3 w-full">
+                        {unit.image ? (
+                          <img src={unit.image} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                            <Store className="w-5 h-5 text-primary" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0 text-left">
+                          <p className="text-sm font-semibold text-foreground truncate">{unit.name}</p>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            {unit.receiver_city && <><MapPin className="w-3 h-3" />{unit.receiver_city}</>}
+                            {unit.receiver_city && unit.category && ' · '}
+                            {unit.category}
+                          </p>
                         </div>
-                      )}
-                      <div className="flex-1 min-w-0 text-left">
-                        <p className="text-sm font-semibold text-foreground truncate">{unit.name}</p>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1">
-                          {unit.receiver_city && <><MapPin className="w-3 h-3" />{unit.receiver_city}</>}
-                          {unit.receiver_city && unit.category && ' · '}
-                          {unit.category}
-                        </p>
+                        {unit.suspension_status !== 'suspended' && selectedUnit?.unit_id === unit.unit_id && (
+                          <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0">
+                            <div className="w-2 h-2 rounded-full bg-white" />
+                          </div>
+                        )}
                       </div>
-                      {selectedUnit?.unit_id === unit.unit_id && (
-                        <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0">
-                          <div className="w-2 h-2 rounded-full bg-white" />
+                      {unit.suspension_status === 'suspended' && (
+                        <div className="flex items-start gap-2 rounded-xl bg-destructive/10 p-3 w-full">
+                          <ShieldAlert className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                          <div className="min-w-0 text-left">
+                            <p className="text-xs font-semibold text-destructive">Suspended</p>
+                            <p className="text-xs text-destructive/80">{unit.suspension_reason || unit.suspension_content}</p>
+                            {unit.suspension_until && (
+                              <p className="text-xs text-destructive/60 mt-1">Until: {new Date(unit.suspension_until * 1000).toLocaleDateString()}</p>
+                            )}
+                          </div>
                         </div>
                       )}
                     </button>
@@ -176,7 +215,7 @@ const Index = () => {
             {/* ─── Payment buttons ─── */}
             <button
               onClick={() => setActiveView("cash")}
-              disabled={businessUnits.length > 1 && !selectedUnit}
+              disabled={(businessUnits.length > 1 && !selectedUnit) || (selectedUnit?.suspension_status === 'suspended') || (businessUnits.length === 1 && businessUnits[0]?.suspension_status === 'suspended')}
               className="flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
             >
               <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
@@ -188,7 +227,7 @@ const Index = () => {
 
             <button
               onClick={() => setActiveView("lana")}
-              disabled={businessUnits.length > 1 && !selectedUnit}
+              disabled={(businessUnits.length > 1 && !selectedUnit) || (selectedUnit?.suspension_status === 'suspended') || (businessUnits.length === 1 && businessUnits[0]?.suspension_status === 'suspended')}
               className="flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
             >
               <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">

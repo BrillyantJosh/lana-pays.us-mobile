@@ -5,7 +5,7 @@
 
 import Database from 'better-sqlite3';
 import { bech32 } from 'bech32';
-import { fetchKind38888, fetchKind30901, fetchKind0Profile, type Kind38888Data, type Kind30901Event } from './lib/nostr.js';
+import { fetchKind38888, fetchKind30901, fetchKind30903, fetchKind0Profile, type Kind38888Data, type Kind30901Event } from './lib/nostr.js';
 
 const HEARTBEAT_INTERVAL = 1 * 60 * 1000; // 1 minute
 
@@ -119,6 +119,38 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
 
       insertMany(businessUnits);
       console.log(`KIND 30901: upserted ${businessUnits.length} business units`);
+    }
+
+    // Fetch KIND 30903 suspensions and apply to business units
+    const suspensions = await fetchKind30903(systemParams.relays);
+    const now = Math.floor(Date.now() / 1000);
+
+    // Reset all suspension_status to 'active' first, then apply current suspensions
+    db.prepare(`UPDATE business_units SET suspension_status = 'active', suspension_reason = NULL, suspension_until = NULL, suspension_content = NULL`).run();
+
+    for (const s of suspensions) {
+      // Only apply if the unit exists in our DB
+      const unit = db.prepare('SELECT unit_id FROM business_units WHERE unit_id = ?').get(s.unit_id) as any;
+      if (!unit) continue;
+
+      let effectiveStatus = s.status;
+      if (s.status === 'suspended' && s.active_until && s.active_until < now) {
+        // Suspension expired — unit is active again
+        effectiveStatus = 'active';
+      }
+
+      if (effectiveStatus === 'suspended') {
+        db.prepare(`
+          UPDATE business_units SET
+            suspension_status = 'suspended',
+            suspension_reason = ?,
+            suspension_until = ?,
+            suspension_content = ?
+          WHERE unit_id = ?
+        `).run(s.reason, s.active_until || null, s.content, s.unit_id);
+
+        console.log(`KIND 30903: suspended unit ${s.unit_id.slice(0, 12)}... reason: ${s.reason.slice(0, 50)}`);
+      }
     }
 
     // Discover and register new users from business unit p tags

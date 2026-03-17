@@ -234,7 +234,8 @@ app.get('/api/business-units/:hexId', (req, res) => {
   const units = db.prepare(`
     SELECT unit_id, name, owner_hex, authorized_hex, category, category_detail,
            currency, country, image, logo, status, receiver_city,
-           lanapays_payout_method, updated_at
+           lanapays_payout_method, suspension_status, suspension_reason,
+           suspension_until, suspension_content, updated_at
     FROM business_units
     WHERE status = 'active'
       AND (owner_hex = ? OR authorized_hex LIKE ?)

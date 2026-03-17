@@ -411,6 +411,116 @@ export async function fetchKind30901(sinceTimestamp?: number, relays?: string[])
   return allEvents;
 }
 
+/**
+ * KIND 30903 — Unit Suspension events
+ */
+export interface Kind30903Event {
+  unit_id: string;
+  event_id: string;
+  pubkey: string;
+  created_at: number;
+  status: string;        // "suspended" or "active"
+  reason: string;
+  content: string;
+  active_until?: number; // unix timestamp, undefined = indefinite
+}
+
+function parseKind30903Event(event: NostrEvent): Kind30903Event | null {
+  const tags = event.tags;
+  const getTag = (name: string) => tags.find(t => t[0] === name)?.[1];
+
+  const unit_id = getTag('unit_id') || getTag('d');
+  const status = getTag('status');
+
+  if (!unit_id || !status) return null;
+
+  const activeUntilStr = getTag('active_until');
+
+  return {
+    unit_id,
+    event_id: event.id,
+    pubkey: event.pubkey,
+    created_at: event.created_at,
+    status,
+    reason: getTag('reason') || '',
+    content: event.content || '',
+    active_until: activeUntilStr ? parseInt(activeUntilStr) : undefined,
+  };
+}
+
+export async function fetchKind30903(relays?: string[]): Promise<Kind30903Event[]> {
+  const useRelays = relays && relays.length > 0 ? relays : LANA_RELAYS;
+  console.log(`Fetching KIND 30903 from ${useRelays.length} relays...`);
+
+  const fetchFromRelayKind30903 = (relayUrl: string, timeout = 15000): Promise<NostrEvent[]> => {
+    return new Promise((resolve) => {
+      const events: NostrEvent[] = [];
+      const timeoutId = setTimeout(() => {
+        ws.close();
+        resolve(events);
+      }, timeout);
+
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(relayUrl);
+      } catch {
+        clearTimeout(timeoutId);
+        resolve([]);
+        return;
+      }
+
+      const subId = `kind30903_${Date.now()}`;
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify(['REQ', subId, { kinds: [30903] }]));
+      });
+
+      ws.on('message', (data: Buffer) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg[0] === 'EVENT' && msg[1] === subId) {
+            events.push(msg[2] as NostrEvent);
+          }
+          if (msg[0] === 'EOSE') {
+            clearTimeout(timeoutId);
+            ws.close();
+            resolve(events);
+          }
+        } catch {}
+      });
+
+      ws.on('error', () => { clearTimeout(timeoutId); resolve(events); });
+      ws.on('close', () => { clearTimeout(timeoutId); });
+    });
+  };
+
+  const results = await Promise.all(
+    useRelays.map(relay => fetchFromRelayKind30903(relay))
+  );
+
+  // Deduplicate by unit_id, keep newest
+  const byUnitId = new Map<string, NostrEvent>();
+  for (const relayEvents of results) {
+    for (const event of relayEvents) {
+      const dTag = event.tags.find(t => t[0] === 'd')?.[1];
+      if (!dTag) continue;
+      const existing = byUnitId.get(dTag);
+      if (!existing || event.created_at > existing.created_at) {
+        byUnitId.set(dTag, event);
+      }
+    }
+  }
+
+  const parsed: Kind30903Event[] = [];
+  for (const event of byUnitId.values()) {
+    const p = parseKind30903Event(event);
+    if (p) parsed.push(p);
+  }
+
+  console.log(`KIND 30903: found ${parsed.length} suspension events`);
+  return parsed;
+}
+
 export function getLanaRelays(): string[] {
   return LANA_RELAYS;
 }
