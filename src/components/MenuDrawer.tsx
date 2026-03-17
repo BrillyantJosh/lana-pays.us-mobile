@@ -1,4 +1,4 @@
-import { X, Settings, HelpCircle, LogOut, Shield, Search } from "lucide-react";
+import { X, Settings, HelpCircle, LogOut, Shield, Search, Store } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 
@@ -23,8 +23,14 @@ const MenuDrawer = ({ open, onClose, onCheckWallet }: MenuDrawerProps) => {
     onCheckWallet?.();
   };
 
+  const handleEditShop = () => {
+    onClose();
+    window.open('https://shop.lanapays.us', '_blank');
+  };
+
   const menuItems = [
     { label: "Check Wallet", icon: Search, action: handleCheckWallet },
+    { label: "Edit Shop", icon: Store, action: handleEditShop },
     { label: "Settings", icon: Settings, action: () => {} },
     { label: "Security", icon: Shield, action: () => {} },
     { label: "Help", icon: HelpCircle, action: () => {} },
