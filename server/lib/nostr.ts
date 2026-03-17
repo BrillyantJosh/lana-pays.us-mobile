@@ -328,8 +328,9 @@ function parseKind30901Event(event: NostrEvent): Kind30901Event | null {
   };
 }
 
-export async function fetchKind30901(sinceTimestamp?: number): Promise<Kind30901Event[]> {
-  console.log(`Fetching KIND 30901 from relays${sinceTimestamp ? ` (since ${sinceTimestamp})` : ' (full history)'}...`);
+export async function fetchKind30901(sinceTimestamp?: number, relays?: string[]): Promise<Kind30901Event[]> {
+  const useRelays = relays && relays.length > 0 ? relays : LANA_RELAYS;
+  console.log(`Fetching KIND 30901 from ${useRelays.length} relays${sinceTimestamp ? ` (since ${sinceTimestamp})` : ' (full history)'}...`);
 
   const allEvents: Kind30901Event[] = [];
 
@@ -385,7 +386,7 @@ export async function fetchKind30901(sinceTimestamp?: number): Promise<Kind30901
   };
 
   const results = await Promise.all(
-    LANA_RELAYS.map(relay => fetchFromRelayKind30901(relay))
+    useRelays.map(relay => fetchFromRelayKind30901(relay))
   );
 
   // Deduplicate by unit_id (d tag), keep newest event per unit_id

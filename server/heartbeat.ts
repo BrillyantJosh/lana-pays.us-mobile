@@ -59,7 +59,7 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
     ).get() as any;
     const sinceTimestamp = lastUnit?.max_ts ? lastUnit.max_ts + 1 : undefined;
 
-    const businessUnits = await fetchKind30901(sinceTimestamp);
+    const businessUnits = await fetchKind30901(sinceTimestamp, systemParams.relays);
 
     if (businessUnits.length > 0) {
       const upsert = db.prepare(`
