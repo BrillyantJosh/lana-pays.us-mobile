@@ -43,7 +43,7 @@ const Index = () => {
   const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | null>(null);
   const [loadingUnits, setLoadingUnits] = useState(true);
 
-  // Fetch business units for logged-in user
+  // Fetch business units for logged-in user (initial + poll every 30s)
   useEffect(() => {
     if (!session?.nostrHexId) {
       setBusinessUnits([]);
@@ -55,10 +55,11 @@ const Index = () => {
       try {
         const res = await fetch(`/api/business-units/${session.nostrHexId}`);
         const data = await res.json();
-        setBusinessUnits(data.units || []);
-        // Auto-select first unit if only one
-        if (data.units?.length === 1) {
-          setSelectedUnit(data.units[0]);
+        const units = data.units || [];
+        setBusinessUnits(units);
+        // Auto-select if only one and nothing selected yet
+        if (units.length === 1) {
+          setSelectedUnit(prev => prev || units[0]);
         }
       } catch (e) {
         console.warn('Failed to fetch business units:', e);
@@ -68,6 +69,8 @@ const Index = () => {
     };
 
     fetchUnits();
+    const interval = setInterval(fetchUnits, 30_000);
+    return () => clearInterval(interval);
   }, [session?.nostrHexId]);
 
   const handlePayWithCash = (walletId: string) => {

@@ -58,15 +58,8 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
 
     console.log(`KIND 38888: split=${systemParams.split}, EUR=${systemParams.exchange_rates.EUR}, USD=${systemParams.exchange_rates.USD}, GBP=${systemParams.exchange_rates.GBP}`);
 
-    // Fetch KIND 30901 Business Units
-    // On first run (no records in business_units), fetch full history
-    // On subsequent runs, fetch only newer events
-    const lastUnit = db.prepare(
-      'SELECT MAX(created_at) as max_ts FROM business_units'
-    ).get() as any;
-    const sinceTimestamp = lastUnit?.max_ts ? lastUnit.max_ts + 1 : undefined;
-
-    const businessUnits = await fetchKind30901(sinceTimestamp, systemParams.relays);
+    // Fetch KIND 30901 Business Units (always full — NIP-33 replaceable, small result set)
+    const businessUnits = await fetchKind30901(undefined, systemParams.relays);
 
     if (businessUnits.length > 0) {
       const upsert = db.prepare(`
