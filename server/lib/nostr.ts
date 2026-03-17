@@ -285,7 +285,7 @@ function parseKind30901Event(event: NostrEvent): Kind30901Event | null {
 
   const unit_id = getTag('unit_id') || getTag('d');
   const name = getTag('name');
-  const owner_hex = getTag('owner_hex');
+  const owner_hex = getTag('owner_hex') || getTag('owner');
 
   if (!unit_id || !name || !owner_hex) {
     const pTags = tags.filter(t => t[0] === 'p').map(t => t[1]);
