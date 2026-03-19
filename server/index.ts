@@ -308,10 +308,12 @@ app.get('/i18n/languages', (_req, res) => {
 // ─── Brain API Proxy ──────────────────────────────────
 
 const BRAIN_API_URL = process.env.BRAIN_API_URL || '';
+const BRAIN_PURCHASE_KEY = process.env.BRAIN_PURCHASE_KEY || '';
 
 /**
  * POST /api/brain/purchase
  * Proxy purchase requests to Brain orchestration service
+ * Sends BRAIN_PURCHASE_KEY as Bearer token for authentication
  */
 app.post('/api/brain/purchase', async (req, res) => {
   if (!BRAIN_API_URL) {
@@ -319,9 +321,14 @@ app.post('/api/brain/purchase', async (req, res) => {
   }
 
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (BRAIN_PURCHASE_KEY) {
+      headers['Authorization'] = `Bearer ${BRAIN_PURCHASE_KEY}`;
+    }
+
     const response = await fetch(`${BRAIN_API_URL}/api/purchase`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(req.body),
     });
 
