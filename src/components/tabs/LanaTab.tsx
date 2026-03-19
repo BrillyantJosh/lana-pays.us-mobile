@@ -44,6 +44,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
 
   // Processing/paid state
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
 
   // Cross-tab entry
   useEffect(() => {
@@ -149,26 +150,37 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
       // Sufficient balance — proceed to processing
       setIsCheckingBalance(false);
       setStep("processing");
+      setPurchaseError(null);
 
-      // Mock transaction: 2s delay
-      const mockHash = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-        .map(b => b.toString(16).padStart(2, '0')).join('');
+      try {
+        const purchaseRes = await fetch('/api/brain/purchase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            unit_id: (window as any).__selectedUnitId || '',
+            payment_type: 'lana',
+            customer_hex: ids.nostrHexId,
+            customer_wallet: ids.walletId,
+            amount: parseFloat(amount.replace(',', '.')),
+            currency,
+            invoice_number: invoiceNumber.trim(),
+          }),
+        });
 
-      console.log('$Lana payment (mock transaction):', {
-        invoiceNumber: invoiceNumber.trim(),
-        fiatAmount: parseFloat(amount.replace(',', '.')),
-        currency,
-        lanaAmount,
-        exchangeRate,
-        customerWallet: ids.walletId,
-        customerBalance: walletLana,
-        recipientWallet: 'MOCK_MERCHANT_WALLET',
-        txHash: mockHash,
-      });
+        const brainData = await purchaseRes.json();
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      setTxHash(mockHash);
-      setStep("paid");
+        if (!purchaseRes.ok || !brainData.success) {
+          setPurchaseError(brainData.error || 'Purchase processing failed');
+          setStep("display");
+          return;
+        }
+
+        setTxHash(brainData.data.transaction_id);
+        setStep("paid");
+      } catch (err: any) {
+        setPurchaseError('Network error. Please check connection and try again.');
+        setStep("display");
+      }
 
     } catch (err) {
       setScanError(err instanceof Error ? err.message : 'Invalid WIF Private Key.');
@@ -189,6 +201,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
     setCustomerBalance(null);
     setIsFrozen(false);
     setTxHash(null);
+    setPurchaseError(null);
     onClearRequest?.();
   };
 
@@ -332,6 +345,24 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
           </div>
         )}
 
+        {/* Purchase error from Brain */}
+        {purchaseError && !isCheckingBalance && !isFrozen && !scanError && (
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-destructive">{purchaseError}</p>
+              </div>
+            </div>
+            <Button
+              onClick={() => { setPurchaseError(null); setWifScannerOpen(true); }}
+              className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              Try Again
+            </Button>
+          </div>
+        )}
+
         {/* Scan error / insufficient balance */}
         {scanError && !isCheckingBalance && !isFrozen && (
           <div className="space-y-4">
@@ -351,7 +382,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
         )}
 
         {/* Prompt to scan — when idle */}
-        {!scanError && !isCheckingBalance && !isFrozen && (
+        {!scanError && !purchaseError && !isCheckingBalance && !isFrozen && (
           <div className="flex flex-col items-center gap-4">
             <p className="text-sm text-muted-foreground text-center">
               Ask the customer to show their WIF Private Key QR code

@@ -305,6 +305,34 @@ app.get('/i18n/languages', (_req, res) => {
   res.json(SUPPORTED_LANGUAGES);
 });
 
+// ─── Brain API Proxy ──────────────────────────────────
+
+const BRAIN_API_URL = process.env.BRAIN_API_URL || '';
+
+/**
+ * POST /api/brain/purchase
+ * Proxy purchase requests to Brain orchestration service
+ */
+app.post('/api/brain/purchase', async (req, res) => {
+  if (!BRAIN_API_URL) {
+    return res.status(503).json({ success: false, error: 'Brain service not configured' });
+  }
+
+  try {
+    const response = await fetch(`${BRAIN_API_URL}/api/purchase`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body),
+    });
+
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error: any) {
+    console.error('Brain API proxy error:', error.message);
+    res.status(502).json({ success: false, error: 'Failed to reach Brain service' });
+  }
+});
+
 // ─── Invoice Image Uploads ────────────────────────────
 
 const uploadsDir = path.resolve(__dirname, '../data/uploads');

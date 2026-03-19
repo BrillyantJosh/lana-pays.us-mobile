@@ -48,6 +48,11 @@ const Index = () => {
   const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | null>(null);
   const [loadingUnits, setLoadingUnits] = useState(true);
 
+  // Sync selected unit ID to window for payment tabs to access
+  useEffect(() => {
+    (window as any).__selectedUnitId = selectedUnit?.unit_id || '';
+  }, [selectedUnit]);
+
   // Fetch business units for logged-in user (initial + poll every 30s)
   useEffect(() => {
     if (!session?.nostrHexId) {

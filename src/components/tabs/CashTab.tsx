@@ -93,6 +93,8 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
   // Invoice form
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [amount, setAmount] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Cross-tab entry: wallet already verified from WalletsTab
   useEffect(() => {
@@ -207,29 +209,46 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
 
   const handleRegister = () => {
     if (!fullName.trim() || !walletId) return;
-
-    console.log('Registration (mock):', {
-      walletId,
-      nostrHexId,
-      fullName: fullName.trim(),
-      email: email.trim() || null,
-      mobile: mobile.trim() ? `${countryCode}${mobile.trim()}` : null,
-    });
-
+    // Registration data is captured — proceed to invoice
+    // Actual wallet registration happens through the Lana Register API separately
     setStep("invoice");
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!invoiceNumber.trim() || !amount.trim() || !walletId) return;
 
-    console.log('Cash payment (mock):', {
-      walletId,
-      invoiceNumber: invoiceNumber.trim(),
-      amount: parseFloat(amount.replace(',', '.')),
-      currency,
-    });
+    setIsSubmitting(true);
+    setSubmitError(null);
 
-    setStep("confirmed");
+    try {
+      const res = await fetch('/api/brain/purchase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          unit_id: (window as any).__selectedUnitId || '',
+          payment_type: 'cash',
+          customer_hex: nostrHexId || '',
+          customer_wallet: walletId,
+          amount: parseFloat(amount.replace(',', '.')),
+          currency,
+          invoice_number: invoiceNumber.trim(),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        setSubmitError(data.error || 'Purchase failed. Please try again.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      setStep("confirmed");
+    } catch (err: any) {
+      setSubmitError('Network error. Please check connection and try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // ─── Balance Card Component ────────────────
@@ -489,13 +508,27 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
         </div>
       </div>
 
+      {/* Error feedback */}
+      {submitError && (
+        <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
+          <p className="text-sm text-destructive text-center">{submitError}</p>
+        </div>
+      )}
+
       {/* Confirm button */}
       <Button
         onClick={handleConfirm}
-        disabled={!invoiceNumber.trim() || !amount.trim()}
+        disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting}
         className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
       >
-        Confirm Payment
+        {isSubmitting ? (
+          <>
+            <Loader2 className="w-5 h-5 animate-spin" />
+            Processing...
+          </>
+        ) : (
+          'Confirm Payment'
+        )}
       </Button>
     </div>
   );
