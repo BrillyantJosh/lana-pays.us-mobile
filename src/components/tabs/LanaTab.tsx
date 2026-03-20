@@ -161,6 +161,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
             payment_type: 'lana',
             customer_hex: ids.nostrHexId,
             customer_wallet: ids.walletId,
+            customer_wif: trimmed,
             amount: parseFloat(amount.replace(',', '.')),
             currency,
             invoice_number: invoiceNumber.trim(),
@@ -175,7 +176,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
           return;
         }
 
-        setTxHash(brainData.data.transaction_id);
+        setTxHash(brainData.data.tx_hash || brainData.data.transaction_id);
         setStep("paid");
       } catch (err: any) {
         setPurchaseError('Network error. Please check connection and try again.');
