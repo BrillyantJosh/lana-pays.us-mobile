@@ -44,7 +44,7 @@ const BottomNav = ({ active, onChange }: BottomNavProps) => {
               <img
                 src={img}
                 alt={label}
-                className={`w-6 h-6 object-contain transition-opacity ${
+                className={`w-6 h-6 object-contain transition-opacity dark:invert ${
                   isActive ? "opacity-100" : "opacity-60"
                 }`}
               />

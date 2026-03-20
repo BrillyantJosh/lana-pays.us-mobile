@@ -28,7 +28,7 @@ const Login = () => {
       <div className="flex flex-col items-center gap-8 max-w-sm w-full">
         <div className="flex flex-col items-center gap-4">
           <div className="w-20 h-20 rounded-2xl bg-secondary flex items-center justify-center">
-            <img src={lanaIconGreen} alt="Lana" className="w-12 h-12 object-contain" />
+            <img src={lanaIconGreen} alt="Lana" className="w-12 h-12 object-contain dark:brightness-125" />
           </div>
           <div className="text-center space-y-2">
             <h1 className="font-display text-3xl font-bold text-foreground">Lana Pays.Us</h1>

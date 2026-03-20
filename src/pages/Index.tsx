@@ -307,7 +307,7 @@ const Index = () => {
               className="flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
             >
               <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
-                <img src={lanaIcon} alt="Lana" className="w-11 h-11 object-contain" />
+                <img src={lanaIcon} alt="Lana" className="w-11 h-11 object-contain dark:invert" />
               </div>
               <span className="text-3xl font-bold text-foreground">Pay with $Lana</span>
               <span className="text-base text-muted-foreground">Lana coin payment</span>

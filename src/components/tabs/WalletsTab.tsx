@@ -172,7 +172,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
 
             {/* LANA amount - very large */}
             <div className="flex items-center justify-center gap-3">
-              <img src={lanaIcon} alt="LANA" className="w-10 h-10 object-contain" />
+              <img src={lanaIcon} alt="LANA" className="w-10 h-10 object-contain dark:invert" />
               <span className="text-5xl sm:text-6xl font-extrabold text-foreground leading-none">
                 {balance.lana.toLocaleString()}
               </span>
@@ -221,7 +221,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
                 onClick={() => onPayWithLana?.(balance.address)}
                 className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
               >
-                <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain" />
+                <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain dark:invert" />
                 Pay with $Lanas
               </Button>
             )}

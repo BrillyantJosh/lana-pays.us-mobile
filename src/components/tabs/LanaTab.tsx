@@ -218,7 +218,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
       <div className="flex flex-col gap-5 px-6 py-4">
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0">
-            <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain" />
+            <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain dark:invert" />
           </div>
           <div>
             <h2 className="font-display text-xl font-bold text-foreground">$Lana Payment</h2>
@@ -309,7 +309,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
           </p>
 
           <div className="flex items-center gap-3 py-3">
-            <img src={lanaIcon} alt="Lana" className="w-10 h-10 object-contain" />
+            <img src={lanaIcon} alt="Lana" className="w-10 h-10 object-contain dark:invert" />
             <span className="text-5xl font-black text-primary tracking-tight">
               {formatLana(lanaAmount)}
             </span>
@@ -405,7 +405,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
               onClick={() => setWifScannerOpen(true)}
               className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
             >
-              <img src={lanaIcon} alt="Lana" className="w-5 h-5 object-contain" />
+              <img src={lanaIcon} alt="Lana" className="w-5 h-5 object-contain dark:invert" />
               Scan Customer WIF
             </Button>
           </div>
@@ -423,7 +423,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
               {currencySymbol}{parseFloat(amount.replace(',', '.')).toFixed(2)}
             </span>
             <div className="flex items-center gap-1.5">
-              <img src={lanaIcon} alt="Lana" className="w-5 h-5 object-contain" />
+              <img src={lanaIcon} alt="Lana" className="w-5 h-5 object-contain dark:invert" />
               <span className="text-lg font-bold text-primary">
                 {formatLana(lanaAmount)} LANA
               </span>
