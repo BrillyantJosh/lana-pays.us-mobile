@@ -311,7 +311,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            1 LANA = {currencySymbol}{exchangeRate.toFixed(6)}
+            1 LANA = {currencySymbol}{parseFloat(exchangeRate.toFixed(8))}
           </p>
         </div>
 
@@ -468,7 +468,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
         <div className="flex justify-between items-baseline">
           <span className="text-sm text-muted-foreground">Rate</span>
           <span className="text-sm text-foreground">
-            1 LANA = {currencySymbol}{exchangeRate.toFixed(6)}
+            1 LANA = {currencySymbol}{parseFloat(exchangeRate.toFixed(8))}
           </span>
         </div>
         <div className="pt-2 border-t border-border space-y-1">
@@ -477,8 +477,19 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
         </div>
         {txHash && (
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">Transaction ID</p>
-            <p className="text-xs font-mono text-foreground break-all">{txHash}</p>
+            <p className="text-xs text-muted-foreground">Blockchain TX</p>
+            {txHash.length === 64 ? (
+              <a
+                href={`https://chainz.cryptoid.info/lana/tx.dws?${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-mono text-primary underline break-all"
+              >
+                {txHash}
+              </a>
+            ) : (
+              <p className="text-xs font-mono text-foreground break-all">{txHash}</p>
+            )}
           </div>
         )}
       </div>
