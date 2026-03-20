@@ -297,7 +297,7 @@ const Index = () => {
               <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
                 <Banknote className="w-11 h-11 text-primary" />
               </div>
-              <span className="text-3xl font-bold text-foreground">Pay with {currencySymbol}</span>
+              <span className="text-3xl font-bold text-foreground">Pay with {CURRENCY_SYMBOL[effectiveUnit?.currency || ''] || currencySymbol}</span>
               <span className="text-base text-muted-foreground">Cash payment</span>
             </button>
 
@@ -332,10 +332,10 @@ const Index = () => {
               <WalletsTab onPayWithCash={handlePayWithCash} onPayWithLana={handlePayWithLana} />
             )}
             {activeView === "cash" && (
-              <CashTab selectedWallet={selectedWallet} onClearWallet={() => setSelectedWallet(null)} />
+              <CashTab selectedWallet={selectedWallet} onClearWallet={() => setSelectedWallet(null)} unitCurrency={effectiveUnit?.currency} />
             )}
             {activeView === "lana" && (
-              <LanaTab paymentRequest={lanaPaymentRequest} onClearRequest={() => setLanaPaymentRequest(null)} />
+              <LanaTab paymentRequest={lanaPaymentRequest} onClearRequest={() => setLanaPaymentRequest(null)} unitCurrency={effectiveUnit?.currency} />
             )}
             {activeView === "profile" && (
               <EditProfile />

@@ -23,13 +23,14 @@ function formatLana(amount: number): string {
 interface LanaTabProps {
   paymentRequest?: { walletAddress: string; invoiceNumber?: string; amount?: number } | null;
   onClearRequest?: () => void;
+  unitCurrency?: string;
 }
 
 type Step = "entry" | "display" | "processing" | "paid";
 
-const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
+const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency }: LanaTabProps) => {
   const { session } = useAuth();
-  const currency = session?.currency || 'GBP';
+  const currency = unitCurrency || session?.currency || 'GBP';
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
 
   const [step, setStep] = useState<Step>("entry");

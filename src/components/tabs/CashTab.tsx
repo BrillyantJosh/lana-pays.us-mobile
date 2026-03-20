@@ -61,13 +61,14 @@ interface BalanceResult {
 interface CashTabProps {
   selectedWallet?: string | null;
   onClearWallet?: () => void;
+  unitCurrency?: string;
 }
 
 type Step = "scan" | "register" | "invoice" | "confirmed";
 
-const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
+const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) => {
   const { session } = useAuth();
-  const currency = session?.currency || 'GBP';
+  const currency = unitCurrency || session?.currency || 'GBP';
   const CurrencyIcon = currencyIcons[currency] || PoundSterling;
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
 
