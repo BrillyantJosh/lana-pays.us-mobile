@@ -14,6 +14,12 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
+/** Format LANA amount: show up to 8 decimals, only significant digits */
+function formatLana(amount: number): string {
+  if (Number.isInteger(amount)) return amount.toLocaleString();
+  return parseFloat(amount.toFixed(8)).toLocaleString(undefined, { maximumFractionDigits: 8 });
+}
+
 interface LanaTabProps {
   paymentRequest?: { walletAddress: string; invoiceNumber?: string; amount?: number } | null;
   onClearRequest?: () => void;
@@ -73,7 +79,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
         return;
       }
       setExchangeRate(rate);
-      const lana = Math.round(fiatAmount / rate);
+      const lana = parseFloat((fiatAmount / rate).toFixed(8));
       setLanaAmount(lana);
       setStep("display");
       setWifScannerOpen(true);
@@ -142,7 +148,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
       setCustomerBalance(walletLana);
 
       if (walletLana < lanaAmount) {
-        setScanError(`Insufficient balance. Wallet has ${walletLana.toLocaleString()} LANA but ${lanaAmount.toLocaleString()} LANA is required.`);
+        setScanError(`Insufficient balance. Wallet has ${walletLana.toLocaleString()} LANA but ${formatLana(lanaAmount)} LANA is required.`);
         setIsCheckingBalance(false);
         return;
       }
@@ -305,7 +311,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
           <div className="flex items-center gap-3 py-3">
             <img src={lanaIcon} alt="Lana" className="w-10 h-10 object-contain" />
             <span className="text-5xl font-black text-primary tracking-tight">
-              {lanaAmount.toLocaleString()}
+              {formatLana(lanaAmount)}
             </span>
             <span className="text-2xl font-bold text-primary/70">LANA</span>
           </div>
@@ -419,7 +425,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
             <div className="flex items-center gap-1.5">
               <img src={lanaIcon} alt="Lana" className="w-5 h-5 object-contain" />
               <span className="text-lg font-bold text-primary">
-                {lanaAmount.toLocaleString()} LANA
+                {formatLana(lanaAmount)} LANA
               </span>
             </div>
           </div>
@@ -435,7 +441,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
         <Loader2 className="w-14 h-14 animate-spin text-primary" />
         <h2 className="text-xl font-bold text-foreground">Processing Payment</h2>
         <p className="text-sm text-muted-foreground text-center">
-          Sending {lanaAmount.toLocaleString()} LANA...
+          Sending {formatLana(lanaAmount)} LANA...
         </p>
       </div>
     );
@@ -462,7 +468,7 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
         <div className="flex justify-between items-baseline">
           <span className="text-sm text-muted-foreground">LANA</span>
           <span className="text-base font-bold text-primary">
-            {lanaAmount.toLocaleString()} LANA
+            {formatLana(lanaAmount)} LANA
           </span>
         </div>
         <div className="flex justify-between items-baseline">
