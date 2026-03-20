@@ -47,18 +47,21 @@ const Index = () => {
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | null>(null);
   const [loadingUnits, setLoadingUnits] = useState(true);
-  const [maxTransaction, setMaxTransaction] = useState<{
+  const [maxTransactions, setMaxTransactions] = useState<Record<string, {
     max_amount: number | null;
     source: string;
     merchant_limit: number | null;
     fund_limit: number | null;
-  } | null>(null);
+  }>>({});
 
   // Sync selected unit ID to window for payment tabs to access
+  const effectiveUnit = selectedUnit || (businessUnits.length === 1 ? businessUnits[0] : null);
+  const selectedMaxTx = effectiveUnit ? maxTransactions[effectiveUnit.unit_id] : null;
+
   useEffect(() => {
-    (window as any).__selectedUnitId = selectedUnit?.unit_id || '';
-    (window as any).__maxTransactionAmount = maxTransaction?.max_amount ?? null;
-  }, [selectedUnit, maxTransaction]);
+    (window as any).__selectedUnitId = effectiveUnit?.unit_id || '';
+    (window as any).__maxTransactionAmount = selectedMaxTx?.max_amount ?? null;
+  }, [effectiveUnit, selectedMaxTx]);
 
   // Fetch business units for logged-in user (initial + poll every 30s)
   useEffect(() => {
@@ -90,31 +93,37 @@ const Index = () => {
     return () => clearInterval(interval);
   }, [session?.nostrHexId]);
 
-  // Fetch max transaction limit when unit changes
+  // Fetch max transaction limits for ALL business units
   useEffect(() => {
-    const effectiveUnit = selectedUnit || (businessUnits.length === 1 ? businessUnits[0] : null);
-    if (!effectiveUnit) {
-      setMaxTransaction(null);
+    if (businessUnits.length === 0) {
+      setMaxTransactions({});
       return;
     }
 
-    const fetchMaxTx = async () => {
-      try {
-        const currency = effectiveUnit.currency || session?.currency || 'EUR';
-        const res = await fetch(`/api/max-transaction?unit_id=${encodeURIComponent(effectiveUnit.unit_id)}&currency=${currency}`);
-        if (res.ok) {
-          const data = await res.json();
-          setMaxTransaction(data);
-        }
-      } catch (e) {
-        console.warn('Failed to fetch max transaction:', e);
-      }
+    const fetchAllMaxTx = async () => {
+      const results: typeof maxTransactions = {};
+      await Promise.all(
+        businessUnits
+          .filter(u => u.suspension_status !== 'suspended')
+          .map(async (unit) => {
+            try {
+              const currency = unit.currency || session?.currency || 'EUR';
+              const res = await fetch(`/api/max-transaction?unit_id=${encodeURIComponent(unit.unit_id)}&currency=${currency}`);
+              if (res.ok) {
+                results[unit.unit_id] = await res.json();
+              }
+            } catch (e) {
+              console.warn(`Failed to fetch max transaction for ${unit.unit_id}:`, e);
+            }
+          })
+      );
+      setMaxTransactions(results);
     };
 
-    fetchMaxTx();
-    const interval = setInterval(fetchMaxTx, 60_000); // refresh every minute
+    fetchAllMaxTx();
+    const interval = setInterval(fetchAllMaxTx, 60_000);
     return () => clearInterval(interval);
-  }, [selectedUnit, businessUnits, session?.currency]);
+  }, [businessUnits, session?.currency]);
 
   const handlePayWithCash = (walletId: string) => {
     setSelectedWallet(walletId);
@@ -185,6 +194,17 @@ const Index = () => {
                       {businessUnits[0].receiver_city && businessUnits[0].category && ' · '}
                       {businessUnits[0].category}
                     </p>
+                    {(() => {
+                      const tx = maxTransactions[businessUnits[0].unit_id];
+                      if (!tx || tx.max_amount === null || tx.max_amount === undefined) return null;
+                      const sym = CURRENCY_SYMBOL[businessUnits[0].currency] || currencySymbol;
+                      return (
+                        <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mt-0.5 flex items-center gap-1">
+                          <Info className="w-3 h-3" />
+                          Max: {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      );
+                    })()}
                   </div>
                 </div>
                 {businessUnits[0].suspension_status === 'suspended' && (
@@ -232,6 +252,17 @@ const Index = () => {
                             {unit.receiver_city && unit.category && ' · '}
                             {unit.category}
                           </p>
+                          {(() => {
+                            const tx = maxTransactions[unit.unit_id];
+                            if (!tx || tx.max_amount === null || tx.max_amount === undefined) return null;
+                            const sym = CURRENCY_SYMBOL[unit.currency] || currencySymbol;
+                            return (
+                              <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mt-0.5 flex items-center gap-1">
+                                <Info className="w-3 h-3" />
+                                Max: {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </p>
+                            );
+                          })()}
                         </div>
                         {unit.suspension_status !== 'suspended' && selectedUnit?.unit_id === unit.unit_id && (
                           <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0">
@@ -253,21 +284,6 @@ const Index = () => {
                       )}
                     </button>
                   ))}
-                </div>
-              </div>
-            )}
-
-            {/* ─── Max Transaction Banner ─── */}
-            {maxTransaction?.max_amount !== null && maxTransaction?.max_amount !== undefined && (
-              <div className="rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 flex items-center gap-3">
-                <Info className="w-5 h-5 text-blue-500 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-blue-700 dark:text-blue-400">
-                    Max transaction: {currencySymbol}{maxTransaction.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
-                  <p className="text-xs text-blue-500/70 dark:text-blue-400/60">
-                    {maxTransaction.source === 'merchant' ? 'Set by merchant policy' : maxTransaction.source === 'fund' ? 'Limited by available funds' : 'Policy limit'}
-                  </p>
                 </div>
               </div>
             )}
