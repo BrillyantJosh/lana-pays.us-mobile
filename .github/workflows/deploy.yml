@@ -17,6 +17,10 @@ jobs:
           script: |
             cd /opt/apps/lana-pays.us-mobile
             git pull origin main
-            echo "LANA_REGISTER_API_KEY=${{ secrets.LANA_REGISTER_API_KEY }}" > .env
+            cat > .env << 'ENVEOF'
+            LANA_REGISTER_API_KEY=${{ secrets.LANA_REGISTER_API_KEY }}
+            BRAIN_API_URL=https://brain.lanapays.us
+            BRAIN_PURCHASE_KEY=${{ secrets.BRAIN_PURCHASE_KEY }}
+            ENVEOF
             docker compose -f docker-compose.prod.yml build
             docker compose -f docker-compose.prod.yml up -d
