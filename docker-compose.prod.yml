@@ -12,6 +12,7 @@ services:
       - VIRTUAL_PORT=3005
       - LETSENCRYPT_HOST=mobile.lanapays.us
       - LETSENCRYPT_EMAIL=josh@lanaworld.app
+      - DIRECT_FUND_URL=http://lana-direct-fund-web:3005
     volumes:
       - ./data:/app/data
     networks:

@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import MenuDrawer from "@/components/MenuDrawer";
 import CashTab from "@/components/tabs/CashTab";
@@ -47,11 +47,18 @@ const Index = () => {
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | null>(null);
   const [loadingUnits, setLoadingUnits] = useState(true);
+  const [maxTransaction, setMaxTransaction] = useState<{
+    max_amount: number | null;
+    source: string;
+    merchant_limit: number | null;
+    fund_limit: number | null;
+  } | null>(null);
 
   // Sync selected unit ID to window for payment tabs to access
   useEffect(() => {
     (window as any).__selectedUnitId = selectedUnit?.unit_id || '';
-  }, [selectedUnit]);
+    (window as any).__maxTransactionAmount = maxTransaction?.max_amount ?? null;
+  }, [selectedUnit, maxTransaction]);
 
   // Fetch business units for logged-in user (initial + poll every 30s)
   useEffect(() => {
@@ -82,6 +89,32 @@ const Index = () => {
     const interval = setInterval(fetchUnits, 30_000);
     return () => clearInterval(interval);
   }, [session?.nostrHexId]);
+
+  // Fetch max transaction limit when unit changes
+  useEffect(() => {
+    const effectiveUnit = selectedUnit || (businessUnits.length === 1 ? businessUnits[0] : null);
+    if (!effectiveUnit) {
+      setMaxTransaction(null);
+      return;
+    }
+
+    const fetchMaxTx = async () => {
+      try {
+        const currency = effectiveUnit.currency || session?.currency || 'EUR';
+        const res = await fetch(`/api/max-transaction?unit_id=${encodeURIComponent(effectiveUnit.unit_id)}&currency=${currency}`);
+        if (res.ok) {
+          const data = await res.json();
+          setMaxTransaction(data);
+        }
+      } catch (e) {
+        console.warn('Failed to fetch max transaction:', e);
+      }
+    };
+
+    fetchMaxTx();
+    const interval = setInterval(fetchMaxTx, 60_000); // refresh every minute
+    return () => clearInterval(interval);
+  }, [selectedUnit, businessUnits, session?.currency]);
 
   const handlePayWithCash = (walletId: string) => {
     setSelectedWallet(walletId);
@@ -220,6 +253,21 @@ const Index = () => {
                       )}
                     </button>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* ─── Max Transaction Banner ─── */}
+            {maxTransaction?.max_amount !== null && maxTransaction?.max_amount !== undefined && (
+              <div className="rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 flex items-center gap-3">
+                <Info className="w-5 h-5 text-blue-500 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-blue-700 dark:text-blue-400">
+                    Max transaction: {currencySymbol}{maxTransaction.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-xs text-blue-500/70 dark:text-blue-400/60">
+                    {maxTransaction.source === 'merchant' ? 'Set by merchant policy' : maxTransaction.source === 'fund' ? 'Limited by available funds' : 'Policy limit'}
+                  </p>
                 </div>
               </div>
             )}

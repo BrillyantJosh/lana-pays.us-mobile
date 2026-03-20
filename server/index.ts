@@ -305,6 +305,63 @@ app.get('/i18n/languages', (_req, res) => {
   res.json(SUPPORTED_LANGUAGES);
 });
 
+// ─── Max Transaction Limit ────────────────────────────
+
+/**
+ * GET /api/max-transaction
+ * Returns the effective max transaction amount for a business unit
+ * Takes the lower of: merchant limit (KIND 30902) and direct.fund capacity
+ * Query: ?unit_id=xxx&currency=EUR
+ */
+app.get('/api/max-transaction', (req, res) => {
+  const unitId = req.query.unit_id as string;
+  const currency = ((req.query.currency as string) || 'EUR').toUpperCase();
+
+  if (!unitId) {
+    return res.status(400).json({ error: 'unit_id is required' });
+  }
+
+  // Get merchant limit from KIND 30902 fee policy
+  const policy = db.prepare(
+    'SELECT max_tx_amount FROM fee_policies WHERE unit_id = ?'
+  ).get(unitId) as any;
+
+  const merchantLimit = policy?.max_tx_amount ? parseFloat(policy.max_tx_amount) : null;
+
+  // Get latest direct fund capacity for the currency
+  const capacity = db.prepare(
+    'SELECT total_available, investor_count, blocked_count, fetched_at FROM fund_capacity WHERE currency = ? ORDER BY id DESC LIMIT 1'
+  ).get(currency) as any;
+
+  const fundLimit = capacity?.total_available ?? null;
+
+  // Calculate effective max: lower of both, or whichever is set
+  let maxAmount: number | null = null;
+  let source = 'none';
+
+  if (merchantLimit !== null && fundLimit !== null) {
+    maxAmount = Math.min(merchantLimit, fundLimit);
+    source = maxAmount === merchantLimit ? 'merchant' : 'fund';
+  } else if (merchantLimit !== null) {
+    maxAmount = merchantLimit;
+    source = 'merchant';
+  } else if (fundLimit !== null) {
+    maxAmount = fundLimit;
+    source = 'fund';
+  }
+
+  res.json({
+    unit_id: unitId,
+    currency,
+    max_amount: maxAmount !== null ? Math.round(maxAmount * 100) / 100 : null,
+    source,
+    merchant_limit: merchantLimit !== null ? Math.round(merchantLimit * 100) / 100 : null,
+    fund_limit: fundLimit !== null ? Math.round(fundLimit * 100) / 100 : null,
+    fund_investors: capacity?.investor_count || 0,
+    fund_updated_at: capacity?.fetched_at || null,
+  });
+});
+
 // ─── Brain API Proxy ──────────────────────────────────
 
 const BRAIN_API_URL = process.env.BRAIN_API_URL || '';

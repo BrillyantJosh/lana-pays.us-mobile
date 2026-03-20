@@ -505,6 +505,18 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
             }}
             className="h-12 rounded-xl bg-background border-input"
           />
+          {(() => {
+            const maxTx = (window as any).__maxTransactionAmount;
+            const parsed = parseFloat(amount.replace(',', '.'));
+            if (maxTx && !isNaN(parsed) && parsed > maxTx) {
+              return (
+                <p className="text-xs text-destructive mt-1">
+                  Exceeds max transaction limit ({currencySymbol}{maxTx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                </p>
+              );
+            }
+            return null;
+          })()}
         </div>
       </div>
 
@@ -518,7 +530,11 @@ const CashTab = ({ selectedWallet, onClearWallet }: CashTabProps) => {
       {/* Confirm button */}
       <Button
         onClick={handleConfirm}
-        disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting}
+        disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || (() => {
+          const maxTx = (window as any).__maxTransactionAmount;
+          const parsed = parseFloat(amount.replace(',', '.'));
+          return maxTx && !isNaN(parsed) && parsed > maxTx;
+        })()}
         className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
       >
         {isSubmitting ? (

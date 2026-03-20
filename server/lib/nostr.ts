@@ -533,6 +533,110 @@ export async function fetchKind30903(relays?: string[]): Promise<Kind30903Event[
   return parsed;
 }
 
+/**
+ * Fetch KIND 30902 (Fee Policy) events from Lana relays
+ * Returns parsed policies with max_tx_amount for each unit
+ */
+export interface Kind30902Policy {
+  unit_id: string;
+  event_id: string;
+  pubkey: string;
+  created_at: number;
+  lana_discount_per: string;
+  lanapays_us_per: string;
+  max_tx_amount: string;  // EUR, empty = no limit
+  caretaker_hex: string;
+  caretaker_wallet: string;
+  status: string;
+}
+
+export async function fetchKind30902(relays?: string[]): Promise<Kind30902Policy[]> {
+  const useRelays = relays && relays.length > 0 ? relays : LANA_RELAYS;
+  console.log(`Fetching KIND 30902 from ${useRelays.length} relays...`);
+
+  const fetchFromRelayKind30902 = (relayUrl: string, timeout = 15000): Promise<NostrEvent[]> => {
+    return new Promise((resolve) => {
+      const events: NostrEvent[] = [];
+      const timeoutId = setTimeout(() => {
+        ws.close();
+        resolve(events);
+      }, timeout);
+
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(relayUrl);
+      } catch {
+        clearTimeout(timeoutId);
+        resolve([]);
+        return;
+      }
+
+      const subId = `kind30902_${Date.now()}`;
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify(['REQ', subId, { kinds: [30902] }]));
+      });
+
+      ws.on('message', (data: Buffer) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg[0] === 'EVENT' && msg[1] === subId) {
+            events.push(msg[2] as NostrEvent);
+          }
+          if (msg[0] === 'EOSE') {
+            clearTimeout(timeoutId);
+            ws.close();
+            resolve(events);
+          }
+        } catch {}
+      });
+
+      ws.on('error', () => { clearTimeout(timeoutId); resolve(events); });
+      ws.on('close', () => { clearTimeout(timeoutId); });
+    });
+  };
+
+  const results = await Promise.all(
+    useRelays.map(relay => fetchFromRelayKind30902(relay))
+  );
+
+  // Deduplicate by unit_id, keep newest
+  const byUnitId = new Map<string, NostrEvent>();
+  for (const relayEvents of results) {
+    for (const event of relayEvents) {
+      const unitId = event.tags.find(t => t[0] === 'unit_id')?.[1];
+      if (!unitId) continue;
+      const existing = byUnitId.get(unitId);
+      if (!existing || event.created_at > existing.created_at) {
+        byUnitId.set(unitId, event);
+      }
+    }
+  }
+
+  const policies: Kind30902Policy[] = [];
+  for (const event of byUnitId.values()) {
+    const getTag = (name: string) => event.tags.find(t => t[0] === name)?.[1] || '';
+    const unitId = getTag('unit_id');
+    if (!unitId) continue;
+
+    policies.push({
+      unit_id: unitId,
+      event_id: event.id,
+      pubkey: event.pubkey,
+      created_at: event.created_at,
+      lana_discount_per: getTag('lana_discount_per') || '5.00',
+      lanapays_us_per: getTag('lanapays_us_per') || '5.00',
+      max_tx_amount: getTag('max_tx_amount') || '',
+      caretaker_hex: getTag('caretaker_hex'),
+      caretaker_wallet: getTag('caretaker_wallet'),
+      status: getTag('status') || 'active',
+    });
+  }
+
+  console.log(`KIND 30902: found ${policies.length} fee policies`);
+  return policies;
+}
+
 export function getLanaRelays(): string[] {
   return LANA_RELAYS;
 }

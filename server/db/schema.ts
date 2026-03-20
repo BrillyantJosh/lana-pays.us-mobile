@@ -68,6 +68,31 @@ export function initializeSchema(db: Database.Database): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- KIND 30902 Fee Policies (from Nostr relays)
+    CREATE TABLE IF NOT EXISTS fee_policies (
+      unit_id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      pubkey TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      lana_discount_per TEXT DEFAULT '5.00',
+      lanapays_us_per TEXT DEFAULT '5.00',
+      max_tx_amount TEXT DEFAULT '',
+      caretaker_hex TEXT,
+      caretaker_wallet TEXT,
+      status TEXT DEFAULT 'active',
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Direct Fund capacity cache
+    CREATE TABLE IF NOT EXISTS fund_capacity (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      currency TEXT NOT NULL,
+      total_available REAL DEFAULT 0,
+      investor_count INTEGER DEFAULT 0,
+      blocked_count INTEGER DEFAULT 0,
+      fetched_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Heartbeat logs
     CREATE TABLE IF NOT EXISTS heartbeat_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

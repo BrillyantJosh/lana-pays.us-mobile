@@ -5,7 +5,7 @@
 
 import Database from 'better-sqlite3';
 import { bech32 } from 'bech32';
-import { fetchKind38888, fetchKind30901, fetchKind30903, fetchKind0Profile, type Kind38888Data, type Kind30901Event } from './lib/nostr.js';
+import { fetchKind38888, fetchKind30901, fetchKind30902, fetchKind30903, fetchKind0Profile, type Kind38888Data, type Kind30901Event, type Kind30902Policy } from './lib/nostr.js';
 
 const HEARTBEAT_INTERVAL = 1 * 60 * 1000; // 1 minute
 
@@ -150,6 +150,62 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
         `).run(s.reason, s.active_until || null, s.content, s.unit_id);
 
         console.log(`KIND 30903: suspended unit ${s.unit_id.slice(0, 12)}... reason: ${s.reason.slice(0, 50)}`);
+      }
+    }
+
+    // Fetch KIND 30902 fee policies (includes max_tx_amount)
+    const feePolicies = await fetchKind30902(systemParams.relays);
+
+    if (feePolicies.length > 0) {
+      const upsertPolicy = db.prepare(`
+        INSERT INTO fee_policies (unit_id, event_id, pubkey, created_at, lana_discount_per, lanapays_us_per, max_tx_amount, caretaker_hex, caretaker_wallet, status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(unit_id) DO UPDATE SET
+          event_id = excluded.event_id,
+          pubkey = excluded.pubkey,
+          created_at = excluded.created_at,
+          lana_discount_per = excluded.lana_discount_per,
+          lanapays_us_per = excluded.lanapays_us_per,
+          max_tx_amount = excluded.max_tx_amount,
+          caretaker_hex = excluded.caretaker_hex,
+          caretaker_wallet = excluded.caretaker_wallet,
+          status = excluded.status,
+          updated_at = datetime('now')
+      `);
+
+      const insertPolicies = db.transaction((policies: Kind30902Policy[]) => {
+        for (const p of policies) {
+          upsertPolicy.run(
+            p.unit_id, p.event_id, p.pubkey, p.created_at,
+            p.lana_discount_per, p.lanapays_us_per, p.max_tx_amount,
+            p.caretaker_hex, p.caretaker_wallet, p.status
+          );
+        }
+      });
+
+      insertPolicies(feePolicies);
+      console.log(`KIND 30902: upserted ${feePolicies.length} fee policies`);
+    }
+
+    // Fetch Direct Fund capacity
+    const DIRECT_FUND_URL = process.env.DIRECT_FUND_URL || 'http://lana-direct-fund-web:3005';
+    const currencies = ['EUR', 'USD', 'GBP'];
+
+    for (const cur of currencies) {
+      try {
+        const capRes = await fetch(`${DIRECT_FUND_URL}/api/capacity?currency=${cur}`, {
+          signal: AbortSignal.timeout(10000),
+        });
+        if (capRes.ok) {
+          const capData = await capRes.json();
+          db.prepare(`
+            INSERT INTO fund_capacity (currency, total_available, investor_count, blocked_count, fetched_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
+          `).run(cur, capData.total_available || 0, capData.investor_count || 0, capData.blocked_count || 0);
+          console.log(`Direct Fund capacity (${cur}): ${capData.total_available} available, ${capData.investor_count} investors`);
+        }
+      } catch (e: any) {
+        console.warn(`Failed to fetch Direct Fund capacity for ${cur}:`, e.message);
       }
     }
 
