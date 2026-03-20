@@ -158,8 +158,8 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
 
     if (feePolicies.length > 0) {
       const upsertPolicy = db.prepare(`
-        INSERT INTO fee_policies (unit_id, event_id, pubkey, created_at, lana_discount_per, lanapays_us_per, max_tx_amount, caretaker_hex, caretaker_wallet, status, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO fee_policies (unit_id, event_id, pubkey, created_at, lana_discount_per, lanapays_us_per, max_tx_amount, max_tx_currency, caretaker_hex, caretaker_wallet, status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(unit_id) DO UPDATE SET
           event_id = excluded.event_id,
           pubkey = excluded.pubkey,
@@ -167,6 +167,7 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
           lana_discount_per = excluded.lana_discount_per,
           lanapays_us_per = excluded.lanapays_us_per,
           max_tx_amount = excluded.max_tx_amount,
+          max_tx_currency = excluded.max_tx_currency,
           caretaker_hex = excluded.caretaker_hex,
           caretaker_wallet = excluded.caretaker_wallet,
           status = excluded.status,
@@ -177,7 +178,7 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
         for (const p of policies) {
           upsertPolicy.run(
             p.unit_id, p.event_id, p.pubkey, p.created_at,
-            p.lana_discount_per, p.lanapays_us_per, p.max_tx_amount,
+            p.lana_discount_per, p.lanapays_us_per, p.max_tx_amount, p.max_tx_currency,
             p.caretaker_hex, p.caretaker_wallet, p.status
           );
         }

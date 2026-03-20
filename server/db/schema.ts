@@ -77,6 +77,7 @@ export function initializeSchema(db: Database.Database): void {
       lana_discount_per TEXT DEFAULT '5.00',
       lanapays_us_per TEXT DEFAULT '5.00',
       max_tx_amount TEXT DEFAULT '',
+      max_tx_currency TEXT DEFAULT '',
       caretaker_hex TEXT,
       caretaker_wallet TEXT,
       status TEXT DEFAULT 'active',
@@ -112,6 +113,13 @@ export function initializeSchema(db: Database.Database): void {
     db.exec(`ALTER TABLE business_units ADD COLUMN suspension_until INTEGER`);
     db.exec(`ALTER TABLE business_units ADD COLUMN suspension_content TEXT`);
     console.log('Migrated: added suspension columns to business_units');
+  }
+
+  // Migration: add max_tx_currency column to fee_policies if missing
+  const fpCols = db.pragma('table_info(fee_policies)') as any[];
+  if (fpCols.length > 0 && !fpCols.some((c: any) => c.name === 'max_tx_currency')) {
+    db.exec(`ALTER TABLE fee_policies ADD COLUMN max_tx_currency TEXT DEFAULT ''`);
+    console.log('Migrated: added max_tx_currency to fee_policies');
   }
 
   console.log('Database schema initialized');

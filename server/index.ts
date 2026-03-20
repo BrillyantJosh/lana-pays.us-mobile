@@ -315,20 +315,23 @@ app.get('/i18n/languages', (_req, res) => {
  */
 app.get('/api/max-transaction', (req, res) => {
   const unitId = req.query.unit_id as string;
-  const currency = ((req.query.currency as string) || 'EUR').toUpperCase();
+  const fallbackCurrency = ((req.query.currency as string) || 'EUR').toUpperCase();
 
   if (!unitId) {
     return res.status(400).json({ error: 'unit_id is required' });
   }
 
-  // Get merchant limit from KIND 30902 fee policy
+  // Get merchant limit from KIND 30902 fee policy (includes currency)
   const policy = db.prepare(
-    'SELECT max_tx_amount FROM fee_policies WHERE unit_id = ?'
+    'SELECT max_tx_amount, max_tx_currency FROM fee_policies WHERE unit_id = ?'
   ).get(unitId) as any;
 
   const merchantLimit = policy?.max_tx_amount ? parseFloat(policy.max_tx_amount) : null;
 
-  // Get latest direct fund capacity for the currency
+  // Use the currency from the fee policy tag, fall back to unit/query currency
+  const currency = (policy?.max_tx_currency || fallbackCurrency).toUpperCase();
+
+  // Get latest direct fund capacity for the unit's currency
   const capacity = db.prepare(
     'SELECT total_available, investor_count, blocked_count, fetched_at FROM fund_capacity WHERE currency = ? ORDER BY id DESC LIMIT 1'
   ).get(currency) as any;

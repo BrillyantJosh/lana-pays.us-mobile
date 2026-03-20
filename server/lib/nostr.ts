@@ -544,7 +544,8 @@ export interface Kind30902Policy {
   created_at: number;
   lana_discount_per: string;
   lanapays_us_per: string;
-  max_tx_amount: string;  // EUR, empty = no limit
+  max_tx_amount: string;  // amount in unit currency, empty = no limit
+  max_tx_currency: string;  // currency code (EUR, GBP, USD), empty = use unit default
   caretaker_hex: string;
   caretaker_wallet: string;
   status: string;
@@ -627,6 +628,7 @@ export async function fetchKind30902(relays?: string[]): Promise<Kind30902Policy
       lana_discount_per: getTag('lana_discount_per') || '5.00',
       lanapays_us_per: getTag('lanapays_us_per') || '5.00',
       max_tx_amount: getTag('max_tx_amount') || '',
+      max_tx_currency: event.tags.find(t => t[0] === 'max_tx_amount')?.[2] || '',
       caretaker_hex: getTag('caretaker_hex'),
       caretaker_wallet: getTag('caretaker_wallet'),
       status: getTag('status') || 'active',
