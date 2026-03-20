@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Loader2, CheckCircle2, AlertCircle, Snowflake, ExternalLink } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Snowflake, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -293,15 +293,6 @@ const LanaTab = ({ paymentRequest, onClearRequest }: LanaTabProps) => {
   if (step === "display") {
     return (
       <div className="flex flex-col gap-5 px-6 py-4">
-        {/* Back to entry */}
-        <button
-          onClick={() => { setStep("entry"); setScanError(null); setIsCheckingBalance(false); }}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors self-start"
-        >
-          <ArrowLeft className="w-5 h-5" />
-          <span className="text-sm font-medium">Back</span>
-        </button>
-
         {/* Payment amounts — designed for customer to read */}
         <div className="flex flex-col items-center gap-2 py-4">
           <p className="text-sm text-muted-foreground">Invoice #{invoiceNumber}</p>
