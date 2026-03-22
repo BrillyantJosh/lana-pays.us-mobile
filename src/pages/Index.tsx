@@ -194,18 +194,20 @@ const Index = () => {
                       {businessUnits[0].receiver_city && businessUnits[0].category && ' · '}
                       {businessUnits[0].category}
                     </p>
-                    {(() => {
-                      const tx = maxTransactions[businessUnits[0].unit_id];
-                      if (!tx || tx.max_amount === null || tx.max_amount === undefined) return null;
-                      const sym = CURRENCY_SYMBOL[businessUnits[0].currency] || currencySymbol;
-                      return (
-                        <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mt-0.5 flex items-center gap-1">
-                          <Info className="w-3 h-3" />
-                          Max: {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
-                      );
-                    })()}
                   </div>
+                  {(() => {
+                    const tx = maxTransactions[businessUnits[0].unit_id];
+                    if (!tx || tx.max_amount === null || tx.max_amount === undefined) return null;
+                    const sym = CURRENCY_SYMBOL[businessUnits[0].currency] || currencySymbol;
+                    return (
+                      <div className="shrink-0 text-right">
+                        <p className="text-xs text-muted-foreground">Max</p>
+                        <p className="text-2xl font-black text-primary leading-tight">
+                          {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </div>
                 {businessUnits[0].suspension_status === 'suspended' && (
                   <div className="flex items-start gap-2 rounded-xl bg-destructive/10 p-3">
@@ -252,23 +254,29 @@ const Index = () => {
                             {unit.receiver_city && unit.category && ' · '}
                             {unit.category}
                           </p>
-                          {(() => {
-                            const tx = maxTransactions[unit.unit_id];
-                            if (!tx || tx.max_amount === null || tx.max_amount === undefined) return null;
+                        </div>
+                        {(() => {
+                          const tx = maxTransactions[unit.unit_id];
+                          if (tx && tx.max_amount !== null && tx.max_amount !== undefined) {
                             const sym = CURRENCY_SYMBOL[unit.currency] || currencySymbol;
                             return (
-                              <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mt-0.5 flex items-center gap-1">
-                                <Info className="w-3 h-3" />
-                                Max: {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </p>
+                              <div className="shrink-0 text-right">
+                                <p className="text-xs text-muted-foreground">Max</p>
+                                <p className="text-2xl font-black text-primary leading-tight">
+                                  {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                              </div>
                             );
-                          })()}
-                        </div>
-                        {unit.suspension_status !== 'suspended' && selectedUnit?.unit_id === unit.unit_id && (
-                          <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0">
-                            <div className="w-2 h-2 rounded-full bg-white" />
-                          </div>
-                        )}
+                          }
+                          if (unit.suspension_status !== 'suspended' && selectedUnit?.unit_id === unit.unit_id) {
+                            return (
+                              <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0">
+                                <div className="w-2 h-2 rounded-full bg-white" />
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
                       </div>
                       {unit.suspension_status === 'suspended' && (
                         <div className="flex items-start gap-2 rounded-xl bg-destructive/10 p-3 w-full">
