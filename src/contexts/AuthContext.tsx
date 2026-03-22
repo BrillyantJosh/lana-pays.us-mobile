@@ -158,7 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.warn('Failed to register user on backend:', e);
       }
 
-      const expiresAt = Date.now() + (30 * 24 * 60 * 60 * 1000); // 30 days
+      const expiresAt = Date.now() + (8 * 60 * 60 * 1000); // 8 hours
 
       const userSession: UserSession = {
         walletId: derivedIds.walletId,

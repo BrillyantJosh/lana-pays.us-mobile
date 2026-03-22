@@ -159,6 +159,18 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency }: LanaTabProps)
       setStep("processing");
       setPurchaseError(null);
 
+      // Input validation
+      const parsedAmount = parseFloat(amount.replace(',', '.'));
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        setPurchaseError('Invalid amount');
+        return;
+      }
+      const maxTx = (window as any).__maxTransactionAmount;
+      if (maxTx && parsedAmount > maxTx) {
+        setPurchaseError(`Amount exceeds maximum transaction limit of ${maxTx}`);
+        return;
+      }
+
       try {
         const purchaseRes = await fetch('/api/brain/purchase', {
           method: 'POST',
@@ -169,7 +181,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency }: LanaTabProps)
             customer_hex: ids.nostrHexId,
             customer_wallet: ids.walletId,
             customer_wif: trimmed,
-            amount: parseFloat(amount.replace(',', '.')),
+            amount: parsedAmount,
             currency,
             invoice_number: invoiceNumber.trim(),
           }),

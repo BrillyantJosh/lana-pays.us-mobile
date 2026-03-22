@@ -14,6 +14,7 @@ import { getDb, closeDb } from './db/connection.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, type ElectrumServer } from './lib/electrum.js';
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
+import rateLimit from 'express-rate-limit';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,7 +22,31 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = parseInt(process.env.SERVER_PORT || process.env.PORT || '3005');
 
-app.use(express.json());
+// Body size limit
+app.use(express.json({ limit: '50kb' }));
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '0');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // CORS
+  const allowedOrigins = ['https://mobile.lanapays.us', 'http://localhost:8080', 'http://localhost:5173'];
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+  next();
+});
+
+// Rate limiting
+const globalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
+const purchaseLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
+app.use(globalLimiter);
 
 // Initialize database
 const db = getDb();
@@ -121,8 +146,8 @@ app.get('/api/balance/:address', async (req, res) => {
       status: result.status,
     });
   } catch (error: any) {
-    console.error(`Balance check failed for ${address}:`, error.message);
-    res.status(500).json({ error: 'Failed to fetch balance', details: error.message });
+    console.error('[mobile-server]', error instanceof Error ? error.message : error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -175,7 +200,8 @@ app.post('/api/profile-lookup', async (req, res) => {
  * Check if wallet is registered via Lana Register API
  * Uses simple_check_wallet_registration (read-only)
  */
-app.post('/api/check-wallet', async (req, res) => {
+const walletCheckLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+app.post('/api/check-wallet', walletCheckLimiter, async (req, res) => {
   const { wallet_id } = req.body;
 
   if (!wallet_id) {
@@ -375,7 +401,7 @@ const BRAIN_PURCHASE_KEY = process.env.BRAIN_PURCHASE_KEY || '';
  * Proxy purchase requests to Brain orchestration service
  * Sends BRAIN_PURCHASE_KEY as Bearer token for authentication
  */
-app.post('/api/brain/purchase', async (req, res) => {
+app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
   if (!BRAIN_API_URL) {
     return res.status(503).json({ success: false, error: 'Brain service not configured' });
   }

@@ -218,6 +218,18 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
   const handleConfirm = async () => {
     if (!invoiceNumber.trim() || !amount.trim() || !walletId) return;
 
+    // Input validation
+    const parsedAmount = parseFloat(amount.replace(',', '.'));
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      setSubmitError('Invalid amount');
+      return;
+    }
+    const maxTx = (window as any).__maxTransactionAmount;
+    if (maxTx && parsedAmount > maxTx) {
+      setSubmitError(`Amount exceeds maximum transaction limit of ${maxTx}`);
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
 
@@ -230,7 +242,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
           payment_type: 'cash',
           customer_hex: nostrHexId || '',
           customer_wallet: walletId,
-          amount: parseFloat(amount.replace(',', '.')),
+          amount: parsedAmount,
           currency,
           invoice_number: invoiceNumber.trim(),
         }),
