@@ -1,16 +1,15 @@
 import { useState } from "react";
-import { X, HelpCircle, LogOut, Search, Store, UserPen, Copy, Check } from "lucide-react";
+import { X, HelpCircle, LogOut, Store, UserPen, Copy, Check, History, Wallet } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 interface MenuDrawerProps {
   open: boolean;
   onClose: () => void;
-  onCheckWallet?: () => void;
   onEditProfile?: () => void;
 }
 
-const MenuDrawer = ({ open, onClose, onCheckWallet, onEditProfile }: MenuDrawerProps) => {
+const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
   const { session, logout } = useAuth();
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
@@ -21,25 +20,16 @@ const MenuDrawer = ({ open, onClose, onCheckWallet, onEditProfile }: MenuDrawerP
     navigate('/login');
   };
 
-  const handleCheckWallet = () => {
-    onClose();
-    onCheckWallet?.();
-  };
-
-  const handleEditShop = () => {
-    onClose();
-    window.open('https://shop.lanapays.us', '_blank');
-  };
-
   const handleEditProfile = () => {
     onClose();
     onEditProfile?.();
   };
 
   const menuItems = [
-    { label: "Edit Profile", icon: UserPen, action: handleEditProfile },
-    { label: "Check Wallet", icon: Search, action: handleCheckWallet },
-    { label: "Edit Shop", icon: Store, action: handleEditShop },
+    { label: "Profile", icon: UserPen, action: handleEditProfile },
+    { label: "Shop", icon: Store, action: () => { onClose(); window.open('https://shop.lanapays.us', '_blank'); } },
+    { label: "Check Wallet", icon: Wallet, action: () => { onClose(); window.open('https://check.lanapays.us', '_blank'); } },
+    { label: "History", icon: History, action: () => { onClose(); window.open('https://brain.lanapays.us', '_blank'); } },
     { label: "Help", icon: HelpCircle, action: () => {} },
   ];
 

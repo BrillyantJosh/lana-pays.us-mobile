@@ -156,7 +156,7 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       <TopBar onMenuOpen={() => setMenuOpen(true)} />
-      <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onCheckWallet={handleCheckWallet} onEditProfile={handleEditProfile} />
+      <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onEditProfile={handleEditProfile} />
 
       <main className="pt-14">
         {/* ─── Home: two big buttons ─── */}
