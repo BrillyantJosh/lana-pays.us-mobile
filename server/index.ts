@@ -359,10 +359,11 @@ app.get('/api/max-transaction', (req, res) => {
 
   // Get latest direct fund capacity for the unit's currency
   const capacity = db.prepare(
-    'SELECT total_available, investor_count, blocked_count, fetched_at FROM fund_capacity WHERE currency = ? ORDER BY id DESC LIMIT 1'
+    'SELECT total_available, max_single_budget, investor_count, blocked_count, fetched_at FROM fund_capacity WHERE currency = ? ORDER BY id DESC LIMIT 1'
   ).get(currency) as any;
 
-  const fundLimit = capacity?.total_available ?? null;
+  // Max invoice = largest single budget (one invoice goes to one budget, not split across)
+  const fundLimit = capacity?.max_single_budget || capacity?.total_available || null;
 
   // Calculate effective max: lower of both, or whichever is set
   let maxAmount: number | null = null;

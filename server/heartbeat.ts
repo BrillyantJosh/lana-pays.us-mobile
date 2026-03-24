@@ -200,10 +200,10 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
         if (capRes.ok) {
           const capData = await capRes.json();
           db.prepare(`
-            INSERT INTO fund_capacity (currency, total_available, investor_count, blocked_count, fetched_at)
-            VALUES (?, ?, ?, ?, datetime('now'))
-          `).run(cur, capData.total_available || 0, capData.investor_count || 0, capData.blocked_count || 0);
-          console.log(`Direct Fund capacity (${cur}): ${capData.total_available} available, ${capData.investor_count} investors`);
+            INSERT INTO fund_capacity (currency, total_available, max_single_budget, investor_count, blocked_count, fetched_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+          `).run(cur, capData.total_available || 0, capData.max_single_budget || 0, capData.investor_count || 0, capData.blocked_count || 0);
+          console.log(`Direct Fund capacity (${cur}): ${capData.total_available} available, max single: ${capData.max_single_budget}, ${capData.investor_count} investors`);
         }
       } catch (e: any) {
         console.warn(`Failed to fetch Direct Fund capacity for ${cur}:`, e.message);

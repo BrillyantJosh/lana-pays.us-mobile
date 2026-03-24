@@ -201,7 +201,7 @@ const Index = () => {
                     const sym = CURRENCY_SYMBOL[businessUnits[0].currency] || currencySymbol;
                     return (
                       <div className="shrink-0 text-right">
-                        <p className="text-xs text-muted-foreground">Max</p>
+                        <p className="text-xs text-muted-foreground">Max Invoice</p>
                         <p className="text-2xl font-black text-primary leading-tight">
                           {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </p>
@@ -261,7 +261,7 @@ const Index = () => {
                             const sym = CURRENCY_SYMBOL[unit.currency] || currencySymbol;
                             return (
                               <div className="shrink-0 text-right">
-                                <p className="text-xs text-muted-foreground">Max</p>
+                                <p className="text-xs text-muted-foreground">Max Invoice</p>
                                 <p className="text-2xl font-black text-primary leading-tight">
                                   {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>

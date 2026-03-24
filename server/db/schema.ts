@@ -115,6 +115,13 @@ export function initializeSchema(db: Database.Database): void {
     console.log('Migrated: added suspension columns to business_units');
   }
 
+  // Migration: add max_single_budget to fund_capacity
+  const fcCols = db.pragma('table_info(fund_capacity)') as any[];
+  if (fcCols.length > 0 && !fcCols.some((c: any) => c.name === 'max_single_budget')) {
+    db.exec(`ALTER TABLE fund_capacity ADD COLUMN max_single_budget REAL DEFAULT 0`);
+    console.log('Migrated: added max_single_budget to fund_capacity');
+  }
+
   // Migration: add max_tx_currency column to fee_policies if missing
   const fpCols = db.pragma('table_info(fee_policies)') as any[];
   if (fpCols.length > 0 && !fpCols.some((c: any) => c.name === 'max_tx_currency')) {
