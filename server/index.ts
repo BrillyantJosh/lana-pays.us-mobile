@@ -363,21 +363,24 @@ app.get('/api/max-transaction', (req, res) => {
   ).get(currency) as any;
 
   // Max invoice = largest single budget (one invoice goes to one budget, not split across)
-  const fundLimit = capacity?.max_single_budget || capacity?.total_available || null;
+  // When capacity exists but is 0, that means no budget available — respect that as 0, not null
+  const fundLimit = capacity
+    ? (capacity.max_single_budget ?? capacity.total_available ?? 0)
+    : null;
 
-  // Calculate effective max: lower of both, or whichever is set
+  // Calculate effective max: always use fundLimit when available (even if 0)
   let maxAmount: number | null = null;
   let source = 'none';
 
-  if (merchantLimit !== null && fundLimit !== null) {
+  if (fundLimit !== null && merchantLimit !== null) {
     maxAmount = Math.min(merchantLimit, fundLimit);
     source = maxAmount === merchantLimit ? 'merchant' : 'fund';
-  } else if (merchantLimit !== null) {
-    maxAmount = merchantLimit;
-    source = 'merchant';
   } else if (fundLimit !== null) {
     maxAmount = fundLimit;
     source = 'fund';
+  } else if (merchantLimit !== null) {
+    maxAmount = merchantLimit;
+    source = 'merchant';
   }
 
   res.json({
