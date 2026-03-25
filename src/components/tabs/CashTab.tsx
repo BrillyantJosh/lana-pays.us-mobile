@@ -170,8 +170,8 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
 
       setWalletId(resolvedWalletId);
 
-      // Check registration + balance in parallel
-      const [regRes, balanceRes] = await Promise.all([
+      // Check registration + balance + hex lookup in parallel
+      const [regRes, balanceRes, userLookup] = await Promise.all([
         fetch('/api/check-wallet', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -180,7 +180,19 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
         fetch(`/api/balance/${encodeURIComponent(resolvedWalletId)}?currency=${currency}`)
           .then(r => r.json().then(j => ({ ok: r.ok, json: j })))
           .catch(() => null),
+        // If scanned wallet address (not WIF), look up hex_id from our DB
+        !hasNostrKeys
+          ? fetch(`/api/users/by-wallet/${encodeURIComponent(resolvedWalletId)}`)
+              .then(r => r.json())
+              .catch(() => ({ user: null }))
+          : Promise.resolve(null),
       ]);
+
+      // If we found the user by wallet address, set their hex/npub
+      if (!hasNostrKeys && userLookup?.user) {
+        setNostrHexId(userLookup.user.hex_id);
+        setNostrNpubId(userLookup.user.npub);
+      }
 
       // Store balance
       if (balanceRes?.ok) {

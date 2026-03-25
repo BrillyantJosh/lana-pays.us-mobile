@@ -251,6 +251,14 @@ app.get('/api/users/:hexId', (req, res) => {
 });
 
 /**
+ * Look up user by wallet address (lana_address)
+ */
+app.get('/api/users/by-wallet/:address', (req, res) => {
+  const user = db.prepare('SELECT hex_id, npub, display_name, picture FROM users WHERE lana_address = ?').get(req.params.address) as any;
+  res.json({ user: user || null });
+});
+
+/**
  * Get business units where the given hex pubkey is authorized (owner or staff via p tags)
  */
 app.get('/api/business-units/:hexId', (req, res) => {
