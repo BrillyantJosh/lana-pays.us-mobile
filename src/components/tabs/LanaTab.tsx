@@ -43,6 +43,9 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [receiptType, setReceiptType] = useState<'receipt' | 'photo'>('receipt');
+  const [analysisDescription, setAnalysisDescription] = useState<string | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [amount, setAmount] = useState("");
   const [lanaAmount, setLanaAmount] = useState<number>(0);
@@ -194,6 +197,8 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             currency,
             invoice_number: invoiceNumber.trim(),
             receipt_url: receiptUrl || undefined,
+            receipt_type: receiptType || 'receipt',
+            receipt_description: analysisDescription || undefined,
           }),
         });
 
@@ -258,6 +263,26 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
     } finally {
       setIsUploading(false);
     }
+
+    // Analyze with Claude Vision
+    setIsAnalyzing(true);
+    try {
+      const analyzeForm = new FormData();
+      analyzeForm.append('receipt', file, file.name);
+      analyzeForm.append('currency', currency);
+      const analyzeRes = await fetch('/api/receipt/analyze', { method: 'POST', body: analyzeForm });
+      const analysis = await analyzeRes.json();
+      if (analysis.isReceipt) {
+        setReceiptType('receipt');
+        if (analysis.amount) setAmount(String(analysis.amount));
+        if (analysis.invoiceNumber) setInvoiceNumber(analysis.invoiceNumber);
+        if (analysis.items) setAnalysisDescription(analysis.items);
+      } else {
+        setReceiptType('photo');
+        setAnalysisDescription(analysis.description || 'Photo captured');
+      }
+    } catch {}
+    finally { setIsAnalyzing(false); }
   };
 
   // ─── STEP: Receipt ─────────────────────────────
@@ -284,6 +309,20 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           </div>
         ) : null}
         {uploadError && <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-3"><p className="text-sm text-destructive text-center">{uploadError}</p></div>}
+        {isAnalyzing && (
+          <div className="rounded-2xl bg-primary/5 border border-primary/10 p-3 flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-primary" />
+            <p className="text-xs text-primary">Analyzing image...</p>
+          </div>
+        )}
+        {!isAnalyzing && analysisDescription && receiptPreview && (
+          <div className={`rounded-2xl p-3 border ${receiptType === 'receipt' ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/10' : 'bg-amber-50 dark:bg-amber-500/5 border-amber-200 dark:border-amber-500/10'}`}>
+            <p className={`text-xs font-medium ${receiptType === 'receipt' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}`}>
+              {receiptType === 'receipt' ? '✓ Receipt detected' : '📷 Photo (not a receipt)'}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">{analysisDescription}</p>
+          </div>
+        )}
         {!receiptPreview ? (
           <label className="cursor-pointer">
             <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files?.[0] && handleReceiptFile(e.target.files[0])} />
@@ -291,11 +330,13 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           </label>
         ) : (
           <>
+            {!isAnalyzing && (
+              <Button onClick={() => setStep("entry")} className="w-full h-14 rounded-2xl text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20" disabled={isUploading}>Continue to Invoice</Button>
+            )}
             <label className="cursor-pointer">
               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files?.[0] && handleReceiptFile(e.target.files[0])} />
-              <div className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center"><Camera className="w-5 h-5" /> Retake Photo</div>
+              <div className="w-full h-12 rounded-2xl text-sm font-medium gap-2 border border-input hover:bg-accent flex items-center justify-center"><Camera className="w-4 h-4" /> Retake Photo</div>
             </label>
-            <Button onClick={() => setStep("entry")} variant="outline" className="w-full h-14 rounded-2xl text-base font-semibold" disabled={isUploading}>Continue to Invoice</Button>
           </>
         )}
         <button onClick={() => setStep("entry")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">Skip — no receipt available</button>
@@ -320,10 +361,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         <div className="glass-card rounded-2xl p-5 space-y-4">
           <div className="space-y-2">
             <Label className="text-sm font-medium text-foreground">
-              Invoice Number <span className="text-destructive">*</span>
+              {receiptType === 'receipt' ? 'Invoice Number' : 'Transaction Description'} <span className="text-destructive">*</span>
             </Label>
             <Input
-              placeholder="e.g. 2024-001234"
+              placeholder={receiptType === 'receipt' ? 'e.g. 2024-001234' : 'Describe the transaction'}
               value={invoiceNumber}
               onChange={(e) => setInvoiceNumber(e.target.value)}
               className="h-12 rounded-xl bg-background border-input"
