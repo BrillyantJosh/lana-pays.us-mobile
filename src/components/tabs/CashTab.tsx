@@ -403,11 +403,19 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         )}
         <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptFile(f); }} className="hidden" />
         <div className="flex flex-col gap-3">
-          <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isAnalyzing} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
-            <Camera className="w-5 h-5" />{receiptPreview ? 'Retake Photo' : 'Take Photo'}
-          </Button>
-          {(receiptUrl || receiptPreview) && !isAnalyzing && (
-            <Button onClick={() => setStep("invoice")} disabled={isUploading} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-secondary text-foreground hover:bg-secondary/80">Continue to Invoice</Button>
+          {!receiptPreview ? (
+            <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isAnalyzing} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
+              <Camera className="w-5 h-5" />Take Photo
+            </Button>
+          ) : (
+            <>
+              {!isAnalyzing && (
+                <Button onClick={() => setStep("invoice")} disabled={isUploading} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">Continue to Invoice</Button>
+              )}
+              <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isAnalyzing} variant="outline" className="w-full h-12 rounded-2xl text-sm font-medium gap-2">
+                <Camera className="w-4 h-4" />Retake Photo
+              </Button>
+            </>
           )}
           <button onClick={() => setStep("invoice")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">Skip — no receipt available</button>
         </div>
