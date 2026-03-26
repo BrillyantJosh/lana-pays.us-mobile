@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Loader2, CheckCircle2, AlertCircle, Snowflake, ExternalLink, Camera, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
   const { session } = useAuth();
   const currency = unitCurrency || session?.currency || 'GBP';
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
+
+  // Keep props fresh via refs (avoid stale closures in async callbacks)
+  const unitIdRef = useRef(unitId);
+  unitIdRef.current = unitId;
 
   const [step, setStep] = useState<Step>("receipt");
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
@@ -181,7 +185,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            unit_id: unitId || '',
+            unit_id: unitIdRef.current || '',
             payment_type: 'lana',
             customer_hex: ids.nostrHexId,
             customer_wallet: ids.walletId,

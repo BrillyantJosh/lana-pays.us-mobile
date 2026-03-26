@@ -75,6 +75,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   const CurrencyIcon = currencyIcons[currency] || PoundSterling;
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
 
+  // Keep all props/state fresh via refs (avoid stale closures in async callbacks)
+  const unitIdRef = useRef(unitId);
+  unitIdRef.current = unitId;
+  const currencyRef = useRef(currency);
+  currencyRef.current = currency;
+
   const [step, setStep] = useState<Step>("receipt");
 
   // Receipt state
@@ -304,12 +310,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          unit_id: unitId || '',
+          unit_id: unitIdRef.current || '',
           payment_type: 'cash',
           customer_hex: hexId,
           customer_wallet: wallet,
           amount: parsedAmount,
-          currency,
+          currency: currencyRef.current,
           invoice_number: invoice.trim(),
           receipt_url: receiptUrl || undefined,
         }),
