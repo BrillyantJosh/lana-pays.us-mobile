@@ -24,11 +24,12 @@ interface LanaTabProps {
   paymentRequest?: { walletAddress: string; invoiceNumber?: string; amount?: number } | null;
   onClearRequest?: () => void;
   unitCurrency?: string;
+  unitId?: string;
 }
 
 type Step = "receipt" | "entry" | "display" | "processing" | "paid";
 
-const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency }: LanaTabProps) => {
+const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaTabProps) => {
   const { session } = useAuth();
   const currency = unitCurrency || session?.currency || 'GBP';
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
@@ -180,7 +181,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency }: LanaTabProps)
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            unit_id: (window as any).__selectedUnitId || '',
+            unit_id: unitId || '',
             payment_type: 'lana',
             customer_hex: ids.nostrHexId,
             customer_wallet: ids.walletId,

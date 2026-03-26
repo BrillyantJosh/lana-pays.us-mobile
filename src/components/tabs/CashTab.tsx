@@ -62,13 +62,14 @@ interface CashTabProps {
   selectedWallet?: string | null;
   onClearWallet?: () => void;
   unitCurrency?: string;
+  unitId?: string;
 }
 
 type Step = "receipt" | "invoice" | "scan" | "register" | "confirmed";
 
 const UPLOAD_URL = '/api/receipt/upload';  // Proxied through our server
 
-const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) => {
+const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTabProps) => {
   const { session } = useAuth();
   const currency = unitCurrency || session?.currency || 'GBP';
   const CurrencyIcon = currencyIcons[currency] || PoundSterling;
@@ -303,7 +304,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          unit_id: (window as any).__selectedUnitId || '',
+          unit_id: unitId || '',
           payment_type: 'cash',
           customer_hex: hexId,
           customer_wallet: wallet,

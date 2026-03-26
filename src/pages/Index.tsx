@@ -340,10 +340,10 @@ const Index = () => {
               <WalletsTab onPayWithCash={handlePayWithCash} onPayWithLana={handlePayWithLana} />
             )}
             {activeView === "cash" && (
-              <CashTab selectedWallet={selectedWallet} onClearWallet={() => setSelectedWallet(null)} unitCurrency={effectiveUnit?.currency} />
+              <CashTab selectedWallet={selectedWallet} onClearWallet={() => setSelectedWallet(null)} unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} />
             )}
             {activeView === "lana" && (
-              <LanaTab paymentRequest={lanaPaymentRequest} onClearRequest={() => setLanaPaymentRequest(null)} unitCurrency={effectiveUnit?.currency} />
+              <LanaTab paymentRequest={lanaPaymentRequest} onClearRequest={() => setLanaPaymentRequest(null)} unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} />
             )}
             {activeView === "profile" && (
               <EditProfile />
