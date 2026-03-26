@@ -110,13 +110,14 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Cross-tab entry: wallet already verified from WalletsTab
+  // Cross-tab entry: wallet already verified from WalletsTab (only on initial mount)
+  const initializedRef = useRef(false);
   useEffect(() => {
-    if (selectedWallet) {
+    if (selectedWallet && !initializedRef.current) {
+      initializedRef.current = true;
       setWalletId(selectedWallet);
       setCheckError(null);
       fetchBalance(selectedWallet);
-      // If receipt already captured, go to invoice; otherwise start with receipt
       setStep(receiptUrl ? "invoice" : "receipt");
     }
   }, [selectedWallet]);
