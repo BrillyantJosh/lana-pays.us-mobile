@@ -538,6 +538,64 @@ app.post('/api/upload', upload.array('images', 5), (req, res) => {
   res.json({ urls });
 });
 
+// ─── Receipt Upload Proxy ──────────────────────────────
+// Proxies receipt uploads to file server (65.21.189.205:3099)
+const RECEIPT_UPLOAD_URL = process.env.RECEIPT_UPLOAD_URL || 'http://65.21.189.205:3099/api/upload';
+const RECEIPT_UPLOAD_KEY = process.env.RECEIPT_UPLOAD_KEY || 'lana_receipt_upload_2026_secure';
+
+const receiptUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    cb(null, allowed.includes(file.mimetype));
+  },
+});
+
+app.post('/api/receipt/upload', receiptUpload.single('receipt'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+
+  try {
+    // Forward to file server
+    const formData = new FormData();
+    const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
+    formData.append('receipt', blob, req.file.originalname || 'receipt.jpg');
+
+    const uploadRes = await fetch(RECEIPT_UPLOAD_URL, {
+      method: 'POST',
+      headers: { 'X-Upload-Key': RECEIPT_UPLOAD_KEY },
+      body: formData,
+    });
+
+    if (!uploadRes.ok) {
+      // Fallback: save locally
+      const id = crypto.randomBytes(16).toString('hex');
+      const ext = path.extname(req.file.originalname || '.jpg') || '.jpg';
+      const filename = `receipt-${id}${ext}`;
+      const filePath = path.join(uploadsDir, filename);
+      fs.writeFileSync(filePath, req.file.buffer);
+
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      return res.json({ success: true, url: `${baseUrl}/uploads/${filename}`, fallback: true });
+    }
+
+    const data = await uploadRes.json();
+    res.json(data);
+  } catch (err: any) {
+    // Fallback: save locally if file server unreachable
+    const id = crypto.randomBytes(16).toString('hex');
+    const ext = path.extname(req.file.originalname || '.jpg') || '.jpg';
+    const filename = `receipt-${id}${ext}`;
+    const filePath = path.join(uploadsDir, filename);
+    fs.writeFileSync(filePath, req.file.buffer);
+
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    res.json({ success: true, url: `${baseUrl}/uploads/${filename}`, fallback: true });
+  }
+});
+
 // ─── Static Frontend ───────────────────────────────────
 
 const distPath = path.resolve(__dirname, '../dist');

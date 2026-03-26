@@ -66,8 +66,7 @@ interface CashTabProps {
 
 type Step = "receipt" | "invoice" | "scan" | "register" | "confirmed";
 
-const UPLOAD_URL = 'https://files.lanapays.us/api/upload';
-const UPLOAD_KEY = 'lana_receipt_upload_2026_secure';
+const UPLOAD_URL = '/api/receipt/upload';  // Proxied through our server
 
 const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) => {
   const { session } = useAuth();
@@ -132,7 +131,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
     reader.onload = (e) => setReceiptPreview(e.target?.result as string);
     reader.readAsDataURL(file);
 
-    // Upload to files.lanapays.us
+    // Upload receipt via server proxy
     setIsUploading(true);
     setUploadError(null);
     try {
@@ -140,7 +139,6 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
       formData.append('receipt', file, file.name);
       const res = await fetch(UPLOAD_URL, {
         method: 'POST',
-        headers: { 'X-Upload-Key': UPLOAD_KEY },
         body: formData,
       });
       const data = await res.json();
