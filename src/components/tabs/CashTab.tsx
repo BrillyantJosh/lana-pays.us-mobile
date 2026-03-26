@@ -255,8 +255,8 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
       // Check registration result — wallet verified, proceed to submit or register
       if (regRes.success) {
         if (regRes.registered) {
-          // Wallet registered — submit the purchase
-          await submitPurchase(resolvedWalletId, nostrHexId || (userLookup?.user?.hex_id) || '');
+          // Wallet registered — submit the purchase (pass refs explicitly to avoid stale closures)
+          await submitPurchase(resolvedWalletId, nostrHexId || (userLookup?.user?.hex_id) || '', invoiceRef.current, amountRef.current);
         } else if (hasNostrKeys) {
           // Not registered, but we have keys from WIF → show registration form
           setStep("register");
@@ -276,20 +276,20 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
 
   const handleRegister = async () => {
     if (!fullName.trim() || !walletId) return;
-    // Registration data captured — submit the purchase
-    await submitPurchase(walletId, nostrHexId || '');
+    // Registration data captured — submit the purchase (pass refs explicitly)
+    await submitPurchase(walletId, nostrHexId || '', invoiceRef.current, amountRef.current);
   };
 
-  // Submit purchase to Brain
-  const submitPurchase = async (wallet: string, hexId: string) => {
-    const inv = invoiceRef.current;
-    const amt = amountRef.current;
-    if (!inv.trim() || !amt.trim()) {
+  // Submit purchase to Brain — accepts invoice/amount as params to avoid stale closures
+  const submitPurchase = async (wallet: string, hexId: string, inv?: string, amt?: string) => {
+    const invoice = inv || invoiceRef.current;
+    const amount_ = amt || amountRef.current;
+    if (!invoice.trim() || !amount_.trim()) {
       setSubmitError('Invoice number and amount are required. Please go back and fill them in.');
       return;
     }
 
-    const parsedAmount = parseFloat(amt.replace(',', '.'));
+    const parsedAmount = parseFloat(amount_.replace(',', '.'));
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       setSubmitError('Invalid amount');
       return;
@@ -309,7 +309,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
           customer_wallet: wallet,
           amount: parsedAmount,
           currency,
-          invoice_number: inv.trim(),
+          invoice_number: invoice.trim(),
           receipt_url: receiptUrl || undefined,
         }),
       });
