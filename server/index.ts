@@ -470,6 +470,16 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
     return res.status(503).json({ success: false, error: 'Brain service not configured' });
   }
 
+  // Debug: log what we're sending to Brain
+  console.log('[mobile] Purchase request body:', JSON.stringify({
+    unit_id: req.body?.unit_id || 'EMPTY',
+    payment_type: req.body?.payment_type || 'EMPTY',
+    customer_wallet: req.body?.customer_wallet ? req.body.customer_wallet.slice(0, 10) + '...' : 'EMPTY',
+    amount: req.body?.amount,
+    currency: req.body?.currency || 'EMPTY',
+    invoice: req.body?.invoice_number || 'EMPTY',
+  }));
+
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (BRAIN_PURCHASE_KEY) {
