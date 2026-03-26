@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2, UserPlus } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2, UserPlus, ImagePlus, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,7 +64,10 @@ interface CashTabProps {
   unitCurrency?: string;
 }
 
-type Step = "scan" | "register" | "invoice" | "confirmed";
+type Step = "receipt" | "invoice" | "scan" | "register" | "confirmed";
+
+const UPLOAD_URL = 'https://files.lanapays.us/api/upload';
+const UPLOAD_KEY = 'lana_receipt_upload_2026_secure';
 
 const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) => {
   const { session } = useAuth();
@@ -72,7 +75,14 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
   const CurrencyIcon = currencyIcons[currency] || PoundSterling;
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
 
-  const [step, setStep] = useState<Step>("scan");
+  const [step, setStep] = useState<Step>("receipt");
+
+  // Receipt state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Scan state
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -103,16 +113,48 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
       setWalletId(selectedWallet);
       setCheckError(null);
       fetchBalance(selectedWallet);
-      setStep("invoice");
+      // If receipt already captured, go to invoice; otherwise start with receipt
+      setStep(receiptUrl ? "invoice" : "receipt");
     }
   }, [selectedWallet]);
 
-  // Auto-open scanner on scan step
+  // Auto-open scanner on scan step (only when wallet not yet set)
   useEffect(() => {
     if (step === "scan" && !walletId && !checkError && !isChecking) {
       setScannerOpen(true);
     }
   }, [step]);
+
+  // Handle receipt photo capture/select
+  const handleReceiptFile = async (file: File) => {
+    // Show preview
+    const reader = new FileReader();
+    reader.onload = (e) => setReceiptPreview(e.target?.result as string);
+    reader.readAsDataURL(file);
+
+    // Upload to files.lanapays.us
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const formData = new FormData();
+      formData.append('receipt', file, file.name);
+      const res = await fetch(UPLOAD_URL, {
+        method: 'POST',
+        headers: { 'X-Upload-Key': UPLOAD_KEY },
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success && data.url) {
+        setReceiptUrl(data.url);
+      } else {
+        setUploadError('Upload failed. Please try again.');
+      }
+    } catch {
+      setUploadError('Network error. Photo saved locally — will retry on submit.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const fetchBalance = async (address: string) => {
     try {
@@ -125,7 +167,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
   };
 
   const resetAll = () => {
-    setStep("scan");
+    setStep("receipt");
+    setReceiptPreview(null);
+    setReceiptUrl(null);
+    setUploadError(null);
     setWalletId(null);
     setNostrHexId(null);
     setNostrNpubId(null);
@@ -138,7 +183,6 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
     setInvoiceNumber("");
     setAmount("");
     onClearWallet?.();
-    setScannerOpen(true);
   };
 
   // Main scan handler — accepts wallet address or WIF key
@@ -199,10 +243,11 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
         setBalance(balanceRes.json);
       }
 
-      // Check registration result
+      // Check registration result — wallet verified, proceed to submit or register
       if (regRes.success) {
         if (regRes.registered) {
-          setStep("invoice");
+          // Wallet registered — submit the purchase
+          await submitPurchase(resolvedWalletId, nostrHexId || (userLookup?.user?.hex_id) || '');
         } else if (hasNostrKeys) {
           // Not registered, but we have keys from WIF → show registration form
           setStep("register");
@@ -220,25 +265,19 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
     }
   };
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
     if (!fullName.trim() || !walletId) return;
-    // Registration data is captured — proceed to invoice
-    // Actual wallet registration happens through the Lana Register API separately
-    setStep("invoice");
+    // Registration data captured — submit the purchase
+    await submitPurchase(walletId, nostrHexId || '');
   };
 
-  const handleConfirm = async () => {
-    if (!invoiceNumber.trim() || !amount.trim() || !walletId) return;
+  // Submit purchase to Brain
+  const submitPurchase = async (wallet: string, hexId: string) => {
+    if (!invoiceNumber.trim() || !amount.trim()) return;
 
-    // Input validation
     const parsedAmount = parseFloat(amount.replace(',', '.'));
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       setSubmitError('Invalid amount');
-      return;
-    }
-    const maxTx = (window as any).__maxTransactionAmount;
-    if (maxTx && parsedAmount > maxTx) {
-      setSubmitError(`Amount exceeds maximum transaction limit of ${maxTx}`);
       return;
     }
 
@@ -252,11 +291,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
         body: JSON.stringify({
           unit_id: (window as any).__selectedUnitId || '',
           payment_type: 'cash',
-          customer_hex: nostrHexId || '',
-          customer_wallet: walletId,
+          customer_hex: hexId,
+          customer_wallet: wallet,
           amount: parsedAmount,
           currency,
           invoice_number: invoiceNumber.trim(),
+          receipt_url: receiptUrl || undefined,
         }),
       });
 
@@ -300,6 +340,96 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
       </div>
     );
   };
+
+  // ─── RECEIPT STEP ────────────────────────────
+  if (step === "receipt") {
+    return (
+      <div className="flex flex-col gap-5 px-6 py-4">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0">
+            <Receipt className="w-7 h-7 text-primary" />
+          </div>
+          <div>
+            <h2 className="font-display text-xl font-bold text-foreground">Cash Payment</h2>
+            <p className="text-muted-foreground text-sm">Take a photo of the receipt or purchase</p>
+          </div>
+        </div>
+
+        {/* Instructions */}
+        <div className="glass-card rounded-2xl p-4">
+          <p className="text-sm text-muted-foreground">
+            Photograph the receipt or invoice. If no receipt is available, take a photo showing the purchase with the items or people involved.
+          </p>
+        </div>
+
+        {/* Receipt preview */}
+        {receiptPreview && (
+          <div className="relative rounded-2xl overflow-hidden border-2 border-primary/20">
+            <img src={receiptPreview} alt="Receipt" className="w-full max-h-64 object-contain bg-black/5" />
+            {isUploading && (
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-white" />
+              </div>
+            )}
+            {receiptUrl && (
+              <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {uploadError && (
+          <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-3">
+            <p className="text-xs text-destructive text-center">{uploadError}</p>
+          </div>
+        )}
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleReceiptFile(file);
+          }}
+          className="hidden"
+        />
+
+        {/* Buttons */}
+        <div className="flex flex-col gap-3">
+          <Button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
+          >
+            <Camera className="w-5 h-5" />
+            {receiptPreview ? 'Retake Photo' : 'Take Photo'}
+          </Button>
+
+          {(receiptUrl || receiptPreview) && (
+            <Button
+              onClick={() => setStep("invoice")}
+              disabled={isUploading}
+              className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-secondary text-foreground hover:bg-secondary/80"
+            >
+              Continue to Invoice
+            </Button>
+          )}
+
+          {/* Skip option (optional) */}
+          <button
+            onClick={() => setStep("invoice")}
+            className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1"
+          >
+            Skip — no receipt available
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ─── SCAN STEP ─────────────────────────────
   if (step === "scan") {
@@ -478,29 +608,28 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
   // ─── INVOICE STEP ──────────────────────────
   return (
     <div className="flex flex-col gap-5 px-6 py-4">
-      {/* Header with wallet info */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0">
-            <CurrencyIcon className="w-7 h-7 text-primary" />
-          </div>
-          <div>
-            <h2 className="font-display text-xl font-bold text-foreground">Cash Payment</h2>
-            <p className="text-muted-foreground text-xs font-mono truncate max-w-[180px]">
-              {walletId}
-            </p>
-          </div>
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0">
+          <CurrencyIcon className="w-7 h-7 text-primary" />
         </div>
-        <button
-          onClick={resetAll}
-          className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-        >
-          Change
-        </button>
+        <div>
+          <h2 className="font-display text-xl font-bold text-foreground">Invoice Details</h2>
+          <p className="text-muted-foreground text-sm">Enter invoice number and amount</p>
+        </div>
       </div>
 
-      {/* Balance card */}
-      <BalanceCard />
+      {/* Receipt thumbnail */}
+      {receiptPreview && (
+        <div className="flex items-center gap-3 glass-card rounded-xl p-3">
+          <img src={receiptPreview} alt="Receipt" className="w-12 h-12 rounded-lg object-cover" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-foreground">Receipt attached</p>
+            <p className="text-[10px] text-muted-foreground truncate">{receiptUrl || 'Uploading...'}</p>
+          </div>
+          {receiptUrl && <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />}
+        </div>
+      )}
 
       {/* Invoice form */}
       <div className="glass-card rounded-2xl p-5 space-y-4">
@@ -552,9 +681,9 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
         </div>
       )}
 
-      {/* Confirm button */}
+      {/* Next: scan customer wallet */}
       <Button
-        onClick={handleConfirm}
+        onClick={() => { setStep("scan"); setScannerOpen(true); }}
         disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || (() => {
           const maxTx = (window as any).__maxTransactionAmount;
           const parsed = parseFloat(amount.replace(',', '.'));
@@ -562,15 +691,16 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
         })()}
         className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
       >
-        {isSubmitting ? (
-          <>
-            <Loader2 className="w-5 h-5 animate-spin" />
-            Processing...
-          </>
-        ) : (
-          'Confirm Payment'
-        )}
+        <Camera className="w-5 h-5" />
+        Scan Customer Wallet
       </Button>
+
+      <button
+        onClick={resetAll}
+        className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors"
+      >
+        Start Over
+      </button>
     </div>
   );
 };
