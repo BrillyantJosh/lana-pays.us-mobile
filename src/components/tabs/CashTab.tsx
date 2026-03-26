@@ -100,9 +100,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
   const [countryCode, setCountryCode] = useState("+386");
   const [mobile, setMobile] = useState("");
 
-  // Invoice form
+  // Invoice form (refs keep values fresh for async callbacks)
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [amount, setAmount] = useState("");
+  const invoiceRef = useRef(invoiceNumber);
+  const amountRef = useRef(amount);
+  invoiceRef.current = invoiceNumber;
+  amountRef.current = amount;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -277,12 +281,14 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
 
   // Submit purchase to Brain
   const submitPurchase = async (wallet: string, hexId: string) => {
-    if (!invoiceNumber.trim() || !amount.trim()) {
+    const inv = invoiceRef.current;
+    const amt = amountRef.current;
+    if (!inv.trim() || !amt.trim()) {
       setSubmitError('Invoice number and amount are required. Please go back and fill them in.');
       return;
     }
 
-    const parsedAmount = parseFloat(amount.replace(',', '.'));
+    const parsedAmount = parseFloat(amt.replace(',', '.'));
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       setSubmitError('Invalid amount');
       return;
@@ -302,7 +308,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
           customer_wallet: wallet,
           amount: parsedAmount,
           currency,
-          invoice_number: invoiceNumber.trim(),
+          invoice_number: inv.trim(),
           receipt_url: receiptUrl || undefined,
         }),
       });
