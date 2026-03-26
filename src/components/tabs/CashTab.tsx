@@ -461,13 +461,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
         )}
 
         {/* Error */}
-        {checkError && !isChecking && (
+        {(checkError || submitError) && !isChecking && (
           <div className="space-y-4">
             <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
-              <p className="text-sm text-destructive text-center">{checkError}</p>
+              <p className="text-sm text-destructive text-center">{checkError || submitError}</p>
             </div>
             <Button
-              onClick={() => { setCheckError(null); setScannerOpen(true); }}
+              onClick={() => { setCheckError(null); setSubmitError(null); setScannerOpen(true); }}
               className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90"
             >
               <Camera className="w-5 h-5" />
@@ -477,7 +477,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
         )}
 
         {/* Idle — scan button */}
-        {!isChecking && !checkError && (
+        {!isChecking && !checkError && !submitError && (
           <div className="flex flex-col items-center gap-4 py-8">
             <Button
               onClick={() => setScannerOpen(true)}

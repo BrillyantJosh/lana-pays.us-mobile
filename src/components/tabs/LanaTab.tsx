@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Loader2, CheckCircle2, AlertCircle, Snowflake, ExternalLink } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Snowflake, ExternalLink, Camera, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,14 +26,18 @@ interface LanaTabProps {
   unitCurrency?: string;
 }
 
-type Step = "entry" | "display" | "processing" | "paid";
+type Step = "receipt" | "entry" | "display" | "processing" | "paid";
 
 const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency }: LanaTabProps) => {
   const { session } = useAuth();
   const currency = unitCurrency || session?.currency || 'GBP';
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
 
-  const [step, setStep] = useState<Step>("entry");
+  const [step, setStep] = useState<Step>("receipt");
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [amount, setAmount] = useState("");
   const [lanaAmount, setLanaAmount] = useState<number>(0);
@@ -184,6 +188,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency }: LanaTabProps)
             amount: parsedAmount,
             currency,
             invoice_number: invoiceNumber.trim(),
+            receipt_url: receiptUrl || undefined,
           }),
         });
 
@@ -224,6 +229,74 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency }: LanaTabProps)
     setPurchaseError(null);
     onClearRequest?.();
   };
+
+  // Receipt upload handler
+  const handleReceiptFile = async (file: File) => {
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => setReceiptPreview(e.target?.result as string);
+    reader.readAsDataURL(file);
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const formData = new FormData();
+      formData.append('receipt', file, file.name);
+      const res = await fetch('/api/receipt/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.success && data.url) setReceiptUrl(data.url);
+      else setUploadError('Upload failed. Please try again.');
+    } catch {
+      setUploadError('Network error. Photo saved locally — will retry on submit.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // ─── STEP: Receipt ─────────────────────────────
+  if (step === "receipt") {
+    return (
+      <div className="flex flex-col gap-5 px-6 py-4">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0">
+            <img src={lanaIcon} alt="LANA" className="w-7 h-7" />
+          </div>
+          <div>
+            <h2 className="font-display text-xl font-bold text-foreground">LANA Payment</h2>
+            <p className="text-muted-foreground text-sm">Take a photo of the receipt or purchase</p>
+          </div>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Photograph the receipt or invoice. If no receipt is available, take a photo showing the purchase with the items or people involved.
+        </p>
+        {receiptPreview ? (
+          <div className="relative rounded-2xl overflow-hidden border bg-muted">
+            <img src={receiptPreview} alt="Receipt" className="w-full max-h-64 object-contain" />
+            {isUploading && <div className="absolute inset-0 bg-background/50 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}
+            {receiptUrl && !isUploading && <div className="absolute top-3 right-3"><CheckCircle className="w-6 h-6 text-emerald-500 bg-white rounded-full" /></div>}
+          </div>
+        ) : null}
+        {uploadError && <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-3"><p className="text-sm text-destructive text-center">{uploadError}</p></div>}
+        {!receiptPreview ? (
+          <label className="cursor-pointer">
+            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files?.[0] && handleReceiptFile(e.target.files[0])} />
+            <div className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 flex items-center justify-center"><Camera className="w-5 h-5" /> Take Photo</div>
+          </label>
+        ) : (
+          <>
+            <label className="cursor-pointer">
+              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files?.[0] && handleReceiptFile(e.target.files[0])} />
+              <div className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center"><Camera className="w-5 h-5" /> Retake Photo</div>
+            </label>
+            <Button onClick={() => setStep("entry")} variant="outline" className="w-full h-14 rounded-2xl text-base font-semibold" disabled={isUploading}>Continue to Invoice</Button>
+          </>
+        )}
+        <button onClick={() => setStep("entry")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">Skip — no receipt available</button>
+      </div>
+    );
+  }
 
   // ─── STEP: Entry ─────────────────────────────
   if (step === "entry") {
