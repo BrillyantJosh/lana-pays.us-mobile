@@ -126,6 +126,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
 
   // Handle receipt photo capture/select
   const handleReceiptFile = async (file: File) => {
+    // Check file size (max 10 MB)
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB.`);
+      return;
+    }
+
     // Show preview
     const reader = new FileReader();
     reader.onload = (e) => setReceiptPreview(e.target?.result as string);
@@ -271,7 +277,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency }: CashTabProps) 
 
   // Submit purchase to Brain
   const submitPurchase = async (wallet: string, hexId: string) => {
-    if (!invoiceNumber.trim() || !amount.trim()) return;
+    if (!invoiceNumber.trim() || !amount.trim()) {
+      setSubmitError('Invoice number and amount are required. Please go back and fill them in.');
+      return;
+    }
 
     const parsedAmount = parseFloat(amount.replace(',', '.'));
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
