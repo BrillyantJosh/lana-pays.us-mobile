@@ -47,6 +47,7 @@ interface PurchaseSnapshot {
   currency: string;
   receiptUrl: string | null;
   receiptType: 'receipt' | 'photo';
+  receiptDescription: string | null;
 }
 
 type Step = "receipt" | "invoice" | "scan" | "register" | "confirmed";
@@ -272,6 +273,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
               invoice_number: pd.invoiceNumber.trim(),
               receipt_url: pd.receiptUrl || undefined,
               receipt_type: pd.receiptType || 'receipt',
+              receipt_description: pd.receiptDescription || undefined,
             }),
           });
           const purchaseData = await res.json();
@@ -552,6 +554,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             currency,
             receiptUrl,
             receiptType,
+            receiptDescription: analysisDescription,
           };
           setStep("scan");
           setScannerOpen(true);
