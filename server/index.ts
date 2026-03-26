@@ -493,9 +493,12 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
     });
 
     const data = await response.json();
+    if (response.status !== 200) {
+      console.error('[mobile] Brain purchase response:', response.status, JSON.stringify(data));
+    }
     res.status(response.status).json(data);
   } catch (error: any) {
-    console.error('Brain API proxy error:', error.message);
+    console.error('[mobile] Brain API proxy error:', error.message);
     res.status(502).json({ success: false, error: 'Failed to reach Brain service' });
   }
 });
