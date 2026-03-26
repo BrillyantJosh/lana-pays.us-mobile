@@ -46,6 +46,7 @@ interface PurchaseSnapshot {
   amount: string;
   currency: string;
   receiptUrl: string | null;
+  receiptType: 'receipt' | 'photo';
 }
 
 type Step = "receipt" | "invoice" | "scan" | "register" | "confirmed";
@@ -94,6 +95,11 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Receipt analysis
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [receiptType, setReceiptType] = useState<'receipt' | 'photo'>('receipt');
+  const [analysisDescription, setAnalysisDescription] = useState<string | null>(null);
+
   // Cross-tab entry: wallet already verified from WalletsTab
   const initializedRef = useRef(false);
   useEffect(() => {
@@ -128,6 +134,30 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       setUploadError('Network error. Photo saved locally — will retry on submit.');
     } finally {
       setIsUploading(false);
+    }
+
+    // Analyze the receipt with Claude Vision
+    setIsAnalyzing(true);
+    try {
+      const analyzeForm = new FormData();
+      analyzeForm.append('receipt', file, file.name);
+      analyzeForm.append('currency', currency);
+      const analyzeRes = await fetch('/api/receipt/analyze', { method: 'POST', body: analyzeForm });
+      const analysis = await analyzeRes.json();
+
+      if (analysis.isReceipt) {
+        setReceiptType('receipt');
+        if (analysis.amount) setAmount(String(analysis.amount));
+        if (analysis.invoiceNumber) setInvoiceNumber(analysis.invoiceNumber);
+        if (analysis.items) setAnalysisDescription(analysis.items);
+      } else {
+        setReceiptType('photo');
+        setAnalysisDescription(analysis.description || 'Photo captured');
+      }
+    } catch {
+      // Analysis failed silently — user can still enter details manually
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -241,6 +271,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
               currency: pd.currency,
               invoice_number: pd.invoiceNumber.trim(),
               receipt_url: pd.receiptUrl || undefined,
+              receipt_type: pd.receiptType || 'receipt',
             }),
           });
           const purchaseData = await res.json();
@@ -354,12 +385,26 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           </div>
         )}
         {uploadError && <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-3"><p className="text-xs text-destructive text-center">{uploadError}</p></div>}
+        {isAnalyzing && (
+          <div className="rounded-2xl bg-primary/5 border border-primary/10 p-3 flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-primary" />
+            <p className="text-xs text-primary">Analyzing image...</p>
+          </div>
+        )}
+        {!isAnalyzing && analysisDescription && receiptPreview && (
+          <div className={`rounded-2xl p-3 border ${receiptType === 'receipt' ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/10' : 'bg-amber-50 dark:bg-amber-500/5 border-amber-200 dark:border-amber-500/10'}`}>
+            <p className={`text-xs font-medium ${receiptType === 'receipt' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}`}>
+              {receiptType === 'receipt' ? '✓ Receipt detected' : '📷 Photo (not a receipt)'}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">{analysisDescription}</p>
+          </div>
+        )}
         <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptFile(f); }} className="hidden" />
         <div className="flex flex-col gap-3">
-          <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
+          <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isAnalyzing} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
             <Camera className="w-5 h-5" />{receiptPreview ? 'Retake Photo' : 'Take Photo'}
           </Button>
-          {(receiptUrl || receiptPreview) && (
+          {(receiptUrl || receiptPreview) && !isAnalyzing && (
             <Button onClick={() => setStep("invoice")} disabled={isUploading} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-secondary text-foreground hover:bg-secondary/80">Continue to Invoice</Button>
           )}
           <button onClick={() => setStep("invoice")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">Skip — no receipt available</button>
@@ -468,8 +513,18 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       )}
       <div className="glass-card rounded-2xl p-5 space-y-4">
         <div className="space-y-2">
-          <Label className="text-sm font-medium text-foreground">Invoice Number <span className="text-destructive">*</span></Label>
-          <Input placeholder="e.g. 2024-001234" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} className="h-12 rounded-xl bg-background border-input" />
+          <Label className="text-sm font-medium text-foreground">
+            {receiptType === 'receipt' ? 'Invoice Number' : 'Transaction Description'} <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            placeholder={receiptType === 'receipt' ? 'e.g. 2024-001234' : 'Describe the transaction'}
+            value={invoiceNumber}
+            onChange={(e) => setInvoiceNumber(e.target.value)}
+            className="h-12 rounded-xl bg-background border-input"
+          />
+          {receiptType === 'photo' && (
+            <p className="text-[11px] text-muted-foreground">No receipt detected — please describe what was purchased.</p>
+          )}
         </div>
         <div className="space-y-2">
           <Label className="text-sm font-medium text-foreground">Amount ({currencySymbol}) <span className="text-destructive">*</span></Label>
@@ -496,6 +551,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             amount,
             currency,
             receiptUrl,
+            receiptType,
           };
           setStep("scan");
           setScannerOpen(true);

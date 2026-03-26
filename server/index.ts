@@ -609,6 +609,86 @@ app.post('/api/receipt/upload', receiptUpload.single('receipt'), async (req, res
   }
 });
 
+// ─── Receipt Analysis (Claude Vision) ──────────────────
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+
+app.post('/api/receipt/analyze', receiptUpload.single('receipt'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No image provided' });
+  }
+
+  if (!ANTHROPIC_API_KEY) {
+    return res.json({ isReceipt: false, description: 'Receipt analysis not configured', amount: null, invoiceNumber: null });
+  }
+
+  try {
+    const base64Image = req.file.buffer.toString('base64');
+    const mediaType = req.file.mimetype as 'image/jpeg' | 'image/png' | 'image/webp';
+    const currency = (req.body.currency as string) || 'EUR';
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 500,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: mediaType, data: base64Image },
+            },
+            {
+              type: 'text',
+              text: `Analyze this image. Respond ONLY with valid JSON (no markdown, no code blocks).
+
+If this is a receipt/invoice/bill:
+{"isReceipt":true,"amount":NUMBER_OR_NULL,"currency":"${currency}","invoiceNumber":"STRING_OR_NULL","items":"brief description of purchased items"}
+
+If this is NOT a receipt (photo of people, items, scene, etc.):
+{"isReceipt":false,"description":"what the image shows in 1-2 sentences","amount":null,"invoiceNumber":null}
+
+Rules:
+- amount must be a number (no currency symbols), or null if unreadable
+- invoiceNumber: receipt/invoice number if visible, null otherwise
+- For non-receipts, describe what you see objectively`
+            }
+          ]
+        }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('[mobile] Claude Vision error:', response.status, errText);
+      return res.json({ isReceipt: false, description: 'Analysis failed', amount: null, invoiceNumber: null });
+    }
+
+    const result = await response.json();
+    const text = result.content?.[0]?.text || '{}';
+
+    // Parse the JSON response (handle potential markdown wrapping)
+    let analysis;
+    try {
+      const jsonStr = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      analysis = JSON.parse(jsonStr);
+    } catch {
+      console.warn('[mobile] Failed to parse Claude response:', text);
+      analysis = { isReceipt: false, description: text.slice(0, 200), amount: null, invoiceNumber: null };
+    }
+
+    res.json(analysis);
+  } catch (err: any) {
+    console.error('[mobile] Receipt analysis error:', err.message);
+    res.json({ isReceipt: false, description: 'Analysis error', amount: null, invoiceNumber: null });
+  }
+});
+
 // ─── Static Frontend ───────────────────────────────────
 
 const distPath = path.resolve(__dirname, '../dist');
