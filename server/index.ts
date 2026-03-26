@@ -238,6 +238,58 @@ app.post('/api/check-wallet', walletCheckLimiter, async (req, res) => {
 });
 
 /**
+ * Register a wallet via Supabase check_wallet method
+ * Auto-registers virgin (balance=0) wallets and broadcasts Nostr events
+ */
+app.post('/api/register/wallet', walletCheckLimiter, async (req, res) => {
+  const { wallet_id, nostr_id_hex } = req.body;
+
+  if (!wallet_id || typeof wallet_id !== 'string') {
+    return res.status(400).json({ error: 'wallet_id is required' });
+  }
+  if (!/^L[a-zA-Z0-9]{25,34}$/.test(wallet_id)) {
+    return res.status(400).json({ error: 'Invalid wallet address format' });
+  }
+  if (nostr_id_hex && (typeof nostr_id_hex !== 'string' || !/^[a-f0-9]{64}$/.test(nostr_id_hex))) {
+    return res.status(400).json({ error: 'Invalid nostr_id_hex format' });
+  }
+
+  const apiKey = process.env.LANA_REGISTER_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'Registration service not configured' });
+  }
+
+  try {
+    const requestBody: any = {
+      method: 'check_wallet',
+      api_key: apiKey,
+      data: { wallet_id }
+    };
+    if (nostr_id_hex) requestBody.data.nostr_id_hex = nostr_id_hex;
+
+    console.log(`[mobile] Registering wallet ${wallet_id}${nostr_id_hex ? ` with nostr ${nostr_id_hex.slice(0, 8)}...` : ''}`);
+
+    const response = await fetch('https://laluxmwarlejdwyboudz.supabase.co/functions/v1/register-virgin-wallets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      console.error('Wallet registration failed:', response.status, data);
+      return res.status(response.status).json({ error: data.message || 'Registration failed' });
+    }
+
+    console.log(`[mobile] Registration result for ${wallet_id}: ${data.status} - ${data.message}`);
+    res.json(data);
+  } catch (error: any) {
+    console.error('Wallet registration error:', error.message);
+    res.status(500).json({ error: 'Failed to register wallet' });
+  }
+});
+
+/**
  * Get user by hex_id
  */
 app.get('/api/users/:hexId', (req, res) => {
