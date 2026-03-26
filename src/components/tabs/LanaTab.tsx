@@ -633,7 +633,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       </div>
 
       <Button
-        onClick={resetAll}
+        onClick={() => window.location.href = '/'}
         className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
       >
         New Payment

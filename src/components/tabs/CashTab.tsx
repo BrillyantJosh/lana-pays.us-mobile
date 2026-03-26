@@ -500,7 +500,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           <p className="text-lg text-muted-foreground text-center">Invoice #{pd?.invoiceNumber || invoiceNumber}</p>
           <p className="text-xs text-muted-foreground truncate max-w-full">Wallet: {walletId}</p>
         </div>
-        <Button onClick={resetAll} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">New Payment</Button>
+        <Button onClick={() => window.location.href = '/'} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">New Payment</Button>
       </div>
     );
   }
