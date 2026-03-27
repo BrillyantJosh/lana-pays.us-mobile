@@ -242,10 +242,16 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           : Promise.resolve(null),
       ]);
 
-      if (!hasNostrKeys && userLookup?.user) {
-        resolvedHexId = userLookup.user.hex_id;
-        setNostrHexId(userLookup.user.hex_id);
-        setNostrNpubId(userLookup.user.npub);
+      if (!hasNostrKeys) {
+        // Try user lookup first, then fall back to registration data
+        if (userLookup?.user?.hex_id) {
+          resolvedHexId = userLookup.user.hex_id;
+          setNostrHexId(userLookup.user.hex_id);
+          setNostrNpubId(userLookup.user.npub);
+        } else if (regRes?.wallet?.nostr_hex_id) {
+          resolvedHexId = regRes.wallet.nostr_hex_id;
+          setNostrHexId(regRes.wallet.nostr_hex_id);
+        }
       }
 
       if (balanceRes?.ok) setBalance(balanceRes.json);
