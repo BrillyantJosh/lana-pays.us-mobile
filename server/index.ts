@@ -705,14 +705,6 @@ Rules:
   }
 });
 
-// ─── Static Frontend ───────────────────────────────────
-
-const distPath = path.resolve(__dirname, '../dist');
-app.use(express.static(distPath));
-app.get('/{*path}', (req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
-});
-
 // ─── Admin API ──────────────────────────────────────────
 
 function requireAdmin(req: any, res: any): string | null {
@@ -760,6 +752,14 @@ app.put('/api/admin/settings', (req, res) => {
     updated++;
   }
   res.json({ success: true, updated });
+});
+
+// ─── Static Frontend (MUST be after all API routes) ───────────────────────
+
+const distPath = path.resolve(__dirname, '../dist');
+app.use(express.static(distPath));
+app.get('/{*path}', (req, res) => {
+  res.sendFile(path.join(distPath, 'index.html'));
 });
 
 // ─── Start Server ──────────────────────────────────────
