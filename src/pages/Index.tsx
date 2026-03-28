@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from 'react-i18next';
 import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import MenuDrawer from "@/components/MenuDrawer";
@@ -37,6 +38,7 @@ const CURRENCY_SYMBOL: Record<string, string> = {
 type View = "home" | "cash" | "wallets" | "lana" | "profile";
 
 const Index = () => {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const currencySymbol = CURRENCY_SYMBOL[session?.currency || 'GBP'] || '£';
 
@@ -166,12 +168,12 @@ const Index = () => {
             {/* ─── Shop Selector ─── */}
             {loadingUnits ? (
               <div className="rounded-2xl bg-card border border-border p-4 flex items-center justify-center">
-                <span className="text-sm text-muted-foreground animate-pulse">Loading shops...</span>
+                <span className="text-sm text-muted-foreground animate-pulse">{t('home.loadingShops')}</span>
               </div>
             ) : businessUnits.length === 0 ? (
               <div className="rounded-2xl bg-card border border-border p-4 flex items-center gap-3">
                 <Store className="w-5 h-5 text-muted-foreground shrink-0" />
-                <span className="text-sm text-muted-foreground">No shops assigned to your account</span>
+                <span className="text-sm text-muted-foreground">{t('home.noShops')}</span>
               </div>
             ) : businessUnits.length === 1 ? (
               <div className={`rounded-2xl border-2 p-4 flex flex-col gap-2 ${
@@ -202,7 +204,7 @@ const Index = () => {
                     const noFunds = tx.max_amount <= 0;
                     return (
                       <div className="shrink-0 text-right">
-                        <p className="text-xs text-muted-foreground">Max Invoice</p>
+                        <p className="text-xs text-muted-foreground">{t('home.maxInvoice')}</p>
                         <p className={`text-2xl font-black leading-tight ${noFunds ? 'text-destructive' : 'text-primary'}`}>
                           {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </p>
@@ -214,10 +216,10 @@ const Index = () => {
                   <div className="flex items-start gap-2 rounded-xl bg-destructive/10 p-3">
                     <ShieldAlert className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold text-destructive">Suspended</p>
+                      <p className="text-xs font-semibold text-destructive">{t('home.suspended')}</p>
                       <p className="text-xs text-destructive/80">{businessUnits[0].suspension_reason || businessUnits[0].suspension_content}</p>
                       {businessUnits[0].suspension_until && (
-                        <p className="text-xs text-destructive/60 mt-1">Until: {new Date(businessUnits[0].suspension_until * 1000).toLocaleDateString()}</p>
+                        <p className="text-xs text-destructive/60 mt-1">{t('home.suspendedUntil', { date: new Date(businessUnits[0].suspension_until * 1000).toLocaleDateString() })}</p>
                       )}
                     </div>
                   </div>
@@ -225,7 +227,7 @@ const Index = () => {
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide px-1">Select shop</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide px-1">{t('home.selectShop')}</p>
                 <div className="flex flex-col gap-2">
                   {businessUnits.map(unit => (
                     <button
@@ -263,7 +265,7 @@ const Index = () => {
                             const noFunds = tx.max_amount <= 0;
                             return (
                               <div className="shrink-0 text-right">
-                                <p className="text-xs text-muted-foreground">Max Invoice</p>
+                                <p className="text-xs text-muted-foreground">{t('home.maxInvoice')}</p>
                                 <p className={`text-2xl font-black leading-tight ${noFunds ? 'text-destructive' : 'text-primary'}`}>
                                   {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
@@ -284,10 +286,10 @@ const Index = () => {
                         <div className="flex items-start gap-2 rounded-xl bg-destructive/10 p-3 w-full">
                           <ShieldAlert className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
                           <div className="min-w-0 text-left">
-                            <p className="text-xs font-semibold text-destructive">Suspended</p>
+                            <p className="text-xs font-semibold text-destructive">{t('home.suspended')}</p>
                             <p className="text-xs text-destructive/80">{unit.suspension_reason || unit.suspension_content}</p>
                             {unit.suspension_until && (
-                              <p className="text-xs text-destructive/60 mt-1">Until: {new Date(unit.suspension_until * 1000).toLocaleDateString()}</p>
+                              <p className="text-xs text-destructive/60 mt-1">{t('home.suspendedUntil', { date: new Date(unit.suspension_until * 1000).toLocaleDateString() })}</p>
                             )}
                           </div>
                         </div>
@@ -314,8 +316,8 @@ const Index = () => {
                     <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
                       <Banknote className="w-11 h-11 text-primary" />
                     </div>
-                    <span className="text-3xl font-bold text-foreground">Pay with {CURRENCY_SYMBOL[effectiveUnit?.currency || ''] || currencySymbol}</span>
-                    <span className="text-base text-muted-foreground">Cash payment</span>
+                    <span className="text-3xl font-bold text-foreground">{t('home.payWithCurrency', { symbol: CURRENCY_SYMBOL[effectiveUnit?.currency || ''] || currencySymbol })}</span>
+                    <span className="text-base text-muted-foreground">{t('home.cashPayment')}</span>
                   </button>
 
                   <button
@@ -326,13 +328,13 @@ const Index = () => {
                     <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
                       <img src={lanaIcon} alt="Lana" className="w-11 h-11 object-contain dark:invert" />
                     </div>
-                    <span className="text-3xl font-bold text-foreground">Pay with $Lana</span>
-                    <span className="text-base text-muted-foreground">Lana coin payment</span>
+                    <span className="text-3xl font-bold text-foreground">{t('home.payWithLana')}</span>
+                    <span className="text-base text-muted-foreground">{t('home.lanaPayment')}</span>
                   </button>
 
                   {noFunds && !noShopSelected && !isSuspended && (
                     <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
-                      <p className="text-sm text-destructive text-center font-medium">No investor funds available — cannot create invoices</p>
+                      <p className="text-sm text-destructive text-center font-medium">{t('home.noFunds')}</p>
                     </div>
                   )}
                 </>
@@ -350,7 +352,7 @@ const Index = () => {
                 className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors text-sm font-medium"
               >
                 <ArrowLeft className="w-5 h-5" />
-                Back
+                {t('common.back')}
               </button>
             </div>
 

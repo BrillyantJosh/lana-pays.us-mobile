@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from 'react-i18next';
 import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2, UserPlus, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +56,7 @@ type Step = "receipt" | "invoice" | "scan" | "register" | "confirmed";
 const UPLOAD_URL = '/api/receipt/upload';
 
 const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTabProps) => {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const currency = unitCurrency || session?.currency || 'GBP';
   const CurrencyIcon = currencyIcons[currency] || PoundSterling;
@@ -116,7 +118,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   // Handle receipt photo
   const handleReceiptFile = async (file: File) => {
     if (file.size > 10 * 1024 * 1024) {
-      setUploadError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB.`);
+      setUploadError(t('cash.fileTooLarge', { size: (file.size / 1024 / 1024).toFixed(1) }));
       return;
     }
     const reader = new FileReader();
@@ -130,9 +132,9 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       const res = await fetch(UPLOAD_URL, { method: 'POST', body: formData });
       const data = await res.json();
       if (data.success && data.url) setReceiptUrl(data.url);
-      else setUploadError('Upload failed. Please try again.');
+      else setUploadError(t('cash.uploadFailed'));
     } catch {
-      setUploadError('Network error. Photo saved locally — will retry on submit.');
+      setUploadError(t('cash.networkErrorRetry'));
     } finally {
       setIsUploading(false);
     }
@@ -153,7 +155,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         if (analysis.items) setAnalysisDescription(analysis.items);
       } else {
         setReceiptType('photo');
-        setAnalysisDescription(analysis.description || 'Photo captured');
+        setAnalysisDescription(analysis.description || t('cash.photoCaptured'));
       }
     } catch {
       // Analysis failed silently — user can still enter details manually
@@ -197,7 +199,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     const pd = purchaseDataRef.current;
 
     if (!pd || !pd.invoiceNumber.trim() || !pd.amount.trim()) {
-      setSubmitError('Purchase data missing. Please go back and enter invoice details.');
+      setSubmitError(t('cash.purchaseDataMissing'));
       return;
     }
 
@@ -261,7 +263,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           // ══════ SUBMIT PURCHASE — using snapshot data ══════
           const parsedAmount = parseFloat(pd.amount.replace(',', '.'));
           if (isNaN(parsedAmount) || parsedAmount <= 0) {
-            setSubmitError('Invalid amount');
+            setSubmitError(t('cash.invalidAmount'));
             return;
           }
 
@@ -286,7 +288,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           setIsSubmitting(false);
 
           if (!res.ok || !purchaseData.success) {
-            setSubmitError(purchaseData.error || 'Purchase failed. Please try again.');
+            setSubmitError(purchaseData.error || t('cash.purchaseFailed'));
             return;
           }
 
@@ -294,13 +296,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         } else if (hasNostrKeys) {
           setStep("register");
         } else {
-          setCheckError('This wallet is not registered. Scan a WIF Private Key instead to register and pay.');
+          setCheckError(t('cash.walletNotRegistered'));
         }
       } else {
-        setCheckError(regRes.message || 'Failed to verify wallet.');
+        setCheckError(regRes.message || t('cash.walletVerifyFailed'));
       }
     } catch {
-      setCheckError('Invalid scan. Please scan a valid Lana Wallet ID or WIF Private Key.');
+      setCheckError(t('cash.invalidScan'));
     } finally {
       setIsChecking(false);
       setIsSubmitting(false);
@@ -310,10 +312,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   const handleRegister = async () => {
     if (!fullName.trim() || !walletId) return;
     const pd = purchaseDataRef.current;
-    if (!pd) { setSubmitError('Purchase data missing.'); return; }
+    if (!pd) { setSubmitError(t('cash.dataMissing')); return; }
 
     const parsedAmount = parseFloat(pd.amount.replace(',', '.'));
-    if (isNaN(parsedAmount) || parsedAmount <= 0) { setSubmitError('Invalid amount'); return; }
+    if (isNaN(parsedAmount) || parsedAmount <= 0) { setSubmitError(t('cash.invalidAmount')); return; }
 
     setIsSubmitting(true);
     setSubmitError(null);
@@ -334,12 +336,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        setSubmitError(data.error || 'Purchase failed.');
+        setSubmitError(data.error || t('cash.purchaseFailed'));
         return;
       }
       setStep("confirmed");
     } catch {
-      setSubmitError('Network error. Please try again.');
+      setSubmitError(t('cash.networkError'));
     } finally {
       setIsSubmitting(false);
     }
@@ -350,7 +352,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     if (!balance) return null;
     return (
       <div className="glass-card rounded-2xl p-4 space-y-2">
-        {!compact && <h3 className="font-semibold text-sm text-muted-foreground">Customer Balance</h3>}
+        {!compact && <h3 className="font-semibold text-sm text-muted-foreground">{t('cash.customerBalance')}</h3>}
         <div className="flex items-baseline gap-2">
           <span className={`${compact ? 'text-xl' : 'text-2xl'} font-bold text-foreground`}>{balance.lana.toLocaleString()}</span>
           <span className="text-sm text-muted-foreground">LANA</span>
@@ -376,13 +378,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             <Receipt className="w-7 h-7 text-primary" />
           </div>
           <div>
-            <h2 className="font-display text-xl font-bold text-foreground">Cash Payment</h2>
-            <p className="text-muted-foreground text-sm">Take a photo of the receipt or purchase</p>
+            <h2 className="font-display text-xl font-bold text-foreground">{t('cash.title')}</h2>
+            <p className="text-muted-foreground text-sm">{t('cash.receiptSubtitle')}</p>
           </div>
         </div>
         <div className="glass-card rounded-2xl p-4">
           <p className="text-sm text-muted-foreground">
-            Photograph the receipt or invoice. If no receipt is available, take a photo showing the purchase with the items or people involved.
+            {t('cash.receiptInstruction')}
           </p>
         </div>
         {receiptPreview && (
@@ -396,13 +398,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         {isAnalyzing && (
           <div className="rounded-2xl bg-primary/5 border border-primary/10 p-3 flex items-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin text-primary" />
-            <p className="text-xs text-primary">Analyzing image...</p>
+            <p className="text-xs text-primary">{t('cash.analyzingImage')}</p>
           </div>
         )}
         {!isAnalyzing && analysisDescription && receiptPreview && (
           <div className={`rounded-2xl p-3 border ${receiptType === 'receipt' ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/10' : 'bg-amber-50 dark:bg-amber-500/5 border-amber-200 dark:border-amber-500/10'}`}>
             <p className={`text-xs font-medium ${receiptType === 'receipt' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}`}>
-              {receiptType === 'receipt' ? '✓ Receipt detected' : '📷 Photo (not a receipt)'}
+              {receiptType === 'receipt' ? t('cash.receiptDetected') : t('cash.photoNotReceipt')}
             </p>
             <p className="text-xs text-muted-foreground mt-1">{analysisDescription}</p>
           </div>
@@ -411,19 +413,19 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         <div className="flex flex-col gap-3">
           {!receiptPreview ? (
             <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isAnalyzing} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
-              <Camera className="w-5 h-5" />Take Photo
+              <Camera className="w-5 h-5" />{t('cash.takePhoto')}
             </Button>
           ) : (
             <>
               {!isAnalyzing && (
-                <Button onClick={() => setStep("invoice")} disabled={isUploading} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">Continue to Invoice</Button>
+                <Button onClick={() => setStep("invoice")} disabled={isUploading} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">{t('cash.continueToInvoice')}</Button>
               )}
               <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isAnalyzing} variant="outline" className="w-full h-12 rounded-2xl text-sm font-medium gap-2">
-                <Camera className="w-4 h-4" />Retake Photo
+                <Camera className="w-4 h-4" />{t('cash.retakePhoto')}
               </Button>
             </>
           )}
-          <button onClick={() => setStep("invoice")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">Skip — no receipt available</button>
+          <button onClick={() => setStep("invoice")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">{t('cash.skipNoReceipt')}</button>
         </div>
       </div>
     );
@@ -438,23 +440,23 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0"><CurrencyIcon className="w-7 h-7 text-primary" /></div>
           <div>
-            <h2 className="font-display text-xl font-bold text-foreground">Cash Payment</h2>
-            <p className="text-muted-foreground text-sm">Scan customer wallet or WIF key</p>
+            <h2 className="font-display text-xl font-bold text-foreground">{t('cash.title')}</h2>
+            <p className="text-muted-foreground text-sm">{t('cash.scanSubtitle')}</p>
           </div>
         </div>
-        {isChecking && <div className="flex flex-col items-center gap-3 py-12"><Loader2 className="w-10 h-10 animate-spin text-primary" /><p className="text-sm text-muted-foreground">Checking wallet...</p></div>}
+        {isChecking && <div className="flex flex-col items-center gap-3 py-12"><Loader2 className="w-10 h-10 animate-spin text-primary" /><p className="text-sm text-muted-foreground">{t('cash.checkingWallet')}</p></div>}
         {(checkError || submitError) && !isChecking && (
           <div className="space-y-4">
             <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4"><p className="text-sm text-destructive text-center">{checkError || submitError}</p></div>
-            <Button onClick={() => { setCheckError(null); setSubmitError(null); setScannerOpen(true); }} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90"><Camera className="w-5 h-5" />Scan Again</Button>
+            <Button onClick={() => { setCheckError(null); setSubmitError(null); setScannerOpen(true); }} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90"><Camera className="w-5 h-5" />{t('common.scanAgain')}</Button>
           </div>
         )}
         {!isChecking && !checkError && !submitError && (
           <div className="flex flex-col items-center gap-4 py-8">
-            <Button onClick={() => setScannerOpen(true)} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"><Camera className="w-5 h-5" />Scan Customer</Button>
+            <Button onClick={() => setScannerOpen(true)} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"><Camera className="w-5 h-5" />{t('cash.scanTitle')}</Button>
           </div>
         )}
-        <QRScanner isOpen={scannerOpen} onClose={() => setScannerOpen(false)} onScan={handleScan} title="Scan Customer" description="Scan a wallet address or WIF private key" />
+        <QRScanner isOpen={scannerOpen} onClose={() => setScannerOpen(false)} onScan={handleScan} title={t('cash.scanTitle')} description={t('cash.scanDescription')} />
       </div>
     );
   }
@@ -467,27 +469,27 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       <div className="flex flex-col gap-5 px-6 py-4">
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0"><UserPlus className="w-7 h-7 text-primary" /></div>
-          <div><h2 className="font-display text-xl font-bold text-foreground">Register Wallet</h2><p className="text-muted-foreground text-sm">This wallet needs to be registered first</p></div>
+          <div><h2 className="font-display text-xl font-bold text-foreground">{t('cash.registerTitle')}</h2><p className="text-muted-foreground text-sm">{t('cash.registerSubtitle')}</p></div>
         </div>
         <BalanceCard compact />
         {submitError && <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4"><p className="text-sm text-destructive text-center">{submitError}</p></div>}
         <div className="space-y-3">
-          <div className="space-y-1.5"><Label className="text-xs font-medium text-muted-foreground">Full Name <span className="text-destructive">*</span></Label><Input placeholder="First and last name" value={fullName} onChange={(e) => setFullName(e.target.value)} className="h-11 rounded-xl" /></div>
-          <div className="space-y-1.5"><Label className="text-xs font-medium text-muted-foreground">Email</Label><Input type="email" placeholder="email@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className="h-11 rounded-xl" /></div>
+          <div className="space-y-1.5"><Label className="text-xs font-medium text-muted-foreground">{t('cash.fullName')} <span className="text-destructive">*</span></Label><Input placeholder={t('cash.fullNamePlaceholder')} value={fullName} onChange={(e) => setFullName(e.target.value)} className="h-11 rounded-xl" /></div>
+          <div className="space-y-1.5"><Label className="text-xs font-medium text-muted-foreground">{t('profile.email')}</Label><Input type="email" placeholder={t('cash.emailPlaceholder')} value={email} onChange={(e) => setEmail(e.target.value)} className="h-11 rounded-xl" /></div>
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground">Mobile</Label>
+            <Label className="text-xs font-medium text-muted-foreground">{t('cash.mobile')}</Label>
             <div className="flex gap-2">
               <select value={countryCode} onChange={(e) => setCountryCode(e.target.value)} className="h-11 rounded-xl border border-input bg-background px-3 text-sm min-w-[90px]">
                 {COUNTRY_CODES.map((c) => <option key={c.code} value={c.code}>{c.country} {c.code}</option>)}
               </select>
-              <Input type="tel" placeholder="Phone number" value={mobile} onChange={(e) => setMobile(e.target.value)} className="h-11 rounded-xl flex-1" />
+              <Input type="tel" placeholder={t('cash.phonePlaceholder')} value={mobile} onChange={(e) => setMobile(e.target.value)} className="h-11 rounded-xl flex-1" />
             </div>
           </div>
         </div>
         <Button onClick={handleRegister} disabled={!fullName.trim() || isSubmitting} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
-          <UserPlus className="w-5 h-5" />{isSubmitting ? 'Processing...' : 'Register & Continue'}
+          <UserPlus className="w-5 h-5" />{isSubmitting ? t('cash.processing') : t('cash.registerAndContinue')}
         </Button>
-        <button onClick={resetAll} className="text-sm text-muted-foreground text-center hover:text-foreground transition-colors">Scan Another</button>
+        <button onClick={resetAll} className="text-sm text-muted-foreground text-center hover:text-foreground transition-colors">{t('common.scanAnother')}</button>
       </div>
     );
   }
@@ -501,12 +503,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       <div className="flex flex-col gap-5 px-6 py-4">
         <div className="flex flex-col items-center gap-4 py-10">
           <CheckCircle2 className="w-16 h-16 text-primary" />
-          <h2 className="text-3xl font-black text-foreground">Payment Confirmed</h2>
+          <h2 className="text-3xl font-black text-foreground">{t('cash.confirmedTitle')}</h2>
           <p className="text-2xl font-bold text-primary text-center">{currencySymbol}{pd ? parseFloat(pd.amount.replace(',', '.')).toFixed(2) : '0.00'}</p>
-          <p className="text-lg text-muted-foreground text-center">Invoice #{pd?.invoiceNumber || invoiceNumber}</p>
-          <p className="text-xs text-muted-foreground truncate max-w-full">Wallet: {walletId}</p>
+          <p className="text-lg text-muted-foreground text-center">{t('cash.invoiceLabel', { number: pd?.invoiceNumber || invoiceNumber })}</p>
+          <p className="text-xs text-muted-foreground truncate max-w-full">{t('cash.walletLabel', { address: walletId })}</p>
         </div>
-        <Button onClick={() => window.location.href = '/'} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">New Payment</Button>
+        <Button onClick={() => window.location.href = '/'} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">{t('common.newPayment')}</Button>
       </div>
     );
   }
@@ -518,41 +520,41 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     <div className="flex flex-col gap-5 px-6 py-4">
       <div className="flex items-center gap-4">
         <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0"><CurrencyIcon className="w-7 h-7 text-primary" /></div>
-        <div><h2 className="font-display text-xl font-bold text-foreground">Invoice Details</h2><p className="text-muted-foreground text-sm">Enter invoice number and amount</p></div>
+        <div><h2 className="font-display text-xl font-bold text-foreground">{t('cash.invoiceTitle')}</h2><p className="text-muted-foreground text-sm">{t('cash.invoiceSubtitle')}</p></div>
       </div>
       {receiptPreview && (
         <div className="flex items-center gap-3 glass-card rounded-xl p-3">
           <img src={receiptPreview} alt="Receipt" className="w-12 h-12 rounded-lg object-cover" />
-          <div className="flex-1 min-w-0"><p className="text-xs font-medium text-foreground">Receipt attached</p><p className="text-[10px] text-muted-foreground truncate">{receiptUrl || 'Uploading...'}</p></div>
+          <div className="flex-1 min-w-0"><p className="text-xs font-medium text-foreground">{t('cash.receiptAttached')}</p><p className="text-[10px] text-muted-foreground truncate">{receiptUrl || t('cash.uploading')}</p></div>
           {receiptUrl && <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />}
         </div>
       )}
       <div className="glass-card rounded-2xl p-5 space-y-4">
         <div className="space-y-2">
           <Label className="text-sm font-medium text-foreground">
-            {receiptType === 'receipt' ? 'Invoice Number' : 'Transaction Description'} <span className="text-destructive">*</span>
+            {receiptType === 'receipt' ? t('cash.invoiceNumber') : t('cash.transactionDescription')} <span className="text-destructive">*</span>
           </Label>
           <Input
-            placeholder={receiptType === 'receipt' ? 'e.g. 2024-001234' : 'Describe the transaction'}
+            placeholder={receiptType === 'receipt' ? t('cash.invoicePlaceholder') : t('cash.descriptionPlaceholder')}
             value={invoiceNumber}
             onChange={(e) => setInvoiceNumber(e.target.value)}
             className="h-12 rounded-xl bg-background border-input"
           />
           {receiptType === 'photo' && (
-            <p className="text-[11px] text-muted-foreground">No receipt detected — please describe what was purchased.</p>
+            <p className="text-[11px] text-muted-foreground">{t('cash.noReceiptDescription')}</p>
           )}
         </div>
         <div className="space-y-2">
-          <Label className="text-sm font-medium text-foreground">Amount ({currencySymbol}) <span className="text-destructive">*</span></Label>
-          <Input type="text" inputMode="decimal" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ''))} className="h-12 rounded-xl bg-background border-input" />
+          <Label className="text-sm font-medium text-foreground">{t('cash.amount', { symbol: currencySymbol })} <span className="text-destructive">*</span></Label>
+          <Input type="text" inputMode="decimal" placeholder={t('cash.amountPlaceholder')} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ''))} className="h-12 rounded-xl bg-background border-input" />
           {(() => {
             const maxTx = (window as any).__maxTransactionAmount;
             const parsed = parseFloat(amount.replace(',', '.'));
             if (maxTx !== null && maxTx !== undefined && maxTx <= 0) {
-              return <p className="text-xs text-destructive mt-1">No investor funds available</p>;
+              return <p className="text-xs text-destructive mt-1">{t('cash.noFunds')}</p>;
             }
             if (maxTx !== null && maxTx !== undefined && !isNaN(parsed) && parsed > maxTx) {
-              return <p className="text-xs text-destructive mt-1">Exceeds max transaction limit ({currencySymbol}{maxTx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</p>;
+              return <p className="text-xs text-destructive mt-1">{t('cash.exceedsMax', { symbol: currencySymbol, amount: maxTx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}</p>;
             }
             return null;
           })()}
@@ -584,9 +586,9 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         })()}
         className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
       >
-        <Camera className="w-5 h-5" />Scan Customer Wallet
+        <Camera className="w-5 h-5" />{t('cash.scanCustomerWallet')}
       </Button>
-      <button onClick={resetAll} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors">Start Over</button>
+      <button onClick={resetAll} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors">{t('common.startOver')}</button>
     </div>
   );
 };

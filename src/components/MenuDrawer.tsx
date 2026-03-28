@@ -1,7 +1,24 @@
 import { useState } from "react";
-import { X, HelpCircle, LogOut, Store, UserPen, Copy, Check, History, Wallet } from "lucide-react";
+import { X, HelpCircle, LogOut, Store, UserPen, Copy, Check, History, Wallet, Globe } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { changeLanguage, getCurrentLanguage } from "@/i18n";
+
+const LANGUAGES = [
+  { code: 'en', native: 'English' },
+  { code: 'sl', native: 'Slovenščina' },
+  { code: 'hu', native: 'Magyar' },
+  { code: 'it', native: 'Italiano' },
+  { code: 'es', native: 'Español' },
+  { code: 'pl', native: 'Polski' },
+  { code: 'pt', native: 'Português' },
+  { code: 'de', native: 'Deutsch' },
+  { code: 'hr', native: 'Hrvatski' },
+  { code: 'sr', native: 'Srpski' },
+  { code: 'ru', native: 'Русский' },
+  { code: 'zh', native: '中文' },
+];
 
 interface MenuDrawerProps {
   open: boolean;
@@ -12,7 +29,9 @@ interface MenuDrawerProps {
 const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
   const { session, logout } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const [showLangPicker, setShowLangPicker] = useState(false);
 
   const handleSignOut = () => {
     logout();
@@ -25,12 +44,20 @@ const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
     onEditProfile?.();
   };
 
+  const handleLanguageSelect = (code: string) => {
+    changeLanguage(code);
+    setShowLangPicker(false);
+  };
+
+  const currentLang = getCurrentLanguage();
+  const currentLangName = LANGUAGES.find(l => l.code === currentLang)?.native || 'English';
+
   const menuItems = [
-    { label: "Profile", icon: UserPen, action: handleEditProfile },
-    { label: "Shop", icon: Store, action: () => { onClose(); window.open('https://shop.lanapays.us', '_blank'); } },
-    { label: "Check Wallet", icon: Wallet, action: () => { onClose(); window.open('https://check.lanapays.us', '_blank'); } },
-    { label: "History", icon: History, action: () => { onClose(); window.open('https://brain.lanapays.us', '_blank'); } },
-    { label: "Help", icon: HelpCircle, action: () => {} },
+    { label: t('menu.profile'), icon: UserPen, action: handleEditProfile },
+    { label: t('menu.shop'), icon: Store, action: () => { onClose(); window.open('https://shop.lanapays.us', '_blank'); } },
+    { label: t('menu.checkWallet'), icon: Wallet, action: () => { onClose(); window.open('https://check.lanapays.us', '_blank'); } },
+    { label: t('menu.history'), icon: History, action: () => { onClose(); window.open('https://brain.lanapays.us', '_blank'); } },
+    { label: t('menu.help'), icon: HelpCircle, action: () => {} },
   ];
 
   return (
@@ -49,7 +76,7 @@ const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
         }`}
       >
         <div className="flex items-center justify-between p-4 border-b border-border">
-          <span className="font-display font-semibold text-foreground">Menu</span>
+          <span className="font-display font-semibold text-foreground">{t('menu.title')}</span>
           <button
             onClick={onClose}
             className="w-9 h-9 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
@@ -62,7 +89,7 @@ const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
         {session && (
           <div className="px-4 py-3 border-b border-border">
             <p className="text-sm font-medium text-foreground truncate">
-              {session.profileDisplayName || session.profileName || 'Lana User'}
+              {session.profileDisplayName || session.profileName || t('menu.defaultUser')}
             </p>
             <button
               onClick={() => {
@@ -72,7 +99,7 @@ const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
                 });
               }}
               className="flex items-center gap-1.5 mt-1 group"
-              title="Copy Nostr Hex ID"
+              title={t('menu.copyHexId')}
             >
               <p className="text-xs text-muted-foreground truncate font-mono">
                 {session.nostrHexId.slice(0, 12)}...{session.nostrHexId.slice(-8)}
@@ -98,6 +125,35 @@ const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
             </button>
           ))}
 
+          {/* Language selector */}
+          <button
+            onClick={() => setShowLangPicker(!showLangPicker)}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl text-foreground hover:bg-secondary transition-colors text-sm font-medium"
+          >
+            <Globe className="w-5 h-5 text-muted-foreground" />
+            <span className="flex-1 text-left">{t('menu.language')}</span>
+            <span className="text-xs text-muted-foreground">{currentLangName}</span>
+          </button>
+
+          {showLangPicker && (
+            <div className="ml-8 mr-2 mb-1 rounded-xl bg-secondary/50 border border-border overflow-hidden max-h-64 overflow-y-auto">
+              {LANGUAGES.map(lang => (
+                <button
+                  key={lang.code}
+                  onClick={() => handleLanguageSelect(lang.code)}
+                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm transition-colors ${
+                    lang.code === currentLang
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-foreground hover:bg-secondary'
+                  }`}
+                >
+                  <span>{lang.native}</span>
+                  {lang.code === currentLang && <Check className="w-4 h-4 text-primary" />}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="border-t border-border my-2" />
 
           <button
@@ -105,7 +161,7 @@ const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
             className="flex items-center gap-3 px-4 py-3 rounded-xl text-destructive hover:bg-destructive/10 transition-colors text-sm font-medium"
           >
             <LogOut className="w-5 h-5" />
-            Sign Out
+            {t('menu.signOut')}
           </button>
         </div>
       </div>

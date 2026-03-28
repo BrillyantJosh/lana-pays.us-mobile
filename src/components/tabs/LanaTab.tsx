@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from 'react-i18next';
 import { Loader2, CheckCircle2, AlertCircle, Snowflake, ExternalLink, Camera, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,7 @@ interface LanaTabProps {
 type Step = "receipt" | "entry" | "display" | "processing" | "paid";
 
 const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaTabProps) => {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const currency = unitCurrency || session?.currency || 'GBP';
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
@@ -87,7 +89,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       const rates = json.data?.exchangeRates;
       const rate = rates?.[currency] || 0;
       if (!rate || rate <= 0) {
-        setRateError('Exchange rate not available. Please try again later.');
+        setRateError(t('lana.rateNotAvailable'));
         setIsLoadingRate(false);
         return;
       }
@@ -97,7 +99,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       setStep("display");
       setWifScannerOpen(true);
     } catch {
-      setRateError('Failed to fetch exchange rate. Please try again.');
+      setRateError(t('lana.rateFetchFailed'));
     } finally {
       setIsLoadingRate(false);
     }
@@ -114,13 +116,13 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
 
     // Reject wallet addresses
     if (trimmed.startsWith('L') && trimmed.length >= 26 && trimmed.length <= 35) {
-      setScanError('This looks like a Wallet Address, not a Private Key. The customer needs to show their WIF Private Key.');
+      setScanError(t('lana.walletAddressNotWif'));
       return;
     }
 
     // Reject Nostr keys
     if (trimmed.startsWith('npub') || trimmed.startsWith('nsec')) {
-      setScanError('This is a Nostr key, not a LanaCoin WIF Private Key.');
+      setScanError(t('lana.nostrKeyNotWif'));
       return;
     }
 
@@ -161,7 +163,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       setCustomerBalance(walletLana);
 
       if (walletLana < lanaAmount) {
-        setScanError(`Insufficient balance. Wallet has ${walletLana.toLocaleString()} LANA but ${formatLana(lanaAmount)} LANA is required.`);
+        setScanError(t('lana.insufficientBalance', { balance: walletLana.toLocaleString(), required: formatLana(lanaAmount) }));
         setIsCheckingBalance(false);
         return;
       }
@@ -174,12 +176,12 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       // Input validation
       const parsedAmount = parseFloat(amount.replace(',', '.'));
       if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        setPurchaseError('Invalid amount');
+        setPurchaseError(t('cash.invalidAmount'));
         return;
       }
       const maxTx = (window as any).__maxTransactionAmount;
       if (maxTx && parsedAmount > maxTx) {
-        setPurchaseError(`Amount exceeds maximum transaction limit of ${maxTx}`);
+        setPurchaseError(t('lana.exceedsMaxLimit', { amount: maxTx }));
         return;
       }
 
@@ -205,7 +207,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         const brainData = await purchaseRes.json();
 
         if (!purchaseRes.ok || !brainData.success) {
-          setPurchaseError(brainData.error || 'Purchase processing failed');
+          setPurchaseError(brainData.error || t('lana.purchaseFailed'));
           setStep("display");
           return;
         }
@@ -213,12 +215,12 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         setTxHash(brainData.data.tx_hash || brainData.data.transaction_id);
         setStep("paid");
       } catch (err: any) {
-        setPurchaseError('Network error. Please check connection and try again.');
+        setPurchaseError(t('lana.networkError'));
         setStep("display");
       }
 
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : 'Invalid WIF Private Key.');
+      setScanError(err instanceof Error ? err.message : t('lana.invalidWifKey'));
       setIsCheckingBalance(false);
     }
   };
@@ -243,7 +245,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
   // Receipt upload handler
   const handleReceiptFile = async (file: File) => {
     if (file.size > 10 * 1024 * 1024) {
-      setUploadError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB.`);
+      setUploadError(t('cash.fileTooLarge', { size: (file.size / 1024 / 1024).toFixed(1) }));
       return;
     }
     const reader = new FileReader();
@@ -257,9 +259,9 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       const res = await fetch('/api/receipt/upload', { method: 'POST', body: formData });
       const data = await res.json();
       if (data.success && data.url) setReceiptUrl(data.url);
-      else setUploadError('Upload failed. Please try again.');
+      else setUploadError(t('cash.uploadFailed'));
     } catch {
-      setUploadError('Network error. Photo saved locally — will retry on submit.');
+      setUploadError(t('cash.networkErrorRetry'));
     } finally {
       setIsUploading(false);
     }
@@ -279,7 +281,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         if (analysis.items) setAnalysisDescription(analysis.items);
       } else {
         setReceiptType('photo');
-        setAnalysisDescription(analysis.description || 'Photo captured');
+        setAnalysisDescription(analysis.description || t('cash.photoCaptured'));
       }
     } catch {}
     finally { setIsAnalyzing(false); }
@@ -294,12 +296,12 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             <img src={lanaIcon} alt="LANA" className="w-7 h-7" />
           </div>
           <div>
-            <h2 className="font-display text-xl font-bold text-foreground">LANA Payment</h2>
-            <p className="text-muted-foreground text-sm">Take a photo of the receipt or purchase</p>
+            <h2 className="font-display text-xl font-bold text-foreground">{t('lana.title')}</h2>
+            <p className="text-muted-foreground text-sm">{t('lana.receiptSubtitle')}</p>
           </div>
         </div>
         <p className="text-sm text-muted-foreground">
-          Photograph the receipt or invoice. If no receipt is available, take a photo showing the purchase with the items or people involved.
+          {t('cash.receiptInstruction')}
         </p>
         {receiptPreview ? (
           <div className="relative rounded-2xl overflow-hidden border bg-muted">
@@ -312,13 +314,13 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         {isAnalyzing && (
           <div className="rounded-2xl bg-primary/5 border border-primary/10 p-3 flex items-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin text-primary" />
-            <p className="text-xs text-primary">Analyzing image...</p>
+            <p className="text-xs text-primary">{t('cash.analyzingImage')}</p>
           </div>
         )}
         {!isAnalyzing && analysisDescription && receiptPreview && (
           <div className={`rounded-2xl p-3 border ${receiptType === 'receipt' ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/10' : 'bg-amber-50 dark:bg-amber-500/5 border-amber-200 dark:border-amber-500/10'}`}>
             <p className={`text-xs font-medium ${receiptType === 'receipt' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}`}>
-              {receiptType === 'receipt' ? '✓ Receipt detected' : '📷 Photo (not a receipt)'}
+              {receiptType === 'receipt' ? t('cash.receiptDetected') : t('cash.photoNotReceipt')}
             </p>
             <p className="text-xs text-muted-foreground mt-1">{analysisDescription}</p>
           </div>
@@ -326,20 +328,20 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         {!receiptPreview ? (
           <label className="cursor-pointer">
             <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files?.[0] && handleReceiptFile(e.target.files[0])} />
-            <div className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 flex items-center justify-center"><Camera className="w-5 h-5" /> Take Photo</div>
+            <div className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 flex items-center justify-center"><Camera className="w-5 h-5" /> {t('cash.takePhoto')}</div>
           </label>
         ) : (
           <>
             {!isAnalyzing && (
-              <Button onClick={() => setStep("entry")} className="w-full h-14 rounded-2xl text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20" disabled={isUploading}>Continue to Invoice</Button>
+              <Button onClick={() => setStep("entry")} className="w-full h-14 rounded-2xl text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20" disabled={isUploading}>{t('cash.continueToInvoice')}</Button>
             )}
             <label className="cursor-pointer">
               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.target.files?.[0] && handleReceiptFile(e.target.files[0])} />
-              <div className="w-full h-12 rounded-2xl text-sm font-medium gap-2 border border-input hover:bg-accent flex items-center justify-center"><Camera className="w-4 h-4" /> Retake Photo</div>
+              <div className="w-full h-12 rounded-2xl text-sm font-medium gap-2 border border-input hover:bg-accent flex items-center justify-center"><Camera className="w-4 h-4" /> {t('cash.retakePhoto')}</div>
             </label>
           </>
         )}
-        <button onClick={() => setStep("entry")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">Skip — no receipt available</button>
+        <button onClick={() => setStep("entry")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">{t('cash.skipNoReceipt')}</button>
       </div>
     );
   }
@@ -353,18 +355,18 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain dark:invert" />
           </div>
           <div>
-            <h2 className="font-display text-xl font-bold text-foreground">$Lana Payment</h2>
-            <p className="text-muted-foreground text-sm">Enter invoice details</p>
+            <h2 className="font-display text-xl font-bold text-foreground">{t('lana.entryTitle')}</h2>
+            <p className="text-muted-foreground text-sm">{t('lana.entrySubtitle')}</p>
           </div>
         </div>
 
         <div className="glass-card rounded-2xl p-5 space-y-4">
           <div className="space-y-2">
             <Label className="text-sm font-medium text-foreground">
-              {receiptType === 'receipt' ? 'Invoice Number' : 'Transaction Description'} <span className="text-destructive">*</span>
+              {receiptType === 'receipt' ? t('cash.invoiceNumber') : t('cash.transactionDescription')} <span className="text-destructive">*</span>
             </Label>
             <Input
-              placeholder={receiptType === 'receipt' ? 'e.g. 2024-001234' : 'Describe the transaction'}
+              placeholder={receiptType === 'receipt' ? t('cash.invoicePlaceholder') : t('cash.descriptionPlaceholder')}
               value={invoiceNumber}
               onChange={(e) => setInvoiceNumber(e.target.value)}
               className="h-12 rounded-xl bg-background border-input"
@@ -372,12 +374,12 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           </div>
           <div className="space-y-2">
             <Label className="text-sm font-medium text-foreground">
-              Amount ({currencySymbol}) <span className="text-destructive">*</span>
+              {t('cash.amount', { symbol: currencySymbol })} <span className="text-destructive">*</span>
             </Label>
             <Input
               type="text"
               inputMode="decimal"
-              placeholder="0.00"
+              placeholder={t('cash.amountPlaceholder')}
               value={amount}
               onChange={(e) => {
                 const v = e.target.value.replace(/[^0-9.,]/g, '');
@@ -389,12 +391,12 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
               const maxTx = (window as any).__maxTransactionAmount;
               const parsed = parseFloat(amount.replace(',', '.'));
               if (maxTx !== null && maxTx !== undefined && maxTx <= 0) {
-                return <p className="text-xs text-destructive mt-1">No investor funds available</p>;
+                return <p className="text-xs text-destructive mt-1">{t('cash.noFunds')}</p>;
               }
               if (maxTx !== null && maxTx !== undefined && !isNaN(parsed) && parsed > maxTx) {
                 return (
                   <p className="text-xs text-destructive mt-1">
-                    Exceeds max transaction limit ({currencySymbol}{maxTx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                    {t('cash.exceedsMax', { symbol: currencySymbol, amount: maxTx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}
                   </p>
                 );
               }
@@ -422,10 +424,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           {isLoadingRate ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin" />
-              Loading rate...
+              {t('lana.loadingRate')}
             </>
           ) : (
-            'Continue to Payment'
+            t('lana.continueToPayment')
           )}
         </Button>
       </div>
@@ -438,7 +440,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       <div className="flex flex-col gap-5 px-6 py-4">
         {/* Payment amounts — designed for customer to read */}
         <div className="flex flex-col items-center gap-2 py-4">
-          <p className="text-sm text-muted-foreground">Invoice #{invoiceNumber}</p>
+          <p className="text-sm text-muted-foreground">{t('cash.invoiceLabel', { number: invoiceNumber })}</p>
 
           <p className="text-2xl font-semibold text-foreground">
             {currencySymbol}{parseFloat(amount.replace(',', '.')).toFixed(2)}
@@ -453,7 +455,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           </div>
 
           <p className="text-xs text-muted-foreground">
-            1 LANA = {currencySymbol}{parseFloat(exchangeRate.toFixed(8))}
+            {t('lana.rateDisplay', { symbol: currencySymbol, rate: parseFloat(exchangeRate.toFixed(8)) })}
           </p>
         </div>
 
@@ -461,7 +463,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         {isCheckingBalance && (
           <div className="flex flex-col items-center gap-3 py-6">
             <Loader2 className="w-10 h-10 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">Checking wallet balance...</p>
+            <p className="text-sm text-muted-foreground">{t('lana.checkingBalance')}</p>
           </div>
         )}
 
@@ -471,10 +473,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 space-y-3 dark:bg-blue-950/30 dark:border-blue-800">
               <div className="flex items-center gap-3">
                 <Snowflake className="w-5 h-5 text-blue-500 flex-shrink-0" />
-                <p className="text-sm font-medium text-blue-700 dark:text-blue-400">This wallet is frozen</p>
+                <p className="text-sm font-medium text-blue-700 dark:text-blue-400">{t('lana.walletFrozen')}</p>
               </div>
               <p className="text-xs text-muted-foreground">
-                Frozen wallets cannot be used for $Lana payments. Visit the unfreeze portal to resolve this.
+                {t('lana.frozenDescription')}
               </p>
               <a
                 href="https://unfreeze.lanapays.us"
@@ -483,14 +485,14 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
                 className="flex items-center justify-center gap-2 w-full h-11 rounded-xl bg-blue-100 text-blue-700 text-sm font-semibold hover:bg-blue-200 transition-colors dark:bg-blue-900/40 dark:text-blue-400 dark:hover:bg-blue-900/60"
               >
                 <ExternalLink className="w-4 h-4" />
-                Go to Unfreeze Portal
+                {t('lana.goToUnfreeze')}
               </a>
             </div>
             <Button
               onClick={() => { setIsFrozen(false); setWifScannerOpen(true); }}
               className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90"
             >
-              Scan Another WIF
+              {t('lana.scanAnotherWif')}
             </Button>
           </div>
         )}
@@ -508,7 +510,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
               onClick={() => { setPurchaseError(null); setWifScannerOpen(true); }}
               className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90"
             >
-              Try Again
+              {t('common.tryAgain')}
             </Button>
           </div>
         )}
@@ -526,7 +528,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
               onClick={() => { setScanError(null); setWifScannerOpen(true); }}
               className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90"
             >
-              Scan Again
+              {t('common.scanAgain')}
             </Button>
           </div>
         )}
@@ -535,14 +537,14 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         {!scanError && !purchaseError && !isCheckingBalance && !isFrozen && (
           <div className="flex flex-col items-center gap-4">
             <p className="text-sm text-muted-foreground text-center">
-              Ask the customer to show their WIF Private Key QR code
+              {t('lana.askCustomerWif')}
             </p>
             <Button
               onClick={() => setWifScannerOpen(true)}
               className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
             >
               <img src={lanaIcon} alt="Lana" className="w-5 h-5 object-contain dark:invert" />
-              Scan Customer WIF
+              {t('lana.scanCustomerWif')}
             </Button>
           </div>
         )}
@@ -551,8 +553,8 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           isOpen={wifScannerOpen}
           onClose={() => setWifScannerOpen(false)}
           onScan={handleWifScan}
-          title="Scan WIF Key"
-          description="Scan the customer's Lana WIF Private Key"
+          title={t('lana.scanWifTitle')}
+          description={t('lana.scanWifDescription')}
         >
           <div className="flex items-center justify-between rounded-xl bg-secondary p-3">
             <span className="text-sm text-muted-foreground">
@@ -575,9 +577,9 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
     return (
       <div className="flex flex-col items-center justify-center gap-4 px-6 py-16">
         <Loader2 className="w-14 h-14 animate-spin text-primary" />
-        <h2 className="text-xl font-bold text-foreground">Processing Payment</h2>
+        <h2 className="text-xl font-bold text-foreground">{t('lana.processingTitle')}</h2>
         <p className="text-sm text-muted-foreground text-center">
-          Sending {formatLana(lanaAmount)} LANA...
+          {t('lana.sendingLana', { amount: formatLana(lanaAmount) })}
         </p>
       </div>
     );
@@ -588,15 +590,15 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
     <div className="flex flex-col gap-5 px-6 py-4">
       <div className="flex flex-col items-center gap-3 py-8">
         <CheckCircle2 className="w-14 h-14 text-primary" />
-        <h2 className="text-2xl font-bold text-foreground">Paid</h2>
+        <h2 className="text-2xl font-bold text-foreground">{t('lana.paidTitle')}</h2>
         <p className="text-lg text-muted-foreground">
-          Invoice #{invoiceNumber}
+          {t('cash.invoiceLabel', { number: invoiceNumber })}
         </p>
       </div>
 
       <div className="glass-card rounded-2xl p-5 space-y-3">
         <div className="flex justify-between items-baseline">
-          <span className="text-sm text-muted-foreground">Amount</span>
+          <span className="text-sm text-muted-foreground">{t('lana.amountLabel')}</span>
           <span className="text-base font-semibold text-foreground">
             {currencySymbol}{parseFloat(amount.replace(',', '.')).toFixed(2)}
           </span>
@@ -608,18 +610,18 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           </span>
         </div>
         <div className="flex justify-between items-baseline">
-          <span className="text-sm text-muted-foreground">Rate</span>
+          <span className="text-sm text-muted-foreground">{t('lana.rateLabel')}</span>
           <span className="text-sm text-foreground">
-            1 LANA = {currencySymbol}{parseFloat(exchangeRate.toFixed(8))}
+            {t('lana.rateDisplay', { symbol: currencySymbol, rate: parseFloat(exchangeRate.toFixed(8)) })}
           </span>
         </div>
         <div className="pt-2 border-t border-border space-y-1">
-          <p className="text-xs text-muted-foreground">Customer Wallet</p>
+          <p className="text-xs text-muted-foreground">{t('lana.customerWallet')}</p>
           <p className="text-xs font-mono text-foreground break-all">{customerWalletId}</p>
         </div>
         {txHash && (
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">Blockchain TX</p>
+            <p className="text-xs text-muted-foreground">{t('lana.blockchainTx')}</p>
             {txHash.length === 64 ? (
               <a
                 href={`https://chainz.cryptoid.info/lana/tx.dws?${txHash}`}
@@ -640,7 +642,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         onClick={() => window.location.href = '/'}
         className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
       >
-        New Payment
+        {t('common.newPayment')}
       </Button>
     </div>
   );

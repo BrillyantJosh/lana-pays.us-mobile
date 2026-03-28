@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Html5Qrcode } from 'html5-qrcode';
 import { Button } from '@/components/ui/button';
 import { X, QrCode } from 'lucide-react';
@@ -13,7 +14,10 @@ interface QRScannerProps {
   children?: React.ReactNode;
 }
 
-export function QRScanner({ isOpen, onClose, onScan, title = 'Scan QR Code', description = 'Position the QR code within the frame', children }: QRScannerProps) {
+export function QRScanner({ isOpen, onClose, onScan, title, description, children }: QRScannerProps) {
+  const { t } = useTranslation();
+  const resolvedTitle = title || t('qrScanner.defaultTitle');
+  const resolvedDescription = description || t('qrScanner.defaultDescription');
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +46,7 @@ export function QRScanner({ isOpen, onClose, onScan, title = 'Scan QR Code', des
       const cameras = await Html5Qrcode.getCameras();
 
       if (!cameras || cameras.length === 0) {
-        setError('No camera found on this device.');
+        setError(t('qrScanner.noCamera'));
         return;
       }
 
@@ -83,7 +87,7 @@ export function QRScanner({ isOpen, onClose, onScan, title = 'Scan QR Code', des
       setError(null);
     } catch (err) {
       console.error('Failed to start scanner:', err);
-      setError('Failed to access camera. Please check permissions.');
+      setError(t('qrScanner.cameraError'));
     }
   };
 
@@ -110,10 +114,10 @@ export function QRScanner({ isOpen, onClose, onScan, title = 'Scan QR Code', des
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <QrCode className="w-5 h-5" />
-            {title}
+            {resolvedTitle}
           </DialogTitle>
           <DialogDescription>
-            {description}
+            {resolvedDescription}
           </DialogDescription>
         </DialogHeader>
 
@@ -128,7 +132,7 @@ export function QRScanner({ isOpen, onClose, onScan, title = 'Scan QR Code', des
 
           <Button onClick={handleClose} variant="outline" className="w-full">
             <X className="w-4 h-4 mr-2" />
-            Cancel
+            {t('common.cancel')}
           </Button>
         </div>
       </DialogContent>

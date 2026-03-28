@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from 'react-i18next';
 import { ScanLine, KeyRound, Loader2, CheckCircle, XCircle, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { convertWifToIds } from "@/lib/crypto";
@@ -30,6 +31,7 @@ interface DerivedIds {
 }
 
 const RegisterTab = () => {
+  const { t } = useTranslation();
   const [step, setStep] = useState<'scan' | 'checking' | 'registered' | 'form' | 'publishing' | 'done'>('scan');
   const [showScanner, setShowScanner] = useState(false);
   const [wif, setWif] = useState('');
@@ -67,7 +69,7 @@ const RegisterTab = () => {
         setStep('form');
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to check wallet');
+      setError(err.message || t('register.failedToCheck'));
       setStep('scan');
     }
   };
@@ -78,18 +80,18 @@ const RegisterTab = () => {
     const required = ['name', 'display_name', 'about', 'location', 'country', 'orgasmic_profile', 'statement_of_responsibility'];
     for (const key of required) {
       if (!(form as any)[key]?.trim()) {
-        setError(`${key.replace(/_/g, ' ')} is required`);
+        setError(t('register.fieldRequired', { field: key.replace(/_/g, ' ') }));
         return;
       }
     }
     if (form.country.length !== 2) {
-      setError('Country must be a 2-letter code (e.g. SI, US, DE)');
+      setError(t('register.countryCodeError'));
       return;
     }
 
     setStep('publishing');
     setError(null);
-    setStatusMsg('Publishing profile...');
+    setStatusMsg(t('register.publishingProfile'));
 
     try {
       // Fetch relays from system params
@@ -122,10 +124,10 @@ const RegisterTab = () => {
 
       const result = await publishToRelays(signedEvent, relays);
       if (result.success.length === 0) {
-        throw new Error('Failed to publish to any relay');
+        throw new Error(t('register.failedToPublish'));
       }
 
-      setStatusMsg(`Profile published to ${result.success.length} relay(s). Registering wallet...`);
+      setStatusMsg(t('register.profilePublished', { count: result.success.length }));
 
       // Register wallet
       const regRes = await fetch('/api/register/wallet', {
@@ -136,14 +138,14 @@ const RegisterTab = () => {
       const regData = await regRes.json();
 
       if (regRes.ok) {
-        setStatusMsg(`Wallet registered: ${regData.message || 'success'}`);
+        setStatusMsg(t('register.walletRegistered', { message: regData.message || 'success' }));
       } else {
-        setStatusMsg(`Profile published. Wallet: ${regData.error || 'registration pending'}`);
+        setStatusMsg(t('register.profilePublishedPending', { status: regData.error || 'registration pending' }));
       }
 
       setStep('done');
     } catch (err: any) {
-      setError(err.message || 'Registration failed');
+      setError(err.message || t('register.registrationFailed'));
       setStep('form');
     }
   };
@@ -166,9 +168,9 @@ const RegisterTab = () => {
           <KeyRound className="w-10 h-10 text-primary" />
         </div>
         <div className="text-center space-y-2">
-          <h2 className="font-display text-2xl font-bold text-foreground">Register Wallet</h2>
+          <h2 className="font-display text-2xl font-bold text-foreground">{t('register.title')}</h2>
           <p className="text-muted-foreground text-sm max-w-[280px]">
-            Scan your LanaCoin WIF private key to register your wallet on the Lana network
+            {t('register.subtitle')}
           </p>
         </div>
         {error && <p className="text-destructive text-sm text-center">{error}</p>}
@@ -178,12 +180,12 @@ const RegisterTab = () => {
             className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground"
           >
             <ScanLine className="w-5 h-5" />
-            Scan WIF Key
+            {t('register.scanWifKey')}
           </Button>
           <div className="relative">
             <input
               type="password"
-              placeholder="Or paste WIF key..."
+              placeholder={t('register.pasteWifPlaceholder')}
               value={wif}
               onChange={e => setWif(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleWifSubmit(wif)}
@@ -192,7 +194,7 @@ const RegisterTab = () => {
           </div>
           {wif && (
             <Button onClick={() => handleWifSubmit(wif)} variant="outline" className="w-full rounded-xl">
-              Check Registration
+              {t('register.checkRegistration')}
             </Button>
           )}
         </div>
@@ -205,7 +207,7 @@ const RegisterTab = () => {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
         <Loader2 className="w-10 h-10 text-primary animate-spin" />
-        <p className="text-muted-foreground">Checking wallet registration...</p>
+        <p className="text-muted-foreground">{t('register.checkingRegistration')}</p>
       </div>
     );
   }
@@ -215,13 +217,13 @@ const RegisterTab = () => {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 px-6">
         <CheckCircle className="w-16 h-16 text-emerald-500" />
-        <h2 className="text-xl font-bold text-foreground">Already Registered</h2>
+        <h2 className="text-xl font-bold text-foreground">{t('register.alreadyRegistered')}</h2>
         <p className="text-muted-foreground text-sm text-center max-w-[280px]">
-          This wallet is already registered on the Lana network. You can use it to make payments.
+          {t('register.alreadyRegisteredDescription')}
         </p>
         <p className="font-mono text-xs text-muted-foreground">{derivedIds?.walletId}</p>
         <Button onClick={() => { setStep('scan'); setWif(''); }} variant="outline" className="rounded-xl">
-          Check Another
+          {t('common.checkAnother')}
         </Button>
       </div>
     );
@@ -232,11 +234,11 @@ const RegisterTab = () => {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 px-6">
         <CheckCircle className="w-16 h-16 text-emerald-500" />
-        <h2 className="text-xl font-bold text-foreground">Registration Complete</h2>
+        <h2 className="text-xl font-bold text-foreground">{t('register.registrationComplete')}</h2>
         <p className="text-muted-foreground text-sm text-center">{statusMsg}</p>
         <p className="font-mono text-xs text-muted-foreground">{derivedIds?.walletId}</p>
         <Button onClick={() => { setStep('scan'); setWif(''); setDerivedIds(null); }} variant="outline" className="rounded-xl">
-          Register Another
+          {t('register.registerAnother')}
         </Button>
       </div>
     );
@@ -256,12 +258,12 @@ const RegisterTab = () => {
   return (
     <div className="px-4 py-6 max-w-lg mx-auto space-y-4">
       <button onClick={() => setStep('scan')} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="w-4 h-4" /> Back
+        <ArrowLeft className="w-4 h-4" /> {t('common.back')}
       </button>
 
-      <h2 className="text-xl font-bold">Create Profile</h2>
+      <h2 className="text-xl font-bold">{t('register.createProfile')}</h2>
       <p className="text-sm text-muted-foreground">
-        Wallet: <span className="font-mono">{derivedIds?.walletId.slice(0, 12)}...</span>
+        {t('register.walletLabel')} <span className="font-mono">{derivedIds?.walletId.slice(0, 12)}...</span>
       </p>
 
       {error && (
@@ -271,14 +273,14 @@ const RegisterTab = () => {
       )}
 
       <div className="space-y-3">
-        <Field label="Name *" value={form.name} onChange={v => setForm(f => ({...f, name: v}))} placeholder="Your name" />
-        <Field label="Display Name *" value={form.display_name} onChange={v => setForm(f => ({...f, display_name: v}))} placeholder="Display name" />
-        <Field label="About *" value={form.about} onChange={v => setForm(f => ({...f, about: v}))} placeholder="About you..." multiline />
-        <Field label="Location *" value={form.location} onChange={v => setForm(f => ({...f, location: v}))} placeholder="City, Country" />
-        <Field label="Country Code *" value={form.country} onChange={v => setForm(f => ({...f, country: v.toUpperCase()}))} placeholder="SI" maxLength={2} />
+        <Field label={`${t('register.nameLabel')} *`} value={form.name} onChange={v => setForm(f => ({...f, name: v}))} placeholder={t('register.namePlaceholder')} />
+        <Field label={`${t('register.displayNameLabel')} *`} value={form.display_name} onChange={v => setForm(f => ({...f, display_name: v}))} placeholder={t('register.displayNamePlaceholder')} />
+        <Field label={`${t('register.aboutLabel')} *`} value={form.about} onChange={v => setForm(f => ({...f, about: v}))} placeholder={t('register.aboutPlaceholder')} multiline />
+        <Field label={`${t('register.locationLabel')} *`} value={form.location} onChange={v => setForm(f => ({...f, location: v}))} placeholder={t('register.locationPlaceholder')} />
+        <Field label={`${t('register.countryCodeLabel')} *`} value={form.country} onChange={v => setForm(f => ({...f, country: v.toUpperCase()}))} placeholder={t('register.countryCodePlaceholder')} maxLength={2} />
 
         <div>
-          <label className="text-xs font-medium text-muted-foreground">Currency</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('register.currencyLabel')}</label>
           <select value={form.currency} onChange={e => setForm(f => ({...f, currency: e.target.value}))}
             className="w-full mt-1 px-3 py-2 rounded-lg border bg-background text-sm">
             {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -286,19 +288,19 @@ const RegisterTab = () => {
         </div>
 
         <div>
-          <label className="text-xs font-medium text-muted-foreground">Language</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('register.languageLabel')}</label>
           <select value={form.language} onChange={e => setForm(f => ({...f, language: e.target.value}))}
             className="w-full mt-1 px-3 py-2 rounded-lg border bg-background text-sm">
             {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
           </select>
         </div>
 
-        <Field label="Orgasmic Profile *" value={form.orgasmic_profile} onChange={v => setForm(f => ({...f, orgasmic_profile: v}))} placeholder="What excites you..." multiline />
-        <Field label="Statement of Responsibility *" value={form.statement_of_responsibility} onChange={v => setForm(f => ({...f, statement_of_responsibility: v}))} placeholder="I take responsibility..." multiline />
+        <Field label={`${t('register.orgasmicLabel')} *`} value={form.orgasmic_profile} onChange={v => setForm(f => ({...f, orgasmic_profile: v}))} placeholder={t('register.orgasmicPlaceholder')} multiline />
+        <Field label={`${t('register.statementLabel')} *`} value={form.statement_of_responsibility} onChange={v => setForm(f => ({...f, statement_of_responsibility: v}))} placeholder={t('register.statementPlaceholder')} multiline />
       </div>
 
       <Button onClick={handlePublish} className="w-full h-12 rounded-xl text-base font-semibold bg-primary text-primary-foreground">
-        Register Wallet
+        {t('register.registerWallet')}
       </Button>
     </div>
   );

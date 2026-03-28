@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ScanLine, KeyRound, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { QRScanner } from '@/components/QRScanner';
@@ -6,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import lanaIconGreen from '@/assets/lana-icon-green.png';
 
 const Login = () => {
+  const { t } = useTranslation();
   const { login } = useAuth();
   const [scannerOpen, setScannerOpen] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -18,7 +20,7 @@ const Login = () => {
     try {
       await login(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : t('login.failed'));
       setIsLoggingIn(false);
     }
   };
@@ -33,7 +35,7 @@ const Login = () => {
           <div className="text-center space-y-2">
             <h1 className="font-display text-3xl font-bold text-foreground">Lana Pays.Us</h1>
             <p className="text-muted-foreground text-sm max-w-[280px]">
-              Scan your Lana WIF Private Key to sign in
+              {t('login.subtitle')}
             </p>
           </div>
         </div>
@@ -47,12 +49,12 @@ const Login = () => {
             {isLoggingIn ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                Signing in...
+                {t('login.signingIn')}
               </>
             ) : (
               <>
                 <ScanLine className="w-5 h-5" />
-                Scan WIF Key
+                {t('login.scanButton')}
               </>
             )}
           </Button>
@@ -66,7 +68,7 @@ const Login = () => {
 
         <div className="flex items-center gap-2 text-muted-foreground/60">
           <KeyRound className="w-4 h-4" />
-          <span className="text-xs">Your keys never leave your device</span>
+          <span className="text-xs">{t('login.keysNeverLeave')}</span>
         </div>
       </div>
 
@@ -74,8 +76,8 @@ const Login = () => {
         isOpen={scannerOpen}
         onClose={() => setScannerOpen(false)}
         onScan={handleScan}
-        title="Scan WIF Key"
-        description="Scan your Lana WIF Private Key QR code to sign in"
+        title={t('login.scanTitle')}
+        description={t('login.scanDescription')}
       />
     </div>
   );

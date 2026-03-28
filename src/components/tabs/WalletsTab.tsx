@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from 'react-i18next';
 import { Search, Loader2, AlertCircle, ShieldCheck, ExternalLink, Snowflake, Banknote, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { QRScanner } from "@/components/QRScanner";
@@ -34,6 +35,7 @@ interface WalletsTabProps {
 }
 
 const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const userCurrency = session?.currency || 'GBP';
   const currencySymbol = CURRENCY_SYMBOL[userCurrency] || '£';
@@ -108,7 +110,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
 
       setBalance(balanceRes.json);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid scan. Please scan a valid Lana Wallet ID or WIF Private Key.');
+      setError(err instanceof Error ? err.message : t('wallets.invalidScan'));
     } finally {
       setIsLoading(false);
     }
@@ -119,10 +121,10 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
     <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 space-y-3 dark:bg-blue-950/30 dark:border-blue-800">
       <div className="flex items-center gap-3">
         <Snowflake className="w-5 h-5 text-blue-500 flex-shrink-0" />
-        <p className="text-sm font-medium text-blue-700 dark:text-blue-400">This wallet is frozen</p>
+        <p className="text-sm font-medium text-blue-700 dark:text-blue-400">{t('wallets.walletFrozen')}</p>
       </div>
       <p className="text-xs text-muted-foreground">
-        Spending is disabled for this wallet. Visit the unfreeze portal to resolve this.
+        {t('wallets.frozenDescription')}
       </p>
       <a
         href="https://unfreeze.lanapays.us"
@@ -131,7 +133,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
         className="flex items-center justify-center gap-2 w-full h-11 rounded-xl bg-blue-100 text-blue-700 text-sm font-semibold hover:bg-blue-200 transition-colors dark:bg-blue-900/40 dark:text-blue-400 dark:hover:bg-blue-900/60"
       >
         <ExternalLink className="w-4 h-4" />
-        Go to Unfreeze Portal
+        {t('lana.goToUnfreeze')}
       </a>
     </div>
   );
@@ -143,7 +145,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
       {isLoading && (
         <div className="flex flex-col items-center gap-4 py-16">
           <Loader2 className="w-12 h-12 animate-spin text-primary" />
-          <p className="text-lg text-muted-foreground">Checking balance...</p>
+          <p className="text-lg text-muted-foreground">{t('wallets.checkingBalance')}</p>
         </div>
       )}
 
@@ -158,7 +160,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
             className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
           >
             <Camera className="w-6 h-6" />
-            Scan Again
+            {t('common.scanAgain')}
           </Button>
         </div>
       )}
@@ -168,7 +170,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
         <div className="space-y-5">
           {/* Big balance display */}
           <div className="rounded-3xl bg-card border border-border shadow-lg p-6 space-y-4">
-            <p className="text-sm font-semibold text-muted-foreground tracking-wide uppercase text-center">Wallet Balance</p>
+            <p className="text-sm font-semibold text-muted-foreground tracking-wide uppercase text-center">{t('wallets.walletBalance')}</p>
 
             {/* LANA amount - very large */}
             <div className="flex items-center justify-center gap-3">
@@ -199,14 +201,14 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
           {isRegistered === true && !isFrozen && (
             <div className="flex items-center gap-3 p-4 rounded-2xl bg-primary/10">
               <ShieldCheck className="w-6 h-6 text-primary flex-shrink-0" />
-              <p className="text-base font-semibold text-foreground">Wallet is registered</p>
+              <p className="text-base font-semibold text-foreground">{t('wallets.walletRegistered')}</p>
             </div>
           )}
 
           {isRegistered === false && (
             <div className="flex items-center gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
               <AlertCircle className="w-6 h-6 text-amber-600 flex-shrink-0" />
-              <p className="text-base font-semibold text-amber-700 dark:text-amber-400">Wallet is not registered</p>
+              <p className="text-base font-semibold text-amber-700 dark:text-amber-400">{t('wallets.walletNotRegistered')}</p>
             </div>
           )}
 
@@ -222,7 +224,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
                 className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
               >
                 <img src={lanaIcon} alt="Lana" className="w-7 h-7 object-contain dark:invert" />
-                Pay with $Lanas
+                {t('wallets.payWithLana')}
               </Button>
             )}
             {/* Pay with Cash — always available */}
@@ -232,7 +234,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
               className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 border-2"
             >
               <Banknote className="w-7 h-7" />
-              Pay with {currencySymbol}
+              {t('wallets.payWithCurrency', { symbol: currencySymbol })}
             </Button>
           </div>
 
@@ -243,7 +245,7 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
             className="w-full h-14 rounded-2xl text-base font-medium text-muted-foreground"
           >
             <Search className="w-5 h-5 mr-2" />
-            Check Another Wallet
+            {t('wallets.checkAnotherWallet')}
           </Button>
         </div>
       )}
@@ -255,15 +257,15 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
             <Search className="w-12 h-12 text-primary" />
           </div>
           <div className="text-center space-y-2">
-            <h2 className="text-2xl font-bold text-foreground">Check Wallet</h2>
-            <p className="text-base text-muted-foreground">Scan a Wallet ID or WIF Private Key</p>
+            <h2 className="text-2xl font-bold text-foreground">{t('wallets.title')}</h2>
+            <p className="text-base text-muted-foreground">{t('wallets.subtitle')}</p>
           </div>
           <Button
             onClick={() => setScannerOpen(true)}
             className="w-full h-16 rounded-2xl text-lg font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
           >
             <Camera className="w-6 h-6" />
-            Scan to Check
+            {t('wallets.scanToCheck')}
           </Button>
         </div>
       )}
@@ -273,8 +275,8 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
         isOpen={scannerOpen}
         onClose={() => setScannerOpen(false)}
         onScan={(data) => handleScan(data)}
-        title="Scan Wallet"
-        description="Scan a Wallet ID or WIF Private Key"
+        title={t('wallets.scanTitle')}
+        description={t('wallets.scanDescription')}
       />
     </div>
   );

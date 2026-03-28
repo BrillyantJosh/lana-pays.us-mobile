@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/contexts/AuthContext';
 import { createAndSignKind0, type Kind0Content } from '@/lib/nostr-sign';
 import {
@@ -28,6 +29,7 @@ const COUNTRIES = [
 const CURRENCIES = ['EUR','USD','GBP','CHF','CAD','AUD','JPY','CNY','INR','BRL','MXN','KRW','SEK','NOK','DKK','PLN','CZK','HUF','RON','BGN','HRK','RSD','BAM','TRY','RUB','UAH'];
 
 const EditProfile = () => {
+  const { t } = useTranslation();
   const { session } = useAuth();
 
   // Form state
@@ -158,36 +160,36 @@ const EditProfile = () => {
   };
 
   const validate = (): string | null => {
-    if (!name.trim()) return 'Name is required';
-    if (!displayName.trim()) return 'Display name is required';
-    if (!about.trim()) return 'About is required';
-    if (!location.trim()) return 'Location is required';
-    if (!country.trim()) return 'Country is required';
-    if (!currency.trim()) return 'Currency is required';
-    if (!lang) return 'Language is required';
-    if (!whoAreYou) return 'Who Are You is required';
-    if (!orgasmicProfile.trim()) return 'Orgasmic Profile is required';
-    if (!statementOfResponsibility.trim()) return 'Statement of Responsibility is required';
+    if (!name.trim()) return t('profile.validation.nameRequired');
+    if (!displayName.trim()) return t('profile.validation.displayNameRequired');
+    if (!about.trim()) return t('profile.validation.aboutRequired');
+    if (!location.trim()) return t('profile.validation.locationRequired');
+    if (!country.trim()) return t('profile.validation.countryRequired');
+    if (!currency.trim()) return t('profile.validation.currencyRequired');
+    if (!lang) return t('profile.validation.languageRequired');
+    if (!whoAreYou) return t('profile.validation.whoAreYouRequired');
+    if (!orgasmicProfile.trim()) return t('profile.validation.orgasmicRequired');
+    if (!statementOfResponsibility.trim()) return t('profile.validation.statementRequired');
 
     if (latitude) {
       const lat = parseFloat(latitude);
-      if (isNaN(lat) || lat < -90 || lat > 90) return 'Latitude must be between -90 and 90';
+      if (isNaN(lat) || lat < -90 || lat > 90) return t('profile.validation.latitudeRange');
     }
     if (longitude) {
       const lng = parseFloat(longitude);
-      if (isNaN(lng) || lng < -180 || lng > 180) return 'Longitude must be between -180 and 180';
+      if (isNaN(lng) || lng < -180 || lng > 180) return t('profile.validation.longitudeRange');
     }
-    if (email && !email.includes('@')) return 'Invalid email format';
-    if (phone && !phoneCountryCode) return 'Phone country code is required when phone is provided';
-    if (phoneCountryCode && !phoneCountryCode.startsWith('+')) return 'Phone country code must start with +';
-    if (phone && !/^\d+$/.test(phone)) return 'Phone must contain digits only';
+    if (email && !email.includes('@')) return t('profile.validation.emailInvalid');
+    if (phone && !phoneCountryCode) return t('profile.validation.phoneCountryCodeRequired');
+    if (phoneCountryCode && !phoneCountryCode.startsWith('+')) return t('profile.validation.phoneCountryCodeFormat');
+    if (phone && !/^\d+$/.test(phone)) return t('profile.validation.phoneDigitsOnly');
 
     return null;
   };
 
   const handleSave = async () => {
     if (!session?.privateKeyHex) {
-      setSaveResult({ ok: false, message: 'No signing key available. Please re-login.' });
+      setSaveResult({ ok: false, message: t('profile.noSigningKey') });
       return;
     }
 
@@ -251,12 +253,12 @@ const EditProfile = () => {
       const result = await res.json();
 
       if (result.success?.length > 0) {
-        setSaveResult({ ok: true, message: `Profile saved to ${result.success.length} relay(s)` });
+        setSaveResult({ ok: true, message: t('profile.savedToRelays', { count: result.success.length }) });
       } else {
-        setSaveResult({ ok: false, message: 'Failed to broadcast to any relay' });
+        setSaveResult({ ok: false, message: t('profile.broadcastFailed') });
       }
     } catch (e: any) {
-      setSaveResult({ ok: false, message: e.message || 'Failed to save profile' });
+      setSaveResult({ ok: false, message: e.message || t('profile.failedToSave') });
     } finally {
       setSaving(false);
     }
@@ -312,87 +314,87 @@ const EditProfile = () => {
   return (
     <div className="px-4 pb-8 space-y-3">
       {/* ─── Basic Info ─── */}
-      <SectionHeader id="basic" icon={User} title="Basic Information" />
+      <SectionHeader id="basic" icon={User} title={t('profile.basicInfo')} />
       {expandedSections.basic && (
         <div className="space-y-4 px-1">
-          <Field label="Language" required>
+          <Field label={t('profile.language')} required>
             <select value={lang} onChange={e => setLang(e.target.value)} className={selectClass}>
-              <option value="">Select language...</option>
+              <option value="">{t('profile.selectLanguage')}</option>
               {languages.map(l => (
                 <option key={l.code} value={l.code}>{l.nativeName} ({l.code})</option>
               ))}
             </select>
           </Field>
-          <Field label="Name" required>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" className={inputClass} />
+          <Field label={t('profile.name')} required>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder={t('profile.namePlaceholder')} className={inputClass} />
           </Field>
-          <Field label="Display Name" required>
-            <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Display name" className={inputClass} />
+          <Field label={t('profile.displayName')} required>
+            <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder={t('profile.displayNamePlaceholder')} className={inputClass} />
           </Field>
-          <Field label="About" required>
-            <textarea value={about} onChange={e => setAbout(e.target.value)} placeholder="Tell us about yourself..." rows={3} className={inputClass + ' resize-none'} />
+          <Field label={t('profile.about')} required>
+            <textarea value={about} onChange={e => setAbout(e.target.value)} placeholder={t('profile.aboutPlaceholder')} rows={3} className={inputClass + ' resize-none'} />
           </Field>
-          <Field label="Profile Picture URL">
-            <input value={picture} onChange={e => setPicture(e.target.value)} placeholder="https://..." className={inputClass} />
+          <Field label={t('profile.pictureUrl')}>
+            <input value={picture} onChange={e => setPicture(e.target.value)} placeholder={t('profile.pictureUrlPlaceholder')} className={inputClass} />
             {picture && (
               <div className="mt-2 flex items-center gap-3">
                 <img src={picture} alt="" className="w-12 h-12 rounded-xl object-cover" onError={e => (e.currentTarget.style.display = 'none')} />
               </div>
             )}
           </Field>
-          <Field label="Website">
-            <input value={website} onChange={e => setWebsite(e.target.value)} placeholder="https://..." className={inputClass} />
+          <Field label={t('profile.website')}>
+            <input value={website} onChange={e => setWebsite(e.target.value)} placeholder={t('profile.websitePlaceholder')} className={inputClass} />
           </Field>
-          <Field label="NIP-05 Verification">
-            <input value={nip05} onChange={e => setNip05(e.target.value)} placeholder="user@domain.com" className={inputClass} />
+          <Field label={t('profile.nip05')}>
+            <input value={nip05} onChange={e => setNip05(e.target.value)} placeholder={t('profile.nip05Placeholder')} className={inputClass} />
           </Field>
         </div>
       )}
 
       {/* ─── Location & Currency ─── */}
-      <SectionHeader id="location" icon={MapPin} title="Location & Currency" />
+      <SectionHeader id="location" icon={MapPin} title={t('profile.locationCurrency')} />
       {expandedSections.location && (
         <div className="space-y-4 px-1">
-          <Field label="Location" required>
-            <input value={location} onChange={e => setLocation(e.target.value)} placeholder="City, Country" className={inputClass} />
+          <Field label={t('profile.location')} required>
+            <input value={location} onChange={e => setLocation(e.target.value)} placeholder={t('profile.locationPlaceholder')} className={inputClass} />
           </Field>
-          <Field label="Country" required>
+          <Field label={t('profile.country')} required>
             <select value={country} onChange={e => setCountry(e.target.value)} className={selectClass}>
-              <option value="">Select country...</option>
+              <option value="">{t('profile.selectCountry')}</option>
               {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </Field>
-          <Field label="Currency" required>
+          <Field label={t('profile.currency')} required>
             <select value={currency} onChange={e => setCurrency(e.target.value)} className={selectClass}>
-              <option value="">Select currency...</option>
+              <option value="">{t('profile.selectCurrency')}</option>
               {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Latitude">
-              <input value={latitude} onChange={e => setLatitude(e.target.value)} placeholder="-90 to 90" type="text" inputMode="decimal" className={inputClass} />
+            <Field label={t('profile.latitude')}>
+              <input value={latitude} onChange={e => setLatitude(e.target.value)} placeholder={t('profile.latitudePlaceholder')} type="text" inputMode="decimal" className={inputClass} />
             </Field>
-            <Field label="Longitude">
-              <input value={longitude} onChange={e => setLongitude(e.target.value)} placeholder="-180 to 180" type="text" inputMode="decimal" className={inputClass} />
+            <Field label={t('profile.longitude')}>
+              <input value={longitude} onChange={e => setLongitude(e.target.value)} placeholder={t('profile.longitudePlaceholder')} type="text" inputMode="decimal" className={inputClass} />
             </Field>
           </div>
         </div>
       )}
 
       {/* ─── Contact Info ─── */}
-      <SectionHeader id="contact" icon={Phone} title="Contact Information" />
+      <SectionHeader id="contact" icon={Phone} title={t('profile.contactInfo')} />
       {expandedSections.contact && (
         <div className="space-y-4 px-1">
-          <Field label="Email">
-            <input value={email} onChange={e => setEmail(e.target.value)} placeholder="user@example.com" type="email" className={inputClass} />
+          <Field label={t('profile.email')}>
+            <input value={email} onChange={e => setEmail(e.target.value)} placeholder={t('profile.emailPlaceholder')} type="email" className={inputClass} />
           </Field>
           <div className="grid grid-cols-3 gap-3">
-            <Field label="Country Code">
-              <input value={phoneCountryCode} onChange={e => setPhoneCountryCode(e.target.value)} placeholder="+386" className={inputClass} />
+            <Field label={t('profile.countryCode')}>
+              <input value={phoneCountryCode} onChange={e => setPhoneCountryCode(e.target.value)} placeholder={t('profile.countryCodePlaceholder')} className={inputClass} />
             </Field>
             <div className="col-span-2">
-              <Field label="Phone">
-                <input value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} placeholder="41123456" inputMode="tel" className={inputClass} />
+              <Field label={t('profile.phone')}>
+                <input value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ''))} placeholder={t('profile.phonePlaceholder')} inputMode="tel" className={inputClass} />
               </Field>
             </div>
           </div>
@@ -400,32 +402,32 @@ const EditProfile = () => {
       )}
 
       {/* ─── Lana Fields ─── */}
-      <SectionHeader id="lana" icon={Wallet} title="LanaCoins Settings" />
+      <SectionHeader id="lana" icon={Wallet} title={t('profile.lanaSettings')} />
       {expandedSections.lana && (
         <div className="space-y-4 px-1">
-          <Field label="Who Are You" required>
+          <Field label={t('profile.whoAreYou')} required>
             <select value={whoAreYou} onChange={e => setWhoAreYou(e.target.value)} className={selectClass}>
-              <option value="Human">Human</option>
-              <option value="EI">EI (Enlightened Intelligence)</option>
+              <option value="Human">{t('profile.whoAreYouHuman')}</option>
+              <option value="EI">{t('profile.whoAreYouEI')}</option>
             </select>
           </Field>
-          <Field label="Lana Wallet ID">
-            <input value={lanaWalletID} onChange={e => setLanaWalletID(e.target.value)} placeholder="L..." className={inputClass} />
+          <Field label={t('profile.lanaWalletId')}>
+            <input value={lanaWalletID} onChange={e => setLanaWalletID(e.target.value)} placeholder={t('profile.lanaWalletIdPlaceholder')} className={inputClass} />
           </Field>
-          <Field label="Lanoshi to Lash (exchange rate)">
-            <input value={lanoshi2lash} onChange={e => setLanoshi2lash(e.target.value)} placeholder="10000" className={inputClass} />
+          <Field label={t('profile.lanoshi2lash')}>
+            <input value={lanoshi2lash} onChange={e => setLanoshi2lash(e.target.value)} placeholder={t('profile.lanoshi2lashPlaceholder')} className={inputClass} />
           </Field>
-          <Field label="Orgasmic Profile" required>
-            <textarea value={orgasmicProfile} onChange={e => setOrgasmicProfile(e.target.value)} placeholder="Things that bring you joy — activities and passions that make you happy..." rows={3} className={inputClass + ' resize-none'} />
+          <Field label={t('profile.orgasmicProfile')} required>
+            <textarea value={orgasmicProfile} onChange={e => setOrgasmicProfile(e.target.value)} placeholder={t('profile.orgasmicProfilePlaceholder')} rows={3} className={inputClass + ' resize-none'} />
           </Field>
         </div>
       )}
 
       {/* ─── Tags ─── */}
-      <SectionHeader id="tags" icon={Heart} title="Interests & Tags" />
+      <SectionHeader id="tags" icon={Heart} title={t('profile.interestsTags')} />
       {expandedSections.tags && (
         <div className="space-y-4 px-1">
-          <Field label='Interests (t tags)'>
+          <Field label={t('profile.interests')}>
             <div className="flex flex-wrap gap-2 mb-2">
               {tTags.map((tag, i) => (
                 <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-xs font-medium">
@@ -437,13 +439,13 @@ const EditProfile = () => {
               ))}
             </div>
             <div className="flex gap-2">
-              <input value={newTTag} onChange={e => setNewTTag(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTTag())} placeholder="Add interest..." className={inputClass} />
+              <input value={newTTag} onChange={e => setNewTTag(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTTag())} placeholder={t('profile.addInterestPlaceholder')} className={inputClass} />
               <button onClick={addTTag} className="shrink-0 w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary hover:bg-primary/20">
                 <Plus className="w-4 h-4" />
               </button>
             </div>
           </Field>
-          <Field label='Intimacy Interests (o tags)'>
+          <Field label={t('profile.intimacyInterests')}>
             <div className="flex flex-wrap gap-2 mb-2">
               {oTags.map((tag, i) => (
                 <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-pink-500/10 text-pink-600 dark:text-pink-400 text-xs font-medium">
@@ -455,7 +457,7 @@ const EditProfile = () => {
               ))}
             </div>
             <div className="flex gap-2">
-              <input value={newOTag} onChange={e => setNewOTag(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addOTag())} placeholder="Add intimacy interest..." className={inputClass} />
+              <input value={newOTag} onChange={e => setNewOTag(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addOTag())} placeholder={t('profile.addIntimacyPlaceholder')} className={inputClass} />
               <button onClick={addOTag} className="shrink-0 w-10 h-10 rounded-xl bg-pink-500/10 flex items-center justify-center text-pink-600 dark:text-pink-400 hover:bg-pink-500/20">
                 <Plus className="w-4 h-4" />
               </button>
@@ -465,20 +467,19 @@ const EditProfile = () => {
       )}
 
       {/* ─── Statement of Responsibility ─── */}
-      <SectionHeader id="responsibility" icon={FileText} title="Statement of Responsibility" />
+      <SectionHeader id="responsibility" icon={FileText} title={t('profile.statementOfResponsibility')} />
       {expandedSections.responsibility && (
         <div className="space-y-4 px-1">
           <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3">
             <p className="text-xs text-amber-700 dark:text-amber-400">
-              <strong>Mandatory.</strong> Write in your own words that you accept unconditional self-responsibility.
-              This is a legally-significant personal declaration. No templates — it must be written by you.
+              <strong>{t('profile.statementMandatory')}</strong> {t('profile.statementInstruction')}
             </p>
           </div>
-          <Field label="Your Statement" required>
+          <Field label={t('profile.yourStatement')} required>
             <textarea
               value={statementOfResponsibility}
               onChange={e => setStatementOfResponsibility(e.target.value)}
-              placeholder="I accept full and unconditional self-responsibility for everything I do or don't do inside the Lana World."
+              placeholder={t('profile.statementPlaceholder')}
               rows={4}
               className={inputClass + ' resize-none'}
             />
@@ -509,9 +510,9 @@ const EditProfile = () => {
         className="w-full rounded-xl bg-primary text-primary-foreground py-3 font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.98] transition-transform"
       >
         {saving ? (
-          <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</>
+          <><Loader2 className="w-4 h-4 animate-spin" /> {t('common.saving')}</>
         ) : (
-          <><Save className="w-4 h-4" /> Save Profile</>
+          <><Save className="w-4 h-4" /> {t('profile.saveProfile')}</>
         )}
       </button>
     </div>
