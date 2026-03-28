@@ -118,7 +118,7 @@
   "profile.validation.countryRequired": "Država je obavezna",
   "profile.validation.currencyRequired": "Valuta je obavezna",
   "profile.validation.languageRequired": "Jezik je obavezan",
-  "profile.validation.whoAreYouRequired": "Polje „Tko ste" je obavezno",
+  "profile.validation.whoAreYouRequired": "Polje 'Tko ste' je obavezno",
   "profile.validation.orgasmicRequired": "Orgazmički profil je obavezan",
   "profile.validation.statementRequired": "Izjava o odgovornosti je obavezna",
   "profile.validation.latitudeRange": "Geografska širina mora biti između -90 i 90",

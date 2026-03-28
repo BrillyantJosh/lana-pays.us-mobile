@@ -118,7 +118,7 @@
   "profile.validation.countryRequired": "Kraj jest wymagany",
   "profile.validation.currencyRequired": "Waluta jest wymagana",
   "profile.validation.languageRequired": "Język jest wymagany",
-  "profile.validation.whoAreYouRequired": "Pole „Kim jesteś" jest wymagane",
+  "profile.validation.whoAreYouRequired": "Pole 'Kim jestes' jest wymagane",
   "profile.validation.orgasmicRequired": "Profil orgazmiczny jest wymagany",
   "profile.validation.statementRequired": "Oświadczenie o odpowiedzialności jest wymagane",
   "profile.validation.latitudeRange": "Szerokość geograficzna musi być między -90 a 90",
