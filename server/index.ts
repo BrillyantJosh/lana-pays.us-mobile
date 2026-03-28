@@ -428,6 +428,10 @@ app.get('/api/max-transaction', (req, res) => {
     ? (capacity.max_single_budget ?? capacity.total_available ?? 0)
     : null;
 
+  // Get global default limit from app_settings
+  const defaultMaxRow = db.prepare("SELECT value FROM app_settings WHERE key = 'default_max_tx_amount'").get() as any;
+  const defaultLimit = defaultMaxRow ? parseFloat(defaultMaxRow.value) : 0;
+
   // Calculate effective max: always use fundLimit when available (even if 0)
   let maxAmount: number | null = null;
   let source = 'none';
@@ -443,6 +447,17 @@ app.get('/api/max-transaction', (req, res) => {
     source = 'merchant';
   }
 
+  // Apply global default limit if set (take lower of current max and default)
+  if (defaultLimit > 0) {
+    if (maxAmount === null) {
+      maxAmount = defaultLimit;
+      source = 'default';
+    } else if (defaultLimit < maxAmount) {
+      maxAmount = defaultLimit;
+      source = 'default';
+    }
+  }
+
   res.json({
     unit_id: unitId,
     currency,
@@ -450,6 +465,7 @@ app.get('/api/max-transaction', (req, res) => {
     source,
     merchant_limit: merchantLimit !== null ? Math.round(merchantLimit * 100) / 100 : null,
     fund_limit: fundLimit !== null ? Math.round(fundLimit * 100) / 100 : null,
+    default_limit: defaultLimit > 0 ? defaultLimit : null,
     fund_investors: capacity?.investor_count || 0,
     fund_updated_at: capacity?.fetched_at || null,
   });
@@ -695,6 +711,55 @@ const distPath = path.resolve(__dirname, '../dist');
 app.use(express.static(distPath));
 app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
+});
+
+// ─── Admin API ──────────────────────────────────────────
+
+function requireAdmin(req: any, res: any): string | null {
+  const hexId = req.headers['x-admin-hex-id'] as string;
+  if (!hexId) { res.status(401).json({ error: 'Missing admin header' }); return null; }
+  const admin = db.prepare('SELECT * FROM admin_users WHERE hex_id = ?').get(hexId) as any;
+  if (!admin) { res.status(403).json({ error: 'Not an admin' }); return null; }
+  return hexId;
+}
+
+// Check if a user is admin
+app.get('/api/admin/check', (req, res) => {
+  const hexId = req.query.hex_id as string;
+  if (!hexId) return res.json({ isAdmin: false });
+  const admin = db.prepare('SELECT * FROM admin_users WHERE hex_id = ?').get(hexId) as any;
+  res.json({ isAdmin: !!admin, name: admin?.name || null });
+});
+
+// Get all app settings
+app.get('/api/admin/settings', (req, res) => {
+  const adminHex = requireAdmin(req, res);
+  if (!adminHex) return;
+  const rows = db.prepare('SELECT key, value, updated_at FROM app_settings ORDER BY key').all() as any[];
+  const settings: Record<string, string> = {};
+  for (const r of rows) settings[r.key] = r.value;
+  res.json({ settings });
+});
+
+// Update app settings
+app.put('/api/admin/settings', (req, res) => {
+  const adminHex = requireAdmin(req, res);
+  if (!adminHex) return;
+  const { settings } = req.body;
+  if (!settings || typeof settings !== 'object') {
+    return res.status(400).json({ error: 'settings object required' });
+  }
+  const upsert = db.prepare(`
+    INSERT INTO app_settings (key, value, updated_at, updated_by)
+    VALUES (?, ?, datetime('now'), ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+  `);
+  let updated = 0;
+  for (const [key, value] of Object.entries(settings)) {
+    upsert.run(key, String(value), adminHex);
+    updated++;
+  }
+  res.json({ success: true, updated });
 });
 
 // ─── Start Server ──────────────────────────────────────

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { X, HelpCircle, LogOut, Store, UserPen, Copy, Check, History, Wallet, Globe } from "lucide-react";
+import { useState, useEffect } from "react";
+import { X, HelpCircle, LogOut, Store, UserPen, Copy, Check, History, Wallet, Globe, Shield } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -32,6 +32,15 @@ const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [showLangPicker, setShowLangPicker] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (!session?.nostrHexId || !open) return;
+    fetch(`/api/admin/check?hex_id=${session.nostrHexId}`)
+      .then(r => r.json())
+      .then(d => setIsAdmin(d.isAdmin))
+      .catch(() => setIsAdmin(false));
+  }, [session?.nostrHexId, open]);
 
   const handleSignOut = () => {
     logout();
@@ -124,6 +133,17 @@ const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
               {label}
             </button>
           ))}
+
+          {/* Admin link (only for admins) */}
+          {isAdmin && (
+            <button
+              onClick={() => { onClose(); navigate('/admin'); }}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl text-primary hover:bg-primary/10 transition-colors text-sm font-medium"
+            >
+              <Shield className="w-5 h-5" />
+              Admin
+            </button>
+          )}
 
           {/* Language selector */}
           <button

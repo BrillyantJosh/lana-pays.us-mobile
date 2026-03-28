@@ -102,7 +102,38 @@ export function initializeSchema(db: Database.Database): void {
       success INTEGER DEFAULT 0,
       error TEXT
     );
+
+    -- Admin users
+    CREATE TABLE IF NOT EXISTS admin_users (
+      hex_id TEXT PRIMARY KEY,
+      name TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- App settings (key-value store)
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now')),
+      updated_by TEXT
+    );
   `);
+
+  // Seed admin user if table is empty
+  const adminCount = (db.prepare('SELECT COUNT(*) as c FROM admin_users').get() as any).c;
+  if (adminCount === 0) {
+    db.prepare('INSERT INTO admin_users (hex_id, name) VALUES (?, ?)').run(
+      '56e8670aa65491f8595dc3a71c94aa7445dcdca755ca5f77c07218498a362061', 'Brilly(ant) Josh'
+    );
+    console.log('Seeded admin user');
+  }
+
+  // Seed default settings if table is empty
+  const settingsCount = (db.prepare('SELECT COUNT(*) as c FROM app_settings').get() as any).c;
+  if (settingsCount === 0) {
+    db.prepare("INSERT INTO app_settings (key, value) VALUES ('default_max_tx_amount', '0')").run();
+    console.log('Seeded default app settings');
+  }
 
   // Migrations: add suspension columns if missing
   const cols = db.pragma('table_info(business_units)') as any[];
