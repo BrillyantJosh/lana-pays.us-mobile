@@ -199,10 +199,11 @@ const Index = () => {
                     const tx = maxTransactions[businessUnits[0].unit_id];
                     if (!tx || tx.max_amount === null || tx.max_amount === undefined) return null;
                     const sym = CURRENCY_SYMBOL[businessUnits[0].currency] || currencySymbol;
+                    const noFunds = tx.max_amount <= 0;
                     return (
                       <div className="shrink-0 text-right">
                         <p className="text-xs text-muted-foreground">Max Invoice</p>
-                        <p className="text-2xl font-black text-primary leading-tight">
+                        <p className={`text-2xl font-black leading-tight ${noFunds ? 'text-destructive' : 'text-primary'}`}>
                           {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </p>
                       </div>
@@ -259,10 +260,11 @@ const Index = () => {
                           const tx = maxTransactions[unit.unit_id];
                           if (tx && tx.max_amount !== null && tx.max_amount !== undefined) {
                             const sym = CURRENCY_SYMBOL[unit.currency] || currencySymbol;
+                            const noFunds = tx.max_amount <= 0;
                             return (
                               <div className="shrink-0 text-right">
                                 <p className="text-xs text-muted-foreground">Max Invoice</p>
-                                <p className="text-2xl font-black text-primary leading-tight">
+                                <p className={`text-2xl font-black leading-tight ${noFunds ? 'text-destructive' : 'text-primary'}`}>
                                   {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
                               </div>
@@ -297,29 +299,45 @@ const Index = () => {
             )}
 
             {/* ─── Payment buttons ─── */}
-            <button
-              onClick={() => setActiveView("cash")}
-              disabled={(businessUnits.length > 1 && !selectedUnit) || (selectedUnit?.suspension_status === 'suspended') || (businessUnits.length === 1 && businessUnits[0]?.suspension_status === 'suspended')}
-              className="flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
-            >
-              <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
-                <Banknote className="w-11 h-11 text-primary" />
-              </div>
-              <span className="text-3xl font-bold text-foreground">Pay with {CURRENCY_SYMBOL[effectiveUnit?.currency || ''] || currencySymbol}</span>
-              <span className="text-base text-muted-foreground">Cash payment</span>
-            </button>
+            {(() => {
+              const noShopSelected = (businessUnits.length > 1 && !selectedUnit);
+              const isSuspended = (selectedUnit?.suspension_status === 'suspended') || (businessUnits.length === 1 && businessUnits[0]?.suspension_status === 'suspended');
+              const noFunds = selectedMaxTx !== null && selectedMaxTx !== undefined && (selectedMaxTx.max_amount === null || selectedMaxTx.max_amount === undefined || selectedMaxTx.max_amount <= 0);
+              const payDisabled = noShopSelected || isSuspended || noFunds;
+              return (
+                <>
+                  <button
+                    onClick={() => setActiveView("cash")}
+                    disabled={payDisabled}
+                    className="flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
+                      <Banknote className="w-11 h-11 text-primary" />
+                    </div>
+                    <span className="text-3xl font-bold text-foreground">Pay with {CURRENCY_SYMBOL[effectiveUnit?.currency || ''] || currencySymbol}</span>
+                    <span className="text-base text-muted-foreground">Cash payment</span>
+                  </button>
 
-            <button
-              onClick={() => setActiveView("lana")}
-              disabled={(businessUnits.length > 1 && !selectedUnit) || (selectedUnit?.suspension_status === 'suspended') || (businessUnits.length === 1 && businessUnits[0]?.suspension_status === 'suspended')}
-              className="flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
-            >
-              <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
-                <img src={lanaIcon} alt="Lana" className="w-11 h-11 object-contain dark:invert" />
-              </div>
-              <span className="text-3xl font-bold text-foreground">Pay with $Lana</span>
-              <span className="text-base text-muted-foreground">Lana coin payment</span>
-            </button>
+                  <button
+                    onClick={() => setActiveView("lana")}
+                    disabled={payDisabled}
+                    className="flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
+                      <img src={lanaIcon} alt="Lana" className="w-11 h-11 object-contain dark:invert" />
+                    </div>
+                    <span className="text-3xl font-bold text-foreground">Pay with $Lana</span>
+                    <span className="text-base text-muted-foreground">Lana coin payment</span>
+                  </button>
+
+                  {noFunds && !noShopSelected && !isSuspended && (
+                    <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
+                      <p className="text-sm text-destructive text-center font-medium">No investor funds available — cannot create invoices</p>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 
