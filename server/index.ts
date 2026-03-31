@@ -22,6 +22,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = parseInt(process.env.SERVER_PORT || process.env.PORT || '3005');
 
+// Trust proxy (behind nginx-proxy)
+app.set('trust proxy', 1);
+
 // Body size limit
 app.use(express.json({ limit: '50kb' }));
 
@@ -626,7 +629,9 @@ app.post('/api/receipt/upload', receiptUpload.single('receipt'), async (req, res
 });
 
 // ─── Receipt Analysis (Claude Vision) ──────────────────
+import sharp from 'sharp';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const MAX_IMAGE_BYTES = 4_500_000; // 4.5 MB (keep under Claude's 5 MB limit)
 
 app.post('/api/receipt/analyze', receiptUpload.single('receipt'), async (req, res) => {
   if (!req.file) {
@@ -638,9 +643,22 @@ app.post('/api/receipt/analyze', receiptUpload.single('receipt'), async (req, re
   }
 
   try {
-    const base64Image = req.file.buffer.toString('base64');
-    const mediaType = req.file.mimetype as 'image/jpeg' | 'image/png' | 'image/webp';
+    let imageBuffer = req.file.buffer;
+    let mediaType: 'image/jpeg' | 'image/png' | 'image/webp' = req.file.mimetype as any;
     const currency = (req.body.currency as string) || 'EUR';
+
+    // Resize if image exceeds Claude's 5 MB base64 limit
+    if (imageBuffer.length > MAX_IMAGE_BYTES) {
+      console.log(`[mobile] Receipt image too large (${(imageBuffer.length / 1024 / 1024).toFixed(1)} MB), resizing...`);
+      imageBuffer = await sharp(imageBuffer)
+        .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+      mediaType = 'image/jpeg';
+      console.log(`[mobile] Resized to ${(imageBuffer.length / 1024 / 1024).toFixed(1)} MB`);
+    }
+
+    const base64Image = imageBuffer.toString('base64');
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
