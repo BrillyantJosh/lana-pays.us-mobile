@@ -7,6 +7,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+      - .env.local
     environment:
       - VIRTUAL_HOST=mobile.lanapays.us
       - VIRTUAL_PORT=3005
