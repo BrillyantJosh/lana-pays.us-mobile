@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { QRScanner } from "@/components/QRScanner";
 import { convertWifToIds } from "@/lib/crypto";
+import { createAndSignKind0, type Kind0Content } from "@/lib/nostr-sign";
 import { useAuth } from "@/contexts/AuthContext";
 
 const currencyIcons: Record<string, typeof PoundSterling> = {
@@ -84,6 +85,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   const [walletId, setWalletId] = useState<string | null>(null);
   const [nostrHexId, setNostrHexId] = useState<string | null>(null);
   const [nostrNpubId, setNostrNpubId] = useState<string | null>(null);
+  const [customerPrivateKeyHex, setCustomerPrivateKeyHex] = useState<string | null>(null);
   const [balance, setBalance] = useState<BalanceResult | null>(null);
 
   // Registration form
@@ -223,6 +225,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         resolvedHexId = ids.nostrHexId;
         setNostrHexId(ids.nostrHexId);
         setNostrNpubId(ids.nostrNpubId);
+        setCustomerPrivateKeyHex(ids.privateKeyHex);
         hasNostrKeys = true;
       }
 
@@ -310,38 +313,81 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   };
 
   const handleRegister = async () => {
-    if (!fullName.trim() || !walletId) return;
-    const pd = purchaseDataRef.current;
-    if (!pd) { setSubmitError(t('cash.dataMissing')); return; }
-
-    const parsedAmount = parseFloat(pd.amount.replace(',', '.'));
-    if (isNaN(parsedAmount) || parsedAmount <= 0) { setSubmitError(t('cash.invalidAmount')); return; }
+    if (!fullName.trim() || !walletId || !nostrHexId || !customerPrivateKeyHex) return;
 
     setIsSubmitting(true);
     setSubmitError(null);
+
     try {
-      const res = await fetch('/api/brain/purchase', {
+      // 1. Create and broadcast KIND 0 profile
+      console.log('[CashTab] Creating KIND 0 profile for new customer...');
+      const kind0Content: Kind0Content = {
+        name: fullName.trim(),
+        display_name: fullName.trim(),
+        about: 'LanaPays.Us customer',
+        location: '',
+        country: '',
+        currency: currency,
+        lanoshi2lash: '10000',
+        lanaWalletID: walletId,
+        whoAreYou: 'Human',
+        orgasmic_profile: 'Living life',
+        statement_of_responsibility: 'I accept full and unconditional self-responsibility for everything I do or do not do inside the Lana World.',
+        email: email.trim() || undefined,
+        phone: mobile.trim() || undefined,
+        phone_country_code: mobile.trim() ? countryCode : undefined,
+      };
+
+      const tags: string[][] = [['lang', 'en']];
+
+      const signedEvent = createAndSignKind0(customerPrivateKeyHex, kind0Content, tags);
+
+      const broadcastRes = await fetch('/api/broadcast-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: signedEvent }),
+      });
+      const broadcastData = await broadcastRes.json();
+      console.log(`[CashTab] KIND 0 broadcast: ${broadcastData.success?.length || 0} relays ok`);
+
+      // 2. Register wallet via Lana Register API
+      console.log('[CashTab] Registering wallet via Lana Register API...');
+      const regRes = await fetch('/api/register/wallet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          unit_id: pd.unitId,
-          payment_type: 'cash',
-          customer_hex: nostrHexId || '',
-          customer_wallet: walletId,
-          amount: parsedAmount,
-          currency: pd.currency,
-          invoice_number: pd.invoiceNumber.trim(),
-          receipt_url: pd.receiptUrl || undefined,
+          wallet_id: walletId,
+          nostr_id_hex: nostrHexId,
         }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setSubmitError(data.error || t('cash.purchaseFailed'));
+      const regData = await regRes.json();
+      console.log(`[CashTab] Wallet registration: ${regData.status} - ${regData.message}`);
+
+      if (!regData.success && regData.status === 'rejected') {
+        setSubmitError(regData.message || 'Wallet registration rejected');
         return;
       }
-      setStep("confirmed");
-    } catch {
-      setSubmitError(t('cash.networkError'));
+
+      // 3. Register user in local DB
+      try {
+        await fetch('/api/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hex_id: nostrHexId,
+            npub: nostrNpubId,
+            lana_address: walletId,
+            display_name: fullName.trim(),
+            picture: null,
+          }),
+        });
+      } catch {} // non-critical
+
+      // 4. Proceed to invoice step
+      setStep("invoice");
+    } catch (err: any) {
+      console.error('[CashTab] Registration error:', err);
+      setSubmitError(err.message || 'Registration failed');
     } finally {
       setIsSubmitting(false);
     }
