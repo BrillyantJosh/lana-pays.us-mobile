@@ -631,7 +631,7 @@ app.post('/api/receipt/upload', receiptUpload.single('receipt'), async (req, res
 // ─── Receipt Analysis (Claude Vision) ──────────────────
 import sharp from 'sharp';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const MAX_IMAGE_BYTES = 4_500_000; // 4.5 MB (keep under Claude's 5 MB limit)
+const MAX_IMAGE_BYTES = 3_500_000; // 3.5 MB raw → ~4.7 MB base64 (under Claude's 5 MB limit)
 
 app.post('/api/receipt/analyze', receiptUpload.single('receipt'), async (req, res) => {
   if (!req.file) {
