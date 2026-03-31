@@ -17,14 +17,24 @@ function hexToNpub(hexPubKey: string): string {
 
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let isRunning = false;
+let heartbeatStartedAt = 0;
+
+const MAX_HEARTBEAT_DURATION = 120_000; // 2 minutes safety timeout
 
 export async function runHeartbeat(db: Database.Database): Promise<void> {
   if (isRunning) {
-    console.log('Heartbeat already running, skipping');
-    return;
+    const elapsed = Date.now() - heartbeatStartedAt;
+    if (elapsed > MAX_HEARTBEAT_DURATION) {
+      console.warn(`Heartbeat stuck for ${Math.round(elapsed / 1000)}s — force resetting lock`);
+      isRunning = false;
+    } else {
+      console.log('Heartbeat already running, skipping');
+      return;
+    }
   }
 
   isRunning = true;
+  heartbeatStartedAt = Date.now();
   const logId = db.prepare(
     "INSERT INTO heartbeat_logs (started_at) VALUES (datetime('now'))"
   ).run().lastInsertRowid;
