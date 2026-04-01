@@ -383,7 +383,41 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         });
       } catch {} // non-critical
 
-      // 4. Proceed to invoice step
+      // 4. Auto-submit purchase (data already captured in purchaseDataRef)
+      const pd = purchaseDataRef.current;
+      if (pd && pd.invoiceNumber.trim() && pd.amount.trim()) {
+        const parsedAmount = parseFloat(pd.amount.replace(',', '.'));
+        if (!isNaN(parsedAmount) && parsedAmount > 0) {
+          console.log('[CashTab] Auto-submitting purchase after registration...');
+          const purchaseRes = await fetch('/api/brain/purchase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              unit_id: pd.unitId,
+              payment_type: 'cash',
+              customer_hex: nostrHexId,
+              customer_wallet: walletId,
+              amount: parsedAmount,
+              currency: pd.currency,
+              invoice_number: pd.invoiceNumber.trim(),
+              receipt_url: pd.receiptUrl || undefined,
+              receipt_type: pd.receiptType || 'receipt',
+              receipt_description: pd.receiptDescription || undefined,
+            }),
+          });
+          const purchaseData = await purchaseRes.json();
+
+          if (!purchaseRes.ok || !purchaseData.success) {
+            setSubmitError(purchaseData.error || t('cash.purchaseFailed'));
+            return;
+          }
+
+          setStep("confirmed");
+          return;
+        }
+      }
+
+      // Fallback: if no purchase data, go to invoice
       setStep("invoice");
     } catch (err: any) {
       console.error('[CashTab] Registration error:', err);
