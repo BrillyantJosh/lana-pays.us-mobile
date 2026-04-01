@@ -182,6 +182,7 @@
   "cash.invalidAmount": "Неверная сумма",
   "cash.purchaseFailed": "Покупка не удалась. Попробуйте снова.",
   "cash.walletNotRegistered": "Этот кошелёк не зарегистрирован. Отсканируйте WIF приватный ключ для регистрации и оплаты.",
+  "cash.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
   "cash.walletVerifyFailed": "Не удалось проверить кошелёк.",
   "cash.invalidScan": "Неверное сканирование. Отсканируйте действительный Lana Wallet ID или WIF приватный ключ.",
   "cash.networkError": "Ошибка сети. Попробуйте снова.",
@@ -219,6 +220,7 @@
   "lana.purchaseFailed": "Ошибка обработки покупки",
   "lana.networkError": "Ошибка сети. Проверьте подключение и попробуйте снова.",
   "lana.exceedsMaxLimit": "Сумма превышает максимальный лимит транзакции {{amount}}",
+  "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
 
   "wallets.title": "Проверить кошелёк",
   "wallets.subtitle": "Отсканируйте Wallet ID или WIF приватный ключ",

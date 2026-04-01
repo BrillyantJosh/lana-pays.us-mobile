@@ -182,6 +182,7 @@
   "cash.invalidAmount": "Neveljaven znesek",
   "cash.purchaseFailed": "Nakup ni uspel. Poskusite znova.",
   "cash.walletNotRegistered": "Ta denarnica ni registrirana. Za registracijo in plačilo skenirajte WIF zasebni ključ.",
+  "cash.walletNotVirgin": "Ta denarnica ni registrirana in je ni mogoče registrirati, ker že ima stanje ({{balance}} LANA). Registrirajo se lahko samo prazne denarnice. Stranka mora uporabiti registrirano denarnico ali ustvariti novo prazno.",
   "cash.walletVerifyFailed": "Preverjanje denarnice ni uspelo.",
   "cash.invalidScan": "Neveljaven sken. Skenirajte veljaven Lana ID denarnice ali WIF zasebni ključ.",
   "cash.networkError": "Napaka omrežja. Poskusite znova.",
@@ -219,6 +220,7 @@
   "lana.purchaseFailed": "Obdelava nakupa ni uspela",
   "lana.networkError": "Napaka omrežja. Preverite povezavo in poskusite znova.",
   "lana.exceedsMaxLimit": "Znesek presega največjo omejitev transakcije {{amount}}",
+  "lana.walletNotVirgin": "Ta denarnica ni registrirana in je ni mogoče registrirati, ker ima stanje ({{balance}} LANA). Samo prazne denarnice se lahko registrirajo. Stranka mora uporabiti registrirano denarnico.",
 
   "wallets.title": "Preveri denarnico",
   "wallets.subtitle": "Skenirajte ID denarnice ali WIF zasebni ključ",

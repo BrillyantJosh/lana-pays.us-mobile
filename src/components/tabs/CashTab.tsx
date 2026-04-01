@@ -297,7 +297,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
 
           setStep("confirmed");
         } else if (hasNostrKeys) {
-          setStep("register");
+          // Check if wallet has balance — only virgin (empty) wallets can be registered
+          const walletBalance = balanceRes?.ok ? balanceRes.json.lana : 0;
+          if (walletBalance > 0) {
+            setCheckError(t('cash.walletNotVirgin', { balance: walletBalance.toLocaleString() }));
+          } else {
+            setStep("register");
+          }
         } else {
           setCheckError(t('cash.walletNotRegistered'));
         }

@@ -182,6 +182,7 @@
   "cash.invalidAmount": "无效金额",
   "cash.purchaseFailed": "购买失败，请重试。",
   "cash.walletNotRegistered": "此钱包未注册。请扫描 WIF 私钥进行注册和支付。",
+  "cash.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
   "cash.walletVerifyFailed": "钱包验证失败。",
   "cash.invalidScan": "无效扫描。请扫描有效的 Lana Wallet ID 或 WIF 私钥。",
   "cash.networkError": "网络错误，请重试。",
@@ -219,6 +220,7 @@
   "lana.purchaseFailed": "购买处理失败",
   "lana.networkError": "网络错误。请检查连接后重试。",
   "lana.exceedsMaxLimit": "金额超出最大交易限额 {{amount}}",
+  "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
 
   "wallets.title": "查看钱包",
   "wallets.subtitle": "扫描 Wallet ID 或 WIF 私钥",

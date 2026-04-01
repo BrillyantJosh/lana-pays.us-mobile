@@ -134,7 +134,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       const ids = await convertWifToIds(trimmed);
       setCustomerWalletId(ids.walletId);
 
-      // Check if wallet is frozen
+      // Check if wallet is frozen or not registered
       try {
         const checkRes = await fetch('/api/check-wallet', {
           method: 'POST',
@@ -146,6 +146,25 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           setIsFrozen(true);
           setIsCheckingBalance(false);
           return;
+        }
+        // If wallet is not registered, check balance first
+        if (checkJson.success && !checkJson.registered) {
+          const balRes = await fetch(`/api/balance/${encodeURIComponent(ids.walletId)}?currency=${currency}`);
+          const balData = await balRes.json();
+          const walletLana = balData.lana || 0;
+          if (walletLana > 0) {
+            setScanError(t('lana.walletNotVirgin', { balance: walletLana.toLocaleString() }));
+            setIsCheckingBalance(false);
+            return;
+          }
+          // Virgin wallet — try to auto-register
+          try {
+            await fetch('/api/register/wallet', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ wallet_id: ids.walletId, nostr_id_hex: ids.nostrHexId }),
+            });
+          } catch {} // best effort
         }
       } catch {
         // If check fails, continue anyway — balance check is more important

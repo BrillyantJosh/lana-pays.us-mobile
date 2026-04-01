@@ -182,6 +182,7 @@
   "cash.invalidAmount": "Nevažeći iznos",
   "cash.purchaseFailed": "Kupovina nije uspela. Pokušajte ponovo.",
   "cash.walletNotRegistered": "Ovaj novčanik nije registrovan. Skenirajte WIF privatni ključ da biste se registrovali i platili.",
+  "cash.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
   "cash.walletVerifyFailed": "Verifikacija novčanika nije uspela.",
   "cash.invalidScan": "Nevažeće skeniranje. Skenirajte validan Lana Wallet ID ili WIF privatni ključ.",
   "cash.networkError": "Greška mreže. Pokušajte ponovo.",
@@ -219,6 +220,7 @@
   "lana.purchaseFailed": "Obrada kupovine nije uspela",
   "lana.networkError": "Greška mreže. Proverite vezu i pokušajte ponovo.",
   "lana.exceedsMaxLimit": "Iznos premašuje maksimalni limit transakcije od {{amount}}",
+  "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
 
   "wallets.title": "Proveri novčanik",
   "wallets.subtitle": "Skenirajte Wallet ID ili WIF privatni ključ",

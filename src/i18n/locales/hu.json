@@ -182,6 +182,7 @@
   "cash.invalidAmount": "Érvénytelen összeg",
   "cash.purchaseFailed": "A vásárlás sikertelen. Kérjük, próbálja újra.",
   "cash.walletNotRegistered": "Ez a tárca nincs regisztrálva. A regisztrációhoz és fizetéshez olvassa be a WIF privát kulcsot.",
+  "cash.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
   "cash.walletVerifyFailed": "Nem sikerült a tárca ellenőrzése.",
   "cash.invalidScan": "Érvénytelen szkennelés. Kérjük, olvasson be egy érvényes Lana tárca ID-t vagy WIF privát kulcsot.",
   "cash.networkError": "Hálózati hiba. Kérjük, próbálja újra.",
@@ -219,6 +220,7 @@
   "lana.purchaseFailed": "A vásárlás feldolgozása sikertelen",
   "lana.networkError": "Hálózati hiba. Kérjük, ellenőrizze a kapcsolatot és próbálja újra.",
   "lana.exceedsMaxLimit": "Az összeg meghaladja a maximális tranzakciós limitet: {{amount}}",
+  "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
 
   "wallets.title": "Tárca ellenőrzése",
   "wallets.subtitle": "Olvassa be a tárca ID-t vagy a WIF privát kulcsot",

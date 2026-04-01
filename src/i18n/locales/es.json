@@ -182,6 +182,7 @@
   "cash.invalidAmount": "Monto inválido",
   "cash.purchaseFailed": "Error en la compra. Por favor, inténtalo de nuevo.",
   "cash.walletNotRegistered": "Esta billetera no está registrada. Escanea una clave privada WIF para registrar y pagar.",
+  "cash.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
   "cash.walletVerifyFailed": "Error al verificar la billetera.",
   "cash.invalidScan": "Escaneo inválido. Por favor escanea un ID de billetera Lana o clave privada WIF válidos.",
   "cash.networkError": "Error de red. Por favor, inténtalo de nuevo.",
@@ -219,6 +220,7 @@
   "lana.purchaseFailed": "Error en el procesamiento de la compra",
   "lana.networkError": "Error de red. Por favor, verifica la conexión e inténtalo de nuevo.",
   "lana.exceedsMaxLimit": "El monto excede el límite máximo de transacción de {{amount}}",
+  "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
 
   "wallets.title": "Verificar billetera",
   "wallets.subtitle": "Escanea un ID de billetera o clave privada WIF",
