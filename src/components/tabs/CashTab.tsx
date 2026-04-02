@@ -339,9 +339,6 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         whoAreYou: 'Human',
         orgasmic_profile: 'Living life',
         statement_of_responsibility: 'I accept full and unconditional self-responsibility for everything I do or do not do inside the Lana World.',
-        email: email.trim() || undefined,
-        phone: mobile.trim() || undefined,
-        phone_country_code: mobile.trim() ? countryCode : undefined,
       };
 
       const tags: string[][] = [['lang', 'en']];
@@ -561,16 +558,6 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         {submitError && <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4"><p className="text-sm text-destructive text-center">{submitError}</p></div>}
         <div className="space-y-3">
           <div className="space-y-1.5"><Label className="text-xs font-medium text-muted-foreground">{t('cash.fullName')} <span className="text-destructive">*</span></Label><Input placeholder={t('cash.fullNamePlaceholder')} value={fullName} onChange={(e) => setFullName(e.target.value)} className="h-11 rounded-xl" /></div>
-          <div className="space-y-1.5"><Label className="text-xs font-medium text-muted-foreground">{t('profile.email')}</Label><Input type="email" placeholder={t('cash.emailPlaceholder')} value={email} onChange={(e) => setEmail(e.target.value)} className="h-11 rounded-xl" /></div>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground">{t('cash.mobile')}</Label>
-            <div className="flex gap-2">
-              <select value={countryCode} onChange={(e) => setCountryCode(e.target.value)} className="h-11 rounded-xl border border-input bg-background px-3 text-sm min-w-[90px]">
-                {COUNTRY_CODES.map((c) => <option key={c.code} value={c.code}>{c.country} {c.code}</option>)}
-              </select>
-              <Input type="tel" placeholder={t('cash.phonePlaceholder')} value={mobile} onChange={(e) => setMobile(e.target.value)} className="h-11 rounded-xl flex-1" />
-            </div>
-          </div>
         </div>
         <Button onClick={handleRegister} disabled={!fullName.trim() || isSubmitting} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
           <UserPlus className="w-5 h-5" />{isSubmitting ? t('cash.processing') : t('cash.registerAndContinue')}
