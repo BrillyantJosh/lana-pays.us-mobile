@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Html5Qrcode } from 'html5-qrcode';
+import jsQR from 'jsqr';
 import { Button } from '@/components/ui/button';
-import { X, QrCode } from 'lucide-react';
+import { X, QrCode, Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 interface QRScannerProps {
@@ -18,93 +18,111 @@ export function QRScanner({ isOpen, onClose, onScan, title, description, childre
   const { t } = useTranslation();
   const resolvedTitle = title || t('qrScanner.defaultTitle');
   const resolvedDescription = description || t('qrScanner.defaultDescription');
-  const scannerRef = useRef<Html5Qrcode | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const hasScannedRef = useRef(false);
 
+  const [isScanning, setIsScanning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
-    if (isOpen && !isScanning) {
-      hasScannedRef.current = false;
+    if (!isOpen) return;
 
-      const timer = setTimeout(() => {
-        startScanner();
-      }, 100);
+    hasScannedRef.current = false;
+    setError(null);
 
-      return () => clearTimeout(timer);
-    }
+    // Small delay to let the dialog render the video element
+    const timer = setTimeout(() => startCamera(), 150);
 
     return () => {
-      if (scannerRef.current && isScanning) {
-        stopScanner();
-      }
+      clearTimeout(timer);
+      cleanup();
     };
   }, [isOpen]);
 
-  const startScanner = async () => {
+  const scanFrame = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || video.readyState < 2 || hasScannedRef.current) {
+      animFrameRef.current = requestAnimationFrame(scanFrame);
+      return;
+    }
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    // Preprocessing: grayscale + high contrast + brightness boost.
+    // Neutralises glare and metallic reflections so jsQR sees a clean
+    // black/white image regardless of the surface material.
+    ctx.filter = 'grayscale(100%) contrast(220%) brightness(115%)';
+    ctx.drawImage(video, 0, 0);
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    // jsQR: pure JavaScript QR decoder — no WASM, no worker, works on
+    // all browsers including older Android Chrome and iOS Safari.
+    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+      inversionAttempts: 'attemptBoth', // try normal AND inverted (for dark metal)
+    });
+
+    if (code && !hasScannedRef.current) {
+      hasScannedRef.current = true;
+      cleanup();
+      onScan(code.data);
+      onClose();
+      return;
+    }
+
+    animFrameRef.current = requestAnimationFrame(scanFrame);
+  };
+
+  const startCamera = async () => {
     try {
-      const cameras = await Html5Qrcode.getCameras();
-
-      if (!cameras || cameras.length === 0) {
-        setError(t('qrScanner.noCamera'));
-        return;
-      }
-
-      let selectedCamera = cameras[0];
-      if (cameras.length > 1) {
-        const backCamera = cameras.find(camera =>
-          camera.label.toLowerCase().includes('back') ||
-          camera.label.toLowerCase().includes('rear')
-        );
-        if (backCamera) {
-          selectedCamera = backCamera;
-        }
-      }
-
-      const scanner = new Html5Qrcode('qr-reader');
-      scannerRef.current = scanner;
-
-      await scanner.start(
-        selectedCamera.id,
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 }
+      // Use constraints instead of listDevices — works on iOS Safari
+      // before permission is granted, and picks back camera automatically
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
-        (decodedText) => {
-          if (hasScannedRef.current) return;
-          hasScannedRef.current = true;
+      });
 
-          onScan(decodedText);
-          stopScanner();
-          onClose();
-        },
-        () => {
-          // Ignore scan errors during scanning
-        }
-      );
+      streamRef.current = stream;
 
-      setIsScanning(true);
-      setError(null);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        setIsScanning(true);
+        setError(null);
+        animFrameRef.current = requestAnimationFrame(scanFrame);
+      }
     } catch (err) {
-      console.error('Failed to start scanner:', err);
+      console.error('Camera error:', err);
       setError(t('qrScanner.cameraError'));
     }
   };
 
-  const stopScanner = async () => {
-    if (scannerRef.current && isScanning) {
-      try {
-        await scannerRef.current.stop();
-        scannerRef.current = null;
-        setIsScanning(false);
-      } catch (err) {
-        console.error('Failed to stop scanner:', err);
-      }
+  const cleanup = () => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
     }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    setIsScanning(false);
   };
 
-  const handleClose = async () => {
-    await stopScanner();
+  const handleClose = () => {
+    cleanup();
     onClose();
   };
 
@@ -124,7 +142,32 @@ export function QRScanner({ isOpen, onClose, onScan, title, description, childre
         {children}
 
         <div className="space-y-4">
-          <div id="qr-reader" className="w-full rounded-lg overflow-hidden" />
+          <div className="relative aspect-square bg-background rounded-lg overflow-hidden">
+            {/* Live video shown to the user */}
+            <video
+              ref={videoRef}
+              className="w-full h-full object-cover"
+              playsInline
+              muted
+            />
+            {/* Hidden canvas used for contrast preprocessing before decoding */}
+            <canvas ref={canvasRef} className="hidden" />
+
+            {!isScanning && !error && (
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/50">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            )}
+
+            {isScanning && (
+              <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute top-0 left-0 w-10 h-10 border-l-4 border-t-4 border-primary rounded-tl-lg" />
+                <div className="absolute top-0 right-0 w-10 h-10 border-r-4 border-t-4 border-primary rounded-tr-lg" />
+                <div className="absolute bottom-0 left-0 w-10 h-10 border-l-4 border-b-4 border-primary rounded-bl-lg" />
+                <div className="absolute bottom-0 right-0 w-10 h-10 border-r-4 border-b-4 border-primary rounded-br-lg" />
+              </div>
+            )}
+          </div>
 
           {error && (
             <p className="text-sm text-destructive">{error}</p>
