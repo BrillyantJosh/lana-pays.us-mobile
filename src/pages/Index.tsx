@@ -233,7 +233,8 @@ const Index = () => {
                   </div>
                 )}
               </div>
-            ) : (
+            ) : businessUnits.length === 2 ? (
+              /* ─── 2 units: inline cards ─── */
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide px-1">{t('home.selectShop')}</p>
                 <div className="flex flex-col gap-2">
@@ -305,6 +306,83 @@ const Index = () => {
                     </button>
                   ))}
                 </div>
+              </div>
+            ) : (
+              /* ─── 3+ units: dropdown selector ─── */
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide px-1">{t('home.selectShop')}</p>
+
+                {/* Selected unit card (or prompt to select) */}
+                {selectedUnit ? (
+                  <div className={`rounded-2xl border-2 p-4 flex flex-col gap-2 ${
+                    selectedUnit.suspension_status === 'suspended'
+                      ? 'bg-destructive/5 border-destructive/20'
+                      : 'bg-primary/5 border-primary/20'
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      {resolveImageUrl(selectedUnit.image) ? (
+                        <img src={resolveImageUrl(selectedUnit.image)!} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                          <Store className="w-5 h-5 text-primary" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">{selectedUnit.name}</p>
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          {selectedUnit.receiver_city && <><MapPin className="w-3 h-3" />{selectedUnit.receiver_city}</>}
+                          {selectedUnit.receiver_city && selectedUnit.category && ' · '}
+                          {selectedUnit.category}
+                        </p>
+                      </div>
+                      {(() => {
+                        const tx = maxTransactions[selectedUnit.unit_id];
+                        if (!tx || tx.max_amount === null || tx.max_amount === undefined) return null;
+                        const sym = CURRENCY_SYMBOL[selectedUnit.currency] || currencySymbol;
+                        const noFunds = tx.max_amount <= 0;
+                        return (
+                          <div className="shrink-0 text-right">
+                            <p className="text-xs text-muted-foreground">{t('home.maxInvoice')}</p>
+                            <p className={`text-2xl font-black leading-tight ${noFunds ? 'text-destructive' : 'text-primary'}`}>
+                              {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    {selectedUnit.suspension_status === 'suspended' && (
+                      <div className="flex items-start gap-2 rounded-xl bg-destructive/10 p-3">
+                        <ShieldAlert className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-destructive">{t('home.suspended')}</p>
+                          <p className="text-xs text-destructive/80">{selectedUnit.suspension_reason || selectedUnit.suspension_content}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                {/* Dropdown select */}
+                <select
+                  value={selectedUnit?.unit_id || ''}
+                  onChange={(e) => {
+                    const unit = businessUnits.find(u => u.unit_id === e.target.value);
+                    if (unit && unit.suspension_status !== 'suspended') setSelectedUnit(unit);
+                  }}
+                  className="w-full h-14 rounded-2xl border-2 border-border bg-card px-4 text-base font-semibold text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '24px', paddingRight: '44px' }}
+                >
+                  <option value="">{t('home.selectShop')}...</option>
+                  {businessUnits.map(unit => (
+                    <option
+                      key={unit.unit_id}
+                      value={unit.unit_id}
+                      disabled={unit.suspension_status === 'suspended'}
+                    >
+                      {unit.name}{unit.suspension_status === 'suspended' ? ` (${t('home.suspended')})` : ''}{unit.receiver_city ? ` — ${unit.receiver_city}` : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
 
