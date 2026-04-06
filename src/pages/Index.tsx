@@ -29,6 +29,14 @@ interface BusinessUnit {
   suspension_content: string | null;
 }
 
+/** Convert relative /api/uploads/ paths to absolute shop.lanapays.us URLs */
+function resolveImageUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.startsWith('http')) return url;
+  if (url.startsWith('/api/uploads/')) return `https://shop.lanapays.us${url}`;
+  return url;
+}
+
 const CURRENCY_SYMBOL: Record<string, string> = {
   GBP: '£',
   USD: '$',
@@ -182,8 +190,8 @@ const Index = () => {
                   : 'bg-primary/5 border-primary/20'
               }`}>
                 <div className="flex items-center gap-3">
-                  {businessUnits[0].image ? (
-                    <img src={businessUnits[0].image} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
+                  {resolveImageUrl(businessUnits[0].image) ? (
+                    <img src={resolveImageUrl(businessUnits[0].image)!} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
                   ) : (
                     <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
                       <Store className="w-5 h-5 text-primary" />
@@ -243,8 +251,8 @@ const Index = () => {
                       }`}
                     >
                       <div className="flex items-center gap-3 w-full">
-                        {unit.image ? (
-                          <img src={unit.image} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
+                        {resolveImageUrl(unit.image) ? (
+                          <img src={resolveImageUrl(unit.image)!} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
                         ) : (
                           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
                             <Store className="w-5 h-5 text-primary" />
