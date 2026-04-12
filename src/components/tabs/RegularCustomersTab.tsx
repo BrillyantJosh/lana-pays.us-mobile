@@ -461,7 +461,7 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
               : null;
             const delKey = customer.customer_hex_id + customer.unit_id;
             const isFrozen = freezeStatus[customer.customer_hex_id] === 'frozen';
-            const isNearMaxCap = bal && bal.lana > MAX_CAP_LANA && !isFrozen && !hasWonder;
+            const isNearMaxCap = bal && bal.lana > MAX_CAP_LANA && !isFrozen;
 
             return (
               <div key={delKey} className={`rounded-2xl p-4 space-y-3 ${
@@ -565,15 +565,17 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
                       <span className="text-xs font-bold text-amber-700 dark:text-amber-400">{t('regulars.maxCapWarning')}</span>
                     </div>
                     <p className="text-xs text-amber-600 dark:text-amber-400">{t('regulars.maxCapMessage', { lana: MAX_CAP_LANA.toLocaleString() })}</p>
-                    <a
-                      href="https://www.lana8wonder.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300 underline"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      {t('regulars.wonderEnrollLink')}
-                    </a>
+                    {!hasWonder && (
+                      <a
+                        href="https://www.lana8wonder.com"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300 underline"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        {t('regulars.wonderEnrollLink')}
+                      </a>
+                    )}
                   </div>
                 )}
               </div>
