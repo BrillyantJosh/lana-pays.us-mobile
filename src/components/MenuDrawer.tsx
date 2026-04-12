@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, HelpCircle, LogOut, Store, UserPen, Copy, Check, History, Wallet, Globe, Shield } from "lucide-react";
+import { X, HelpCircle, LogOut, Store, UserPen, Copy, Check, History, Wallet, Globe, Shield, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -24,9 +24,10 @@ interface MenuDrawerProps {
   open: boolean;
   onClose: () => void;
   onEditProfile?: () => void;
+  onRegularCustomers?: () => void;
 }
 
-const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
+const MenuDrawer = ({ open, onClose, onEditProfile, onRegularCustomers }: MenuDrawerProps) => {
   const { session, logout } = useAuth();
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -65,6 +66,7 @@ const MenuDrawer = ({ open, onClose, onEditProfile }: MenuDrawerProps) => {
     { label: t('menu.profile'), icon: UserPen, action: handleEditProfile },
     { label: t('menu.shop'), icon: Store, action: () => { onClose(); window.open('https://shop.lanapays.us', '_blank'); } },
     { label: t('menu.checkWallet'), icon: Wallet, action: () => { onClose(); window.open('https://check.lanapays.us', '_blank'); } },
+    { label: t('menu.regularCustomers'), icon: Users, action: () => { onClose(); onRegularCustomers?.(); } },
     { label: t('menu.history'), icon: History, action: () => { onClose(); window.open('https://brain.lanapays.us', '_blank'); } },
     { label: t('menu.help'), icon: HelpCircle, action: () => {} },
   ];

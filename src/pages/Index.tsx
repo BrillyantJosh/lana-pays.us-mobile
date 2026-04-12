@@ -7,6 +7,7 @@ import CashTab from "@/components/tabs/CashTab";
 import WalletsTab from "@/components/tabs/WalletsTab";
 import LanaTab from "@/components/tabs/LanaTab";
 import EditProfile from "@/components/EditProfile";
+import RegularCustomersTab from "@/components/tabs/RegularCustomersTab";
 import { useAuth } from "@/contexts/AuthContext";
 import lanaIcon from "@/assets/lana-icon.png";
 
@@ -43,7 +44,7 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
-type View = "home" | "cash" | "wallets" | "lana" | "profile";
+type View = "home" | "cash" | "wallets" | "lana" | "profile" | "regulars";
 
 const Index = () => {
   const { t } = useTranslation();
@@ -163,10 +164,16 @@ const Index = () => {
     setActiveView("profile");
   };
 
+  const handleRegularCustomers = () => {
+    setSelectedWallet(null);
+    setLanaPaymentRequest(null);
+    setActiveView("regulars");
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <TopBar onMenuOpen={() => setMenuOpen(true)} />
-      <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onEditProfile={handleEditProfile} />
+      <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onEditProfile={handleEditProfile} onRegularCustomers={handleRegularCustomers} />
 
       <main className="pt-14">
         {/* ─── Home: two big buttons ─── */}
@@ -453,6 +460,9 @@ const Index = () => {
             )}
             {activeView === "profile" && (
               <EditProfile />
+            )}
+            {activeView === "regulars" && (
+              <RegularCustomersTab unitId={effectiveUnit?.unit_id} staffHexId={session?.nostrHexId} />
             )}
           </div>
         )}

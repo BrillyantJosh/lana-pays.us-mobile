@@ -110,6 +110,21 @@ export function initializeSchema(db: Database.Database): void {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Regular customers (per business unit)
+    CREATE TABLE IF NOT EXISTS regular_customers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      unit_id TEXT NOT NULL,
+      customer_hex_id TEXT NOT NULL,
+      customer_wallet TEXT NOT NULL,
+      customer_npub TEXT,
+      display_name TEXT,
+      picture TEXT,
+      added_by_hex TEXT NOT NULL,
+      note TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(unit_id, customer_hex_id)
+    );
+
     -- App settings (key-value store)
     CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,

@@ -345,6 +345,93 @@ app.get('/api/business-units/:hexId', (req, res) => {
   res.json({ units: filtered });
 });
 
+// ─── Authorization Helper ─────────────────────────────
+function isAuthorizedForUnit(db: any, hexId: string, unitId: string): boolean {
+  const unit = db.prepare('SELECT owner_hex, authorized_hex FROM business_units WHERE unit_id = ?').get(unitId) as any;
+  if (!unit) return false;
+  if (unit.owner_hex === hexId) return true;
+  try {
+    const authList: string[] = JSON.parse(unit.authorized_hex || '[]');
+    return authList.includes(hexId);
+  } catch { return false; }
+}
+
+// ─── Regular Customers API ────────────────────────────
+
+/**
+ * List regular customers for a business unit
+ */
+app.get('/api/regular-customers/:unitId', (req, res) => {
+  const { unitId } = req.params;
+  const staffHex = req.query.staff_hex as string;
+
+  if (!staffHex || !unitId) {
+    return res.status(400).json({ error: 'Missing staff_hex or unitId' });
+  }
+
+  if (!isAuthorizedForUnit(db, staffHex, unitId)) {
+    return res.status(403).json({ error: 'Not authorized for this unit' });
+  }
+
+  const customers = db.prepare(`
+    SELECT id, unit_id, customer_hex_id, customer_wallet, customer_npub,
+           display_name, picture, added_by_hex, note, created_at
+    FROM regular_customers
+    WHERE unit_id = ?
+    ORDER BY display_name ASC, created_at ASC
+  `).all(unitId);
+
+  res.json({ customers });
+});
+
+/**
+ * Add/upsert a regular customer
+ */
+app.post('/api/regular-customers', (req, res) => {
+  const { unit_id, customer_hex_id, customer_wallet, customer_npub, display_name, picture, staff_hex, note } = req.body;
+
+  if (!unit_id || !customer_hex_id || !customer_wallet || !staff_hex) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  if (!isAuthorizedForUnit(db, staff_hex, unit_id)) {
+    return res.status(403).json({ error: 'Not authorized for this unit' });
+  }
+
+  db.prepare(`
+    INSERT INTO regular_customers (unit_id, customer_hex_id, customer_wallet, customer_npub, display_name, picture, added_by_hex, note)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(unit_id, customer_hex_id) DO UPDATE SET
+      customer_wallet = excluded.customer_wallet,
+      customer_npub = excluded.customer_npub,
+      display_name = COALESCE(excluded.display_name, regular_customers.display_name),
+      picture = COALESCE(excluded.picture, regular_customers.picture),
+      note = COALESCE(excluded.note, regular_customers.note)
+  `).run(unit_id, customer_hex_id, customer_wallet, customer_npub || null, display_name || null, picture || null, staff_hex, note || null);
+
+  const customer = db.prepare('SELECT * FROM regular_customers WHERE unit_id = ? AND customer_hex_id = ?').get(unit_id, customer_hex_id);
+  res.json({ success: true, customer });
+});
+
+/**
+ * Delete a regular customer
+ */
+app.delete('/api/regular-customers/:unitId/:customerHexId', (req, res) => {
+  const { unitId, customerHexId } = req.params;
+  const staffHex = req.query.staff_hex as string;
+
+  if (!staffHex) {
+    return res.status(400).json({ error: 'Missing staff_hex' });
+  }
+
+  if (!isAuthorizedForUnit(db, staffHex, unitId)) {
+    return res.status(403).json({ error: 'Not authorized for this unit' });
+  }
+
+  db.prepare('DELETE FROM regular_customers WHERE unit_id = ? AND customer_hex_id = ?').run(unitId, customerHexId);
+  res.json({ success: true });
+});
+
 /**
  * Fetch full KIND 0 profile for editing
  */
