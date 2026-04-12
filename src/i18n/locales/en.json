@@ -160,6 +160,9 @@
   "cash.scanCustomerWallet": "Scan Customer Wallet",
   "cash.orSelectRegular": "or select a regular customer",
   "cash.searchRegulars": "Search customers...",
+  "cash.saveAsRegular": "Save as regular customer",
+  "cash.savingRegular": "Saving...",
+  "cash.savedAsRegular": "Saved as regular customer",
 
   "cash.scanTitle": "Scan Customer",
   "cash.scanSubtitle": "Scan customer wallet or WIF key",

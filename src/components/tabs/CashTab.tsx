@@ -103,6 +103,8 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   // Regular customers
   const [regularCustomers, setRegularCustomers] = useState<{ customer_hex_id: string; customer_wallet: string; customer_npub?: string; display_name?: string; picture?: string; note?: string }[]>([]);
   const [regularSearch, setRegularSearch] = useState('');
+  const [savingAsRegular, setSavingAsRegular] = useState(false);
+  const [savedAsRegular, setSavedAsRegular] = useState(false);
 
   // Receipt analysis
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -651,6 +653,66 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           <p className="text-lg text-muted-foreground text-center">{t('cash.invoiceLabel', { number: pd?.invoiceNumber || invoiceNumber })}</p>
           <p className="text-xs text-muted-foreground truncate max-w-full">{t('cash.walletLabel', { address: walletId })}</p>
         </div>
+
+        {/* Save as regular customer prompt */}
+        {nostrHexId && walletId && !savedAsRegular && !regularCustomers.some(c => c.customer_hex_id === nostrHexId) && (
+          <button
+            onClick={async () => {
+              if (!unitId || !session?.nostrHexId || !nostrHexId || !walletId) return;
+              setSavingAsRegular(true);
+              try {
+                // Fetch profile name for the customer
+                let displayName: string | null = null;
+                try {
+                  const profRes = await fetch('/api/profile-lookup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hex_id: nostrHexId }),
+                  });
+                  const profData = await profRes.json();
+                  displayName = profData.profile?.display_name || profData.profile?.name || null;
+                } catch {}
+
+                await fetch('/api/regular-customers', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    unit_id: unitId,
+                    customer_hex_id: nostrHexId,
+                    customer_wallet: walletId,
+                    customer_npub: nostrNpubId,
+                    display_name: displayName,
+                    staff_hex: session.nostrHexId,
+                  }),
+                });
+                setSavedAsRegular(true);
+                // Refresh list
+                fetch(`/api/regular-customers/${unitId}?staff_hex=${session.nostrHexId}`)
+                  .then(r => r.json())
+                  .then(d => setRegularCustomers(d.customers || []))
+                  .catch(() => {});
+              } catch {} finally {
+                setSavingAsRegular(false);
+              }
+            }}
+            disabled={savingAsRegular}
+            className="w-full rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 p-4 flex items-center justify-center gap-2 text-sm font-medium text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+          >
+            {savingAsRegular ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> {t('cash.savingRegular')}</>
+            ) : (
+              <><UserPlus className="w-4 h-4" /> {t('cash.saveAsRegular')}</>
+            )}
+          </button>
+        )}
+
+        {savedAsRegular && (
+          <div className="rounded-2xl bg-primary/5 border border-primary/20 p-3 flex items-center justify-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-primary" />
+            <span className="text-sm text-primary font-medium">{t('cash.savedAsRegular')}</span>
+          </div>
+        )}
+
         <Button onClick={() => window.location.href = '/'} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">{t('common.newPayment')}</Button>
       </div>
     );

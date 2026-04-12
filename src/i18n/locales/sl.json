@@ -160,6 +160,9 @@
   "cash.scanCustomerWallet": "Skeniraj denarnico stranke",
   "cash.orSelectRegular": "ali izberi redno stranko",
   "cash.searchRegulars": "Iskanje strank...",
+  "cash.saveAsRegular": "Shrani med redne stranke",
+  "cash.savingRegular": "Shranjujem...",
+  "cash.savedAsRegular": "Shranjeno med redne stranke",
 
   "cash.scanTitle": "Skeniraj stranko",
   "cash.scanSubtitle": "Skenirajte denarnico ali WIF ključ stranke",
