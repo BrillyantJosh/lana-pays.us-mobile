@@ -17,15 +17,32 @@ interface RegularCustomer {
   created_at: string;
 }
 
+interface BusinessUnitOption {
+  unit_id: string;
+  name: string;
+  image?: string;
+}
+
 interface RegularCustomersTabProps {
   unitId?: string;
   staffHexId?: string;
+  businessUnits?: BusinessUnitOption[];
 }
 
 type Step = 'list' | 'scanning' | 'confirm';
 
-const RegularCustomersTab = ({ unitId, staffHexId }: RegularCustomersTabProps) => {
+const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits = [] }: RegularCustomersTabProps) => {
   const { t } = useTranslation();
+
+  const [activeUnitId, setActiveUnitId] = useState<string | undefined>(initialUnitId);
+  const unitId = activeUnitId || initialUnitId;
+
+  // Auto-select first unit if none selected
+  useEffect(() => {
+    if (!unitId && businessUnits.length > 0) {
+      setActiveUnitId(businessUnits[0].unit_id);
+    }
+  }, [unitId, businessUnits]);
 
   const [step, setStep] = useState<Step>('list');
   const [customers, setCustomers] = useState<RegularCustomer[]>([]);
@@ -328,6 +345,19 @@ const RegularCustomersTab = ({ unitId, staffHexId }: RegularCustomersTabProps) =
           <p className="text-muted-foreground text-sm">{t('regulars.subtitle')}</p>
         </div>
       </div>
+
+      {/* Unit selector (when multiple units) */}
+      {businessUnits.length > 1 && (
+        <select
+          value={unitId || ''}
+          onChange={(e) => { setActiveUnitId(e.target.value); setCustomers([]); setLoading(true); }}
+          className="w-full h-12 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+        >
+          {businessUnits.map(u => (
+            <option key={u.unit_id} value={u.unit_id}>{u.name}</option>
+          ))}
+        </select>
+      )}
 
       {/* Add button */}
       <button

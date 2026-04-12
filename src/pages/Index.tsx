@@ -462,7 +462,7 @@ const Index = () => {
               <EditProfile />
             )}
             {activeView === "regulars" && (
-              <RegularCustomersTab unitId={effectiveUnit?.unit_id} staffHexId={session?.nostrHexId} />
+              <RegularCustomersTab unitId={effectiveUnit?.unit_id} staffHexId={session?.nostrHexId} businessUnits={businessUnits.filter(u => u.suspension_status !== 'suspended')} />
             )}
           </div>
         )}
