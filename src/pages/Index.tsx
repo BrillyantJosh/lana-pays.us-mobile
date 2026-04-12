@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from 'react-i18next';
-import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info } from "lucide-react";
+import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import MenuDrawer from "@/components/MenuDrawer";
 import CashTab from "@/components/tabs/CashTab";
@@ -53,6 +53,7 @@ const Index = () => {
 
   const [activeView, setActiveView] = useState<View>("home");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [principlesOpen, setPrinciplesOpen] = useState(false);
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
   const [lanaPaymentRequest, setLanaPaymentRequest] = useState<{ walletAddress: string } | null>(null);
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
@@ -433,7 +434,82 @@ const Index = () => {
                 </>
               );
             })()}
+
+            {/* ─── Principles banner ─── */}
+            <button
+              onClick={() => setPrinciplesOpen(true)}
+              className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground hover:text-primary transition-colors"
+            >
+              <Leaf className="w-3.5 h-3.5" />
+              <span>{t('principles.banner')}</span>
+            </button>
           </div>
+        )}
+
+        {/* ─── Principles Modal ─── */}
+        {principlesOpen && (
+          <>
+            <div className="fixed inset-0 bg-foreground/30 backdrop-blur-sm z-[80]" onClick={() => setPrinciplesOpen(false)} />
+            <div className="fixed inset-4 z-[90] bg-card rounded-2xl border border-border shadow-xl flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
+                <h2 className="font-display font-bold text-foreground text-lg">{t('principles.title')}</h2>
+                <button onClick={() => setPrinciplesOpen(false)} className="w-9 h-9 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 space-y-5 text-sm text-foreground leading-relaxed">
+                <p className="text-muted-foreground">{t('principles.subtitle')}</p>
+
+                <div>
+                  <h3 className="font-bold text-primary mb-2">{t('principles.s1Title')}</h3>
+                  <p className="text-muted-foreground mb-2">{t('principles.s1Intro')}</p>
+                  <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                    <li>{t('principles.s1P1')}</li><li>{t('principles.s1P2')}</li><li>{t('principles.s1P3')}</li><li>{t('principles.s1P4')}</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <h3 className="font-bold text-primary mb-2">{t('principles.s2Title')}</h3>
+                  <p className="text-muted-foreground mb-2">{t('principles.s2Intro')}</p>
+                  <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                    <li>{t('principles.s2P1')}</li><li>{t('principles.s2P2')}</li><li>{t('principles.s2P3')}</li><li>{t('principles.s2P4')}</li>
+                  </ul>
+                  <p className="text-muted-foreground mt-2 mb-2">{t('principles.s2Not')}</p>
+                  <ul className="list-disc list-inside space-y-1 text-destructive/80">
+                    <li>{t('principles.s2N1')}</li><li>{t('principles.s2N2')}</li><li>{t('principles.s2N3')}</li><li>{t('principles.s2N4')}</li><li>{t('principles.s2N5')}</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <h3 className="font-bold text-primary mb-2">{t('principles.s3Title')}</h3>
+                  <p className="text-muted-foreground mb-2">{t('principles.s3Intro')}</p>
+                  <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                    <li>{t('principles.s3P1')}</li><li>{t('principles.s3P2')}</li><li>{t('principles.s3P3')}</li><li>{t('principles.s3P4')}</li>
+                  </ul>
+                  <p className="text-muted-foreground mt-2 mb-2">{t('principles.s3Action')}</p>
+                  <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                    <li>{t('principles.s3A1')}</li><li>{t('principles.s3A2')}</li><li>{t('principles.s3A3')}</li><li>{t('principles.s3A4')}</li>
+                  </ul>
+                  <p className="text-muted-foreground mt-2 italic">{t('principles.s3Responsibility')}</p>
+                </div>
+
+                <div>
+                  <h3 className="font-bold text-primary mb-2">{t('principles.s4Title')}</h3>
+                  <p className="text-muted-foreground mb-2">{t('principles.s4Intro')}</p>
+                  <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                    <li>{t('principles.s4P1')}</li><li>{t('principles.s4P2')}</li><li>{t('principles.s4P3')}</li><li>{t('principles.s4P4')}</li>
+                  </ul>
+                  <p className="text-muted-foreground mt-2">{t('principles.s4Restore')}</p>
+                  <p className="text-muted-foreground mt-1">{t('principles.s4Repeated')}</p>
+                </div>
+
+                <div className="rounded-xl bg-primary/5 border border-primary/20 p-4">
+                  <p className="text-sm font-bold text-primary text-center italic">{t('principles.core')}</p>
+                  <p className="text-xs text-muted-foreground text-center mt-2">{t('principles.closing')}</p>
+                </div>
+              </div>
+            </div>
+          </>
         )}
 
         {/* ─── Back button + Tabs ─── */}
