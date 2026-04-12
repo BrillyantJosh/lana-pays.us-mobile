@@ -350,6 +350,7 @@
   "regulars.hexId": "Nostr Hex ID",
   "regulars.notePlaceholder": "Optional note (e.g. VIP, comes Mondays)",
   "regulars.note": "Note",
+  "regulars.addToShop": "Add to shop",
   "regulars.saveCustomer": "Save Customer",
   "regulars.saving": "Saving...",
   "regulars.saved": "Customer saved",

@@ -433,6 +433,57 @@ app.delete('/api/regular-customers/:unitId/:customerHexId', (req, res) => {
 });
 
 /**
+ * Get ALL regular customers across all units the staff member is authorized for
+ */
+app.get('/api/regular-customers-all', (req, res) => {
+  const staffHex = req.query.staff_hex as string;
+  if (!staffHex) return res.status(400).json({ error: 'Missing staff_hex' });
+
+  // Get all units this staff member has access to
+  const units = db.prepare(`
+    SELECT unit_id, name, owner_hex, authorized_hex FROM business_units WHERE status = 'active'
+  `).all() as any[];
+
+  const authorizedUnits = units.filter(u => {
+    if (u.owner_hex === staffHex) return true;
+    try { return JSON.parse(u.authorized_hex || '[]').includes(staffHex); } catch { return false; }
+  });
+
+  const unitMap: Record<string, string> = {};
+  authorizedUnits.forEach(u => { unitMap[u.unit_id] = u.name; });
+
+  if (authorizedUnits.length === 0) return res.json({ customers: [] });
+
+  const placeholders = authorizedUnits.map(() => '?').join(',');
+  const customers = db.prepare(`
+    SELECT id, unit_id, customer_hex_id, customer_wallet, customer_npub,
+           display_name, picture, added_by_hex, note, created_at
+    FROM regular_customers
+    WHERE unit_id IN (${placeholders})
+    ORDER BY display_name ASC, created_at ASC
+  `).all(...authorizedUnits.map(u => u.unit_id)) as any[];
+
+  // Add unit_name to each customer
+  const enriched = customers.map(c => ({ ...c, unit_name: unitMap[c.unit_id] || c.unit_id }));
+
+  res.json({ customers: enriched });
+});
+
+/**
+ * Proxy Lana8Wonder status check (avoids CORS from frontend)
+ */
+app.get('/api/lana8wonder/:hexId', async (req, res) => {
+  const { hexId } = req.params;
+  try {
+    const r = await fetch(`https://check.lanapays.us/api/lana8wonder/${hexId}`, { signal: AbortSignal.timeout(8000) });
+    const data = await r.json();
+    res.json(data);
+  } catch {
+    res.json({ enrolled: false });
+  }
+});
+
+/**
  * Fetch full KIND 0 profile for editing
  */
 app.get('/api/profile-full/:hexId', async (req, res) => {

@@ -7,6 +7,7 @@ import { convertWifToIds } from '@/lib/crypto';
 interface RegularCustomer {
   id: number;
   unit_id: string;
+  unit_name: string;
   customer_hex_id: string;
   customer_wallet: string;
   customer_npub: string | null;
@@ -31,7 +32,7 @@ interface CustomerBalance {
 }
 
 const CURRENCY_SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
-const WONDER_THRESHOLD_FIAT = 100; // 100 EUR/USD/GBP to be eligible
+const WONDER_THRESHOLD_FIAT = 100;
 
 interface RegularCustomersTabProps {
   unitId?: string;
@@ -41,23 +42,16 @@ interface RegularCustomersTabProps {
 
 type Step = 'list' | 'scanning' | 'confirm';
 
-const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits = [] }: RegularCustomersTabProps) => {
+const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomersTabProps) => {
   const { t } = useTranslation();
-
-  const [activeUnitId, setActiveUnitId] = useState<string | undefined>(initialUnitId);
-  const unitId = activeUnitId || initialUnitId;
-
-  // Auto-select first unit if none selected
-  useEffect(() => {
-    if (!unitId && businessUnits.length > 0) {
-      setActiveUnitId(businessUnits[0].unit_id);
-    }
-  }, [unitId, businessUnits]);
 
   const [step, setStep] = useState<Step>('list');
   const [customers, setCustomers] = useState<RegularCustomer[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // For "Add Customer" — which unit to add to
+  const [addToUnitId, setAddToUnitId] = useState<string>(businessUnits[0]?.unit_id || '');
 
   // Scan result state
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -81,11 +75,11 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Fetch customers
+  // Fetch ALL customers across all authorized units
   const fetchCustomers = async () => {
-    if (!unitId || !staffHexId) { setLoading(false); return; }
+    if (!staffHexId) { setLoading(false); return; }
     try {
-      const res = await fetch(`/api/regular-customers/${unitId}?staff_hex=${staffHexId}`);
+      const res = await fetch(`/api/regular-customers-all?staff_hex=${staffHexId}`);
       const data = await res.json();
       setCustomers(data.customers || []);
     } catch {
@@ -97,17 +91,20 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
 
   useEffect(() => {
     fetchCustomers();
-  }, [unitId, staffHexId]);
+  }, [staffHexId]);
 
-  // Fetch balances + Lana8Wonder status for all customers
-  const activeUnit = businessUnits.find(u => u.unit_id === unitId);
-  const unitCurrency = activeUnit?.currency || 'EUR';
-
+  // Fetch balances + Lana8Wonder for all customers
   useEffect(() => {
     if (customers.length === 0) return;
 
-    // Fetch balances
+    // Deduplicate by hex_id (same customer might be in multiple units)
+    const seen = new Set<string>();
     customers.forEach(c => {
+      if (seen.has(c.customer_hex_id)) return;
+      seen.add(c.customer_hex_id);
+
+      const unitCurrency = businessUnits.find(u => u.unit_id === c.unit_id)?.currency || 'EUR';
+
       fetch(`/api/balance/${encodeURIComponent(c.customer_wallet)}?currency=${unitCurrency}`)
         .then(r => r.json())
         .then(data => {
@@ -117,15 +114,12 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
         })
         .catch(() => {});
 
-      // Fetch Lana8Wonder enrollment
-      fetch(`https://check.lanapays.us/api/lana8wonder/${c.customer_hex_id}`)
+      fetch(`/api/lana8wonder/${c.customer_hex_id}`)
         .then(r => r.json())
-        .then(data => {
-          setWonderStatus(prev => ({ ...prev, [c.customer_hex_id]: data.enrolled === true }));
-        })
+        .then(data => { setWonderStatus(prev => ({ ...prev, [c.customer_hex_id]: data.enrolled === true })); })
         .catch(() => {});
     });
-  }, [customers, unitCurrency]);
+  }, [customers, businessUnits]);
 
   // Handle QR scan result
   const handleScan = async (data: string) => {
@@ -149,16 +143,12 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
 
       if (isWalletAddress) {
         wallet = trimmed;
-
-        // Try local user lookup first
         const userRes = await fetch(`/api/users/by-wallet/${encodeURIComponent(wallet)}`);
         const userData = await userRes.json();
-
         if (userData.user?.hex_id) {
           hexId = userData.user.hex_id;
           npub = userData.user.npub;
         } else {
-          // Try check-wallet API for registration data
           const checkRes = await fetch('/api/check-wallet', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -170,14 +160,13 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
           }
         }
       } else {
-        // WIF private key — derive all IDs
         const ids = await convertWifToIds(trimmed);
         wallet = ids.walletId;
         hexId = ids.nostrHexId;
         npub = ids.nostrNpubId;
       }
 
-      // Check wallet registration via Lana Register API
+      // Check registration
       let isRegistered = false;
       try {
         const regCheck = await fetch('/api/check-wallet', {
@@ -187,10 +176,7 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
         });
         const regData = await regCheck.json();
         isRegistered = regData.success && regData.registered;
-        // If we still don't have hexId, try from registration data
-        if (!hexId && regData.wallet?.nostr_hex_id) {
-          hexId = regData.wallet.nostr_hex_id;
-        }
+        if (!hexId && regData.wallet?.nostr_hex_id) hexId = regData.wallet.nostr_hex_id;
       } catch {}
 
       if (!isRegistered) {
@@ -211,7 +197,6 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
       setResolvedWallet(wallet);
       setResolvedNpub(npub);
 
-      // Fetch KIND 0 profile for name and picture
       try {
         const profileRes = await fetch('/api/profile-lookup', {
           method: 'POST',
@@ -223,7 +208,7 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
           setResolvedName(profileData.profile.display_name || profileData.profile.name || null);
           setResolvedPicture(profileData.profile.picture || null);
         }
-      } catch {} // profile lookup is best-effort
+      } catch {}
 
       setStep('confirm');
     } catch {
@@ -236,7 +221,7 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
 
   // Save customer
   const handleSave = async () => {
-    if (!unitId || !staffHexId || !resolvedHexId || !resolvedWallet) return;
+    if (!addToUnitId || !staffHexId || !resolvedHexId || !resolvedWallet) return;
 
     setIsSaving(true);
     setSaveError(null);
@@ -246,7 +231,7 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          unit_id: unitId,
+          unit_id: addToUnitId,
           customer_hex_id: resolvedHexId,
           customer_wallet: resolvedWallet,
           customer_npub: resolvedNpub,
@@ -272,28 +257,18 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
   };
 
   // Delete customer
-  const handleDelete = async (customerHexId: string) => {
-    if (!unitId || !staffHexId) return;
-    setDeletingId(customerHexId);
+  const handleDelete = async (unitId: string, customerHexId: string) => {
+    if (!staffHexId) return;
+    setDeletingId(customerHexId + unitId);
     try {
       await fetch(`/api/regular-customers/${unitId}/${customerHexId}?staff_hex=${staffHexId}`, { method: 'DELETE' });
-      setCustomers(prev => prev.filter(c => c.customer_hex_id !== customerHexId));
+      setCustomers(prev => prev.filter(c => !(c.customer_hex_id === customerHexId && c.unit_id === unitId)));
     } catch {} finally {
       setDeletingId(null);
     }
   };
 
   const inputClass = "w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary";
-
-  // ─── No shop selected ───
-  if (!unitId) {
-    return (
-      <div className="flex flex-col items-center gap-4 px-6 py-16">
-        <Store className="w-12 h-12 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground text-center">{t('regulars.noShopSelected')}</p>
-      </div>
-    );
-  }
 
   // ─── Looking up after scan ───
   if (isLookingUp) {
@@ -344,11 +319,23 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
               <p className="text-xs text-muted-foreground">{t('regulars.wallet')}</p>
               <p className="text-xs font-mono text-foreground break-all">{resolvedWallet}</p>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">{t('regulars.hexId')}</p>
-              <p className="text-xs font-mono text-foreground break-all">{resolvedHexId}</p>
-            </div>
           </div>
+
+          {/* Select which unit to add to */}
+          {businessUnits.length > 1 && (
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted-foreground">{t('regulars.addToShop')}</p>
+              <select
+                value={addToUnitId}
+                onChange={e => setAddToUnitId(e.target.value)}
+                className="w-full h-11 rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                {businessUnits.map(u => (
+                  <option key={u.unit_id} value={u.unit_id}>{u.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <p className="text-xs text-muted-foreground">{t('regulars.note')}</p>
@@ -369,7 +356,7 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
 
         <button
           onClick={handleSave}
-          disabled={isSaving}
+          disabled={isSaving || !addToUnitId}
           className="w-full rounded-xl bg-primary text-primary-foreground py-3.5 font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.98] transition-transform"
         >
           {isSaving ? (
@@ -394,7 +381,8 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
     ? customers.filter(c =>
         (c.display_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         c.customer_wallet.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.note || '').toLowerCase().includes(searchQuery.toLowerCase())
+        (c.note || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (c.unit_name || '').toLowerCase().includes(searchQuery.toLowerCase())
       )
     : customers;
 
@@ -411,22 +399,9 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
         </div>
       </div>
 
-      {/* Unit selector (when multiple units) */}
-      {businessUnits.length > 1 && (
-        <select
-          value={unitId || ''}
-          onChange={(e) => { setActiveUnitId(e.target.value); setCustomers([]); setLoading(true); }}
-          className="w-full h-12 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-        >
-          {businessUnits.map(u => (
-            <option key={u.unit_id} value={u.unit_id}>{u.name}</option>
-          ))}
-        </select>
-      )}
-
       {/* Add button */}
       <button
-        onClick={() => { setLookupError(null); setScannerOpen(true); }}
+        onClick={() => { setLookupError(null); setAddToUnitId(businessUnits[0]?.unit_id || ''); setScannerOpen(true); }}
         className="w-full rounded-xl bg-primary text-primary-foreground py-3.5 font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
       >
         <UserPlus className="w-4 h-4" />
@@ -459,30 +434,28 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
         </div>
       ) : filtered.length === 0 ? (
-        /* Empty state */
         <div className="flex flex-col items-center gap-3 py-12">
           <Users className="w-12 h-12 text-muted-foreground/30" />
           <p className="text-sm text-muted-foreground">{t('regulars.empty')}</p>
           <p className="text-xs text-muted-foreground/60 text-center">{t('regulars.emptyHint')}</p>
         </div>
       ) : (
-        /* Customer list */
+        /* Customer list — flat across all units */
         <div className="flex flex-col gap-2">
           {filtered.map(customer => {
             const bal = balances[customer.customer_hex_id];
             const hasWonder = wonderStatus[customer.customer_hex_id];
-            const sym = CURRENCY_SYMBOL[unitCurrency] || '€';
+            const unitCur = businessUnits.find(u => u.unit_id === customer.unit_id)?.currency || 'EUR';
+            const sym = CURRENCY_SYMBOL[unitCur] || '€';
             const missingFiat = bal ? Math.max(0, WONDER_THRESHOLD_FIAT - bal.fiatValue) : null;
             const missingLana = bal && bal.fiatValue < WONDER_THRESHOLD_FIAT && bal.lana > 0
               ? Math.ceil((WONDER_THRESHOLD_FIAT - bal.fiatValue) / (bal.fiatValue / bal.lana))
               : null;
+            const delKey = customer.customer_hex_id + customer.unit_id;
 
             return (
-              <div
-                key={customer.customer_hex_id}
-                className="rounded-2xl bg-card border border-border p-4 space-y-3"
-              >
-                {/* Top row: avatar + name + delete */}
+              <div key={delKey} className="rounded-2xl bg-card border border-border p-4 space-y-3">
+                {/* Top row: avatar + name + shop badge + delete */}
                 <div className="flex items-center gap-3">
                   {customer.picture ? (
                     <img src={customer.picture} alt="" className="w-11 h-11 rounded-xl object-cover shrink-0" />
@@ -495,32 +468,28 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
                     <p className="text-sm font-semibold text-foreground truncate">
                       {customer.display_name || t('regulars.unknownCustomer')}
                     </p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <Store className="w-3 h-3 text-muted-foreground shrink-0" />
+                      <span className="text-xs text-muted-foreground truncate">{customer.unit_name}</span>
+                    </div>
                     {customer.note && (
                       <p className="text-xs text-primary/70 truncate">{customer.note}</p>
                     )}
                   </div>
                   <button
-                    onClick={() => handleDelete(customer.customer_hex_id)}
-                    disabled={deletingId === customer.customer_hex_id}
+                    onClick={() => handleDelete(customer.unit_id, customer.customer_hex_id)}
+                    disabled={deletingId === delKey}
                     className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
                   >
-                    {deletingId === customer.customer_hex_id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-4 h-4" />
-                    )}
+                    {deletingId === delKey ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                   </button>
                 </div>
 
                 {/* Balance row */}
                 {bal ? (
                   <div className="flex items-center justify-between px-1">
-                    <div>
-                      <p className="text-lg font-black text-foreground">{bal.lana.toLocaleString()} <span className="text-xs font-normal text-muted-foreground">LANA</span></p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-lg font-bold text-primary">{sym}{bal.fiatValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                    </div>
+                    <p className="text-lg font-black text-foreground">{bal.lana.toLocaleString()} <span className="text-xs font-normal text-muted-foreground">LANA</span></p>
+                    <p className="text-lg font-bold text-primary">{sym}{bal.fiatValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 px-1">
