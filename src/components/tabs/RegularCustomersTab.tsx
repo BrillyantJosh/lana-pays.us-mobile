@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Users, UserPlus, Loader2, Trash2, Search, Store, Sparkles, TrendingUp } from 'lucide-react';
+import { Users, UserPlus, Loader2, Trash2, Search, Store, Sparkles, TrendingUp, Snowflake, AlertTriangle, ExternalLink } from 'lucide-react';
 import { QRScanner } from '@/components/QRScanner';
 import { convertWifToIds } from '@/lib/crypto';
 
@@ -33,6 +33,7 @@ interface CustomerBalance {
 
 const CURRENCY_SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
 const WONDER_THRESHOLD_FIAT = 100;
+const MAX_CAP_LANA = 1500; // Above this, account will be frozen at next split
 
 interface RegularCustomersTabProps {
   unitId?: string;
@@ -68,9 +69,10 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Balance + Lana8Wonder status
+  // Balance + Lana8Wonder + freeze status
   const [balances, setBalances] = useState<Record<string, CustomerBalance>>({});
   const [wonderStatus, setWonderStatus] = useState<Record<string, boolean>>({});
+  const [freezeStatus, setFreezeStatus] = useState<Record<string, string>>({}); // hex -> 'active' | 'frozen'
 
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -117,6 +119,12 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
       fetch(`/api/lana8wonder/${c.customer_hex_id}`)
         .then(r => r.json())
         .then(data => { setWonderStatus(prev => ({ ...prev, [c.customer_hex_id]: data.enrolled === true })); })
+        .catch(() => {});
+
+      // Check freeze status via wallet list
+      fetch(`/api/wallets/${c.customer_hex_id}`)
+        .then(r => r.json())
+        .then(data => { setFreezeStatus(prev => ({ ...prev, [c.customer_hex_id]: data.accountStatus || 'unknown' })); })
         .catch(() => {});
     });
   }, [customers, businessUnits]);
@@ -452,9 +460,35 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
               ? Math.ceil((WONDER_THRESHOLD_FIAT - bal.fiatValue) / (bal.fiatValue / bal.lana))
               : null;
             const delKey = customer.customer_hex_id + customer.unit_id;
+            const isFrozen = freezeStatus[customer.customer_hex_id] === 'frozen';
+            const isNearMaxCap = bal && bal.lana > MAX_CAP_LANA && !isFrozen;
 
             return (
-              <div key={delKey} className="rounded-2xl bg-card border border-border p-4 space-y-3">
+              <div key={delKey} className={`rounded-2xl p-4 space-y-3 ${
+                isFrozen
+                  ? 'bg-blue-50 dark:bg-blue-950/30 border-2 border-blue-300 dark:border-blue-700'
+                  : 'bg-card border border-border'
+              }`}>
+                {/* Frozen banner — takes priority */}
+                {isFrozen && (
+                  <div className="rounded-xl bg-blue-100 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Snowflake className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
+                      <span className="text-sm font-bold text-blue-700 dark:text-blue-300">{t('regulars.frozenTitle')}</span>
+                    </div>
+                    <p className="text-xs text-blue-600 dark:text-blue-400">{t('regulars.frozenMessage')}</p>
+                    <a
+                      href="https://youtu.be/0DHEQriOXjw"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 underline"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      {t('regulars.frozenVideoLink')}
+                    </a>
+                  </div>
+                )}
+
                 {/* Top row: avatar + name + shop badge + delete */}
                 <div className="flex items-center gap-3">
                   {customer.picture ? (
@@ -522,6 +556,26 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
                     </div>
                   )
                 ) : null}
+
+                {/* Max cap warning — near limit, needs to spend */}
+                {isNearMaxCap && (
+                  <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span className="text-xs font-bold text-amber-700 dark:text-amber-400">{t('regulars.maxCapWarning')}</span>
+                    </div>
+                    <p className="text-xs text-amber-600 dark:text-amber-400">{t('regulars.maxCapMessage', { lana: MAX_CAP_LANA.toLocaleString() })}</p>
+                    <a
+                      href="https://www.lana8wonder.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300 underline"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      {t('regulars.wonderEnrollLink')}
+                    </a>
+                  </div>
+                )}
               </div>
             );
           })}

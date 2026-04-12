@@ -363,6 +363,12 @@
   "regulars.wonderActive": "Lana8Wonder active",
   "regulars.wonderEligible": "Eligible for Lana8Wonder — not yet enrolled!",
   "regulars.wonderMissing": "Needs {{fiat}} more ({{lana}} LANA) for Lana8Wonder",
+  "regulars.wonderEnrollLink": "Enroll in Lana8Wonder at lana8wonder.com",
+  "regulars.frozenTitle": "Account Frozen",
+  "regulars.frozenMessage": "This customer's account is frozen because they didn't spend their funds before the split. It can be unfrozen by donating to the common good.",
+  "regulars.frozenVideoLink": "Watch how to unfreeze",
+  "regulars.maxCapWarning": "Approaching limit!",
+  "regulars.maxCapMessage": "This customer has more than {{lana}} LANA. They need to spend, enroll in Lana8Wonder, or make a purchase before the next split — otherwise their account will be frozen.",
   "regulars.lookupFailed": "Failed to look up customer. Please try again.",
   "regulars.walletNotRegistered": "This wallet is not registered and does not belong to anyone. The customer must register their wallet first."
 }

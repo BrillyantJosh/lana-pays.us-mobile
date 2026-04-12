@@ -484,6 +484,20 @@ app.get('/api/lana8wonder/:hexId', async (req, res) => {
 });
 
 /**
+ * Proxy wallet list + freeze status check (avoids CORS)
+ */
+app.get('/api/wallets/:hexId', async (req, res) => {
+  const { hexId } = req.params;
+  try {
+    const r = await fetch(`https://check.lanapays.us/api/wallets/${hexId}`, { signal: AbortSignal.timeout(10000) });
+    const data = await r.json();
+    res.json(data);
+  } catch {
+    res.json({ wallets: [], accountStatus: 'unknown', walletCount: 0 });
+  }
+});
+
+/**
  * Fetch full KIND 0 profile for editing
  */
 app.get('/api/profile-full/:hexId', async (req, res) => {
