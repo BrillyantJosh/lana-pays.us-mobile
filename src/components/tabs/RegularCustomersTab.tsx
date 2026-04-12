@@ -121,10 +121,14 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
         .then(data => { setWonderStatus(prev => ({ ...prev, [c.customer_hex_id]: data.enrolled === true })); })
         .catch(() => {});
 
-      // Check freeze status via wallet list
+      // Check freeze status via wallet list — account-level OR any wallet frozen
       fetch(`/api/wallets/${c.customer_hex_id}`)
         .then(r => r.json())
-        .then(data => { setFreezeStatus(prev => ({ ...prev, [c.customer_hex_id]: data.accountStatus || 'unknown' })); })
+        .then(data => {
+          const accountFrozen = data.accountStatus === 'frozen';
+          const anyWalletFrozen = (data.wallets || []).some((w: any) => w.frozen === true);
+          setFreezeStatus(prev => ({ ...prev, [c.customer_hex_id]: (accountFrozen || anyWalletFrozen) ? 'frozen' : 'active' }));
+        })
         .catch(() => {});
     });
   }, [customers, businessUnits]);
