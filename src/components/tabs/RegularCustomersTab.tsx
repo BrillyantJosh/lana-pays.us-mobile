@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Users, UserPlus, Loader2, Trash2, Search, Store } from 'lucide-react';
+import { Users, UserPlus, Loader2, Trash2, Search, Store, Sparkles, TrendingUp } from 'lucide-react';
 import { QRScanner } from '@/components/QRScanner';
 import { convertWifToIds } from '@/lib/crypto';
 
@@ -21,7 +21,17 @@ interface BusinessUnitOption {
   unit_id: string;
   name: string;
   image?: string;
+  currency?: string;
 }
+
+interface CustomerBalance {
+  lana: number;
+  fiatValue: number;
+  currency: string;
+}
+
+const CURRENCY_SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
+const WONDER_THRESHOLD_FIAT = 100; // 100 EUR/USD/GBP to be eligible
 
 interface RegularCustomersTabProps {
   unitId?: string;
@@ -64,6 +74,10 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Balance + Lana8Wonder status
+  const [balances, setBalances] = useState<Record<string, CustomerBalance>>({});
+  const [wonderStatus, setWonderStatus] = useState<Record<string, boolean>>({});
+
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -84,6 +98,34 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
   useEffect(() => {
     fetchCustomers();
   }, [unitId, staffHexId]);
+
+  // Fetch balances + Lana8Wonder status for all customers
+  const activeUnit = businessUnits.find(u => u.unit_id === unitId);
+  const unitCurrency = activeUnit?.currency || 'EUR';
+
+  useEffect(() => {
+    if (customers.length === 0) return;
+
+    // Fetch balances
+    customers.forEach(c => {
+      fetch(`/api/balance/${encodeURIComponent(c.customer_wallet)}?currency=${unitCurrency}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.lana !== undefined) {
+            setBalances(prev => ({ ...prev, [c.customer_hex_id]: { lana: data.lana, fiatValue: data.fiatValue, currency: data.currency } }));
+          }
+        })
+        .catch(() => {});
+
+      // Fetch Lana8Wonder enrollment
+      fetch(`https://check.lanapays.us/api/lana8wonder/${c.customer_hex_id}`)
+        .then(r => r.json())
+        .then(data => {
+          setWonderStatus(prev => ({ ...prev, [c.customer_hex_id]: data.enrolled === true }));
+        })
+        .catch(() => {});
+    });
+  }, [customers, unitCurrency]);
 
   // Handle QR scan result
   const handleScan = async (data: string) => {
@@ -426,42 +468,94 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
       ) : (
         /* Customer list */
         <div className="flex flex-col gap-2">
-          {filtered.map(customer => (
-            <div
-              key={customer.customer_hex_id}
-              className="rounded-2xl bg-card border border-border p-4 flex items-center gap-3"
-            >
-              {customer.picture ? (
-                <img src={customer.picture} alt="" className="w-11 h-11 rounded-xl object-cover shrink-0" />
-              ) : (
-                <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                  <Users className="w-5 h-5 text-primary" />
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-foreground truncate">
-                  {customer.display_name || t('regulars.unknownCustomer')}
-                </p>
-                <p className="text-xs text-muted-foreground font-mono truncate">
-                  {customer.customer_wallet}
-                </p>
-                {customer.note && (
-                  <p className="text-xs text-primary/70 mt-0.5 truncate">{customer.note}</p>
-                )}
-              </div>
-              <button
-                onClick={() => handleDelete(customer.customer_hex_id)}
-                disabled={deletingId === customer.customer_hex_id}
-                className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+          {filtered.map(customer => {
+            const bal = balances[customer.customer_hex_id];
+            const hasWonder = wonderStatus[customer.customer_hex_id];
+            const sym = CURRENCY_SYMBOL[unitCurrency] || '€';
+            const missingFiat = bal ? Math.max(0, WONDER_THRESHOLD_FIAT - bal.fiatValue) : null;
+            const missingLana = bal && bal.fiatValue < WONDER_THRESHOLD_FIAT && bal.lana > 0
+              ? Math.ceil((WONDER_THRESHOLD_FIAT - bal.fiatValue) / (bal.fiatValue / bal.lana))
+              : null;
+
+            return (
+              <div
+                key={customer.customer_hex_id}
+                className="rounded-2xl bg-card border border-border p-4 space-y-3"
               >
-                {deletingId === customer.customer_hex_id ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                {/* Top row: avatar + name + delete */}
+                <div className="flex items-center gap-3">
+                  {customer.picture ? (
+                    <img src={customer.picture} alt="" className="w-11 h-11 rounded-xl object-cover shrink-0" />
+                  ) : (
+                    <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                      <Users className="w-5 h-5 text-primary" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">
+                      {customer.display_name || t('regulars.unknownCustomer')}
+                    </p>
+                    {customer.note && (
+                      <p className="text-xs text-primary/70 truncate">{customer.note}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleDelete(customer.customer_hex_id)}
+                    disabled={deletingId === customer.customer_hex_id}
+                    className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+                  >
+                    {deletingId === customer.customer_hex_id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+
+                {/* Balance row */}
+                {bal ? (
+                  <div className="flex items-center justify-between px-1">
+                    <div>
+                      <p className="text-lg font-black text-foreground">{bal.lana.toLocaleString()} <span className="text-xs font-normal text-muted-foreground">LANA</span></p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-bold text-primary">{sym}{bal.fiatValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                    </div>
+                  </div>
                 ) : (
-                  <Trash2 className="w-4 h-4" />
+                  <div className="flex items-center gap-2 px-1">
+                    <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">{t('regulars.loadingBalance')}</span>
+                  </div>
                 )}
-              </button>
-            </div>
-          ))}
+
+                {/* Lana8Wonder status */}
+                {hasWonder === true ? (
+                  <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/20 px-3 py-2">
+                    <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span className="text-xs font-medium text-amber-700 dark:text-amber-400">{t('regulars.wonderActive')}</span>
+                  </div>
+                ) : hasWonder === false && bal ? (
+                  bal.fiatValue >= WONDER_THRESHOLD_FIAT ? (
+                    <div className="flex items-center gap-2 rounded-xl bg-green-500/10 border border-green-500/20 px-3 py-2">
+                      <Sparkles className="w-4 h-4 text-green-500 shrink-0" />
+                      <span className="text-xs font-medium text-green-700 dark:text-green-400">{t('regulars.wonderEligible')}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 rounded-xl bg-muted px-3 py-2">
+                      <TrendingUp className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <span className="text-xs text-muted-foreground">
+                        {t('regulars.wonderMissing', {
+                          fiat: `${sym}${missingFiat?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                          lana: missingLana?.toLocaleString() || '?'
+                        })}
+                      </span>
+                    </div>
+                  )
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       )}
 

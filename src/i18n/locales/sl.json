@@ -358,6 +358,10 @@
   "regulars.noProfileFound": "Profil ni najden na Nostr relayjh",
   "regulars.unknownCustomer": "Neznana stranka",
   "regulars.search": "Iskanje strank...",
+  "regulars.loadingBalance": "Nalaganje stanja...",
+  "regulars.wonderActive": "Lana8Wonder aktivna",
+  "regulars.wonderEligible": "Upravičen do Lana8Wonder — še ni vpisan!",
+  "regulars.wonderMissing": "Potrebuje še {{fiat}} ({{lana}} LANA) do Lana8Wonder",
   "regulars.lookupFailed": "Iskanje stranke ni uspelo. Poskusite znova.",
   "regulars.walletNotRegistered": "Ta denarnica ni registrirana in ne pripada nikomur. Stranka mora najprej registrirati svojo denarnico."
 }
