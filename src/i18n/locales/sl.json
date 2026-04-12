@@ -309,5 +309,6 @@
   "regulars.noProfileFound": "Profil ni najden na Nostr relayjh",
   "regulars.unknownCustomer": "Neznana stranka",
   "regulars.search": "Iskanje strank...",
-  "regulars.lookupFailed": "Iskanje stranke ni uspelo. Poskusite znova."
+  "regulars.lookupFailed": "Iskanje stranke ni uspelo. Poskusite znova.",
+  "regulars.walletNotRegistered": "Ta denarnica ni registrirana in ne pripada nikomur. Stranka mora najprej registrirati svojo denarnico."
 }

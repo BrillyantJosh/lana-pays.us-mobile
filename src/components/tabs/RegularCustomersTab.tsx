@@ -135,6 +135,29 @@ const RegularCustomersTab = ({ unitId: initialUnitId, staffHexId, businessUnits 
         npub = ids.nostrNpubId;
       }
 
+      // Check wallet registration via Lana Register API
+      let isRegistered = false;
+      try {
+        const regCheck = await fetch('/api/check-wallet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet_id: wallet }),
+        });
+        const regData = await regCheck.json();
+        isRegistered = regData.success && regData.registered;
+        // If we still don't have hexId, try from registration data
+        if (!hexId && regData.wallet?.nostr_hex_id) {
+          hexId = regData.wallet.nostr_hex_id;
+        }
+      } catch {}
+
+      if (!isRegistered) {
+        setLookupError(t('regulars.walletNotRegistered'));
+        setStep('list');
+        setIsLookingUp(false);
+        return;
+      }
+
       if (!hexId) {
         setLookupError(t('regulars.lookupFailed'));
         setStep('list');

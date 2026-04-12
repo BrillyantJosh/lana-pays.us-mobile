@@ -309,5 +309,6 @@
   "regulars.noProfileFound": "No profile found on Nostr relays",
   "regulars.unknownCustomer": "Unknown Customer",
   "regulars.search": "Search customers...",
-  "regulars.lookupFailed": "Failed to look up customer. Please try again."
+  "regulars.lookupFailed": "Failed to look up customer. Please try again.",
+  "regulars.walletNotRegistered": "This wallet is not registered and does not belong to anyone. The customer must register their wallet first."
 }
