@@ -461,7 +461,7 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
               : null;
             const delKey = customer.customer_hex_id + customer.unit_id;
             const isFrozen = freezeStatus[customer.customer_hex_id] === 'frozen';
-            const isNearMaxCap = bal && bal.lana > MAX_CAP_LANA && !isFrozen;
+            const isNearMaxCap = bal && bal.lana > MAX_CAP_LANA && !isFrozen && !hasWonder;
 
             return (
               <div key={delKey} className={`rounded-2xl p-4 space-y-3 ${
