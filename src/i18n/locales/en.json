@@ -158,6 +158,8 @@
   "cash.receiptAttached": "Receipt attached",
   "cash.uploading": "Uploading...",
   "cash.scanCustomerWallet": "Scan Customer Wallet",
+  "cash.orSelectRegular": "or select a regular customer",
+  "cash.searchRegulars": "Search customers...",
 
   "cash.scanTitle": "Scan Customer",
   "cash.scanSubtitle": "Scan customer wallet or WIF key",

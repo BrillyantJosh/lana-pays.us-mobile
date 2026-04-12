@@ -158,6 +158,8 @@
   "cash.receiptAttached": "Račun priložen",
   "cash.uploading": "Nalaganje...",
   "cash.scanCustomerWallet": "Skeniraj denarnico stranke",
+  "cash.orSelectRegular": "ali izberi redno stranko",
+  "cash.searchRegulars": "Iskanje strank...",
 
   "cash.scanTitle": "Skeniraj stranko",
   "cash.scanSubtitle": "Skenirajte denarnico ali WIF ključ stranke",

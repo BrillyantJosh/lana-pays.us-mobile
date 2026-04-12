@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from 'react-i18next';
-import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2, UserPlus, Receipt } from "lucide-react";
+import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2, UserPlus, Receipt, Users, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -100,6 +100,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Regular customers
+  const [regularCustomers, setRegularCustomers] = useState<{ customer_hex_id: string; customer_wallet: string; customer_npub?: string; display_name?: string; picture?: string; note?: string }[]>([]);
+  const [regularSearch, setRegularSearch] = useState('');
+
   // Receipt analysis
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [receiptType, setReceiptType] = useState<'receipt' | 'photo'>('receipt');
@@ -116,6 +120,15 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       setStep(receiptUrl ? "invoice" : "receipt");
     }
   }, [selectedWallet]);
+
+  // Fetch regular customers for this unit
+  useEffect(() => {
+    if (!unitId || !session?.nostrHexId) return;
+    fetch(`/api/regular-customers/${unitId}?staff_hex=${session.nostrHexId}`)
+      .then(r => r.json())
+      .then(d => setRegularCustomers(d.customers || []))
+      .catch(() => {});
+  }, [unitId, session?.nostrHexId]);
 
   // Handle receipt photo
   const handleReceiptFile = async (file: File) => {
@@ -314,6 +327,63 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       setCheckError(t('cash.invalidScan'));
     } finally {
       setIsChecking(false);
+      setIsSubmitting(false);
+    }
+  };
+
+  // Select a regular customer — skip scanner, submit purchase directly
+  const handleSelectRegularCustomer = async (customer: { customer_hex_id: string; customer_wallet: string }) => {
+    // Snapshot purchase data
+    purchaseDataRef.current = {
+      unitId: unitId || '',
+      invoiceNumber,
+      amount,
+      currency,
+      receiptUrl,
+      receiptType,
+      receiptDescription: analysisDescription,
+    };
+
+    const pd = purchaseDataRef.current;
+    const parsedAmount = parseFloat(pd.amount.replace(',', '.'));
+    if (!pd.invoiceNumber.trim() || isNaN(parsedAmount) || parsedAmount <= 0) {
+      setSubmitError(t('cash.invalidAmount'));
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      const res = await fetch('/api/brain/purchase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          unit_id: pd.unitId,
+          payment_type: 'cash',
+          customer_hex: customer.customer_hex_id,
+          customer_wallet: customer.customer_wallet,
+          amount: parsedAmount,
+          currency: pd.currency,
+          invoice_number: pd.invoiceNumber.trim(),
+          receipt_url: pd.receiptUrl || undefined,
+          receipt_type: pd.receiptType || 'receipt',
+          receipt_description: pd.receiptDescription || undefined,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        setSubmitError(data.error || t('cash.purchaseFailed'));
+        return;
+      }
+
+      setWalletId(customer.customer_wallet);
+      setNostrHexId(customer.customer_hex_id);
+      setStep("confirmed");
+    } catch {
+      setSubmitError(t('cash.networkError'));
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -661,6 +731,62 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       >
         <Camera className="w-5 h-5" />{t('cash.scanCustomerWallet')}
       </Button>
+      {/* ══════ Regular Customers quick-select ══════ */}
+      {regularCustomers.length > 0 && (
+        <>
+          <div className="flex items-center gap-3 px-2">
+            <div className="flex-1 h-px bg-border" />
+            <span className="text-xs text-muted-foreground whitespace-nowrap">{t('cash.orSelectRegular')}</span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
+
+          {regularCustomers.length >= 3 && (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                value={regularSearch}
+                onChange={e => setRegularSearch(e.target.value)}
+                placeholder={t('cash.searchRegulars')}
+                className="w-full rounded-xl border border-border bg-background pl-9 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+              />
+            </div>
+          )}
+
+          <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
+            {(() => {
+              const filtered = regularSearch.trim()
+                ? regularCustomers.filter(c =>
+                    (c.display_name || '').toLowerCase().includes(regularSearch.toLowerCase()) ||
+                    c.customer_wallet.toLowerCase().includes(regularSearch.toLowerCase()) ||
+                    (c.note || '').toLowerCase().includes(regularSearch.toLowerCase())
+                  )
+                : regularCustomers;
+              return filtered.map(c => (
+                <button
+                  key={c.customer_hex_id}
+                  onClick={() => handleSelectRegularCustomer(c)}
+                  disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting}
+                  className="rounded-xl bg-card border border-border p-3 flex items-center gap-3 active:scale-[0.98] transition-all hover:border-primary/30 disabled:opacity-40 disabled:pointer-events-none text-left"
+                >
+                  {c.picture ? (
+                    <img src={c.picture} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <Users className="w-5 h-5 text-primary" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{c.display_name || c.customer_wallet.slice(0, 12) + '...'}</p>
+                    <p className="text-xs text-muted-foreground font-mono truncate">{c.customer_wallet}</p>
+                    {c.note && <p className="text-xs text-primary/60 truncate">{c.note}</p>}
+                  </div>
+                </button>
+              ));
+            })()}
+          </div>
+        </>
+      )}
+
       <button onClick={resetAll} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors">{t('common.startOver')}</button>
     </div>
   );
