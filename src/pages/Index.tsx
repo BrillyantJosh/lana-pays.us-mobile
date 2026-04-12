@@ -181,6 +181,15 @@ const Index = () => {
         {activeView === "home" && (
           <div className="flex flex-col gap-5 px-6 py-6" style={{ minHeight: 'calc(100vh - 3.5rem)' }}>
 
+            {/* ─── Principles banner (top, prominent) ─── */}
+            <button
+              onClick={() => setPrinciplesOpen(true)}
+              className="w-full rounded-2xl bg-primary/5 border border-primary/20 p-4 flex items-center gap-3 active:scale-[0.98] transition-transform text-left"
+            >
+              <Leaf className="w-6 h-6 text-primary shrink-0" />
+              <p className="text-sm font-medium text-foreground leading-snug">{t('principles.banner')}</p>
+            </button>
+
             {/* ─── Shop Selector ─── */}
             {loadingUnits ? (
               <div className="rounded-2xl bg-card border border-border p-4 flex items-center justify-center">
@@ -435,14 +444,6 @@ const Index = () => {
               );
             })()}
 
-            {/* ─── Principles banner ─── */}
-            <button
-              onClick={() => setPrinciplesOpen(true)}
-              className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground hover:text-primary transition-colors"
-            >
-              <Leaf className="w-3.5 h-3.5" />
-              <span>{t('principles.banner')}</span>
-            </button>
           </div>
         )}
 
