@@ -19,6 +19,9 @@
   "login.scanTitle": "Skeniraj WIF ključ",
   "login.scanDescription": "Skenirajte QR kodo vašega Lana WIF zasebnega ključa za prijavo",
   "login.failed": "Prijava ni uspela",
+  "login.enterManually": "Vnesi WIF ključ ročno",
+  "login.wifPlaceholder": "Prilepite svoj WIF zasebni ključ tukaj...",
+  "login.signInButton": "Prijava",
 
   "notFound.title": "404",
   "notFound.message": "Ups! Stran ni najdena",

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ScanLine, KeyRound, Loader2, Leaf, X } from 'lucide-react';
+import { ScanLine, KeyRound, Loader2, Leaf, X, Keyboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { QRScanner } from '@/components/QRScanner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,6 +13,8 @@ const Login = () => {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [principlesOpen, setPrinciplesOpen] = useState(false);
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [manualWif, setManualWif] = useState('');
 
   const handleScan = async (data: string) => {
     setIsLoggingIn(true);
@@ -59,6 +61,42 @@ const Login = () => {
               </>
             )}
           </Button>
+
+          {/* Manual WIF input toggle */}
+          {!showManualInput ? (
+            <button
+              onClick={() => setShowManualInput(true)}
+              className="w-full h-12 rounded-2xl text-sm font-medium gap-2 border-2 border-border text-foreground hover:bg-secondary transition-colors flex items-center justify-center"
+            >
+              <Keyboard className="w-4 h-4" />
+              {t('login.enterManually')}
+            </button>
+          ) : (
+            <div className="space-y-3">
+              <textarea
+                value={manualWif}
+                onChange={e => setManualWif(e.target.value)}
+                placeholder={t('login.wifPlaceholder')}
+                rows={3}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none"
+                autoFocus
+              />
+              <Button
+                onClick={() => {
+                  const trimmed = manualWif.trim();
+                  if (trimmed) handleScan(trimmed);
+                }}
+                disabled={!manualWif.trim() || isLoggingIn}
+                className="w-full h-12 rounded-2xl text-sm font-semibold gap-2 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {isLoggingIn ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> {t('login.signingIn')}</>
+                ) : (
+                  <><KeyRound className="w-4 h-4" /> {t('login.signInButton')}</>
+                )}
+              </Button>
+            </div>
+          )}
 
           {error && (
             <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3">

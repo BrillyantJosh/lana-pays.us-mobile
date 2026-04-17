@@ -19,6 +19,9 @@
   "login.scanTitle": "Scan WIF Key",
   "login.scanDescription": "Scan your Lana WIF Private Key QR code to sign in",
   "login.failed": "Login failed",
+  "login.enterManually": "Enter WIF key manually",
+  "login.wifPlaceholder": "Paste your WIF private key here...",
+  "login.signInButton": "Sign In",
 
   "notFound.title": "404",
   "notFound.message": "Oops! Page not found",
