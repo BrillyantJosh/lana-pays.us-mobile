@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { QRScanner } from "@/components/QRScanner";
 import { convertWifToIds } from "@/lib/crypto";
+import { signCustomerLanaTx } from "@/lib/transaction";
 import { useAuth } from "@/contexts/AuthContext";
 import lanaIcon from "@/assets/lana-icon.png";
 
@@ -204,23 +205,70 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         return;
       }
 
+      // Common purchase body — only customer_wif vs signed_tx_hex differs between paths
+      const basePurchaseBody = {
+        unit_id: unitIdRef.current || '',
+        payment_type: 'lana' as const,
+        customer_hex: ids.nostrHexId,
+        customer_wallet: ids.walletId,
+        amount: parsedAmount,
+        currency,
+        invoice_number: invoiceNumber.trim(),
+        receipt_url: receiptUrl || undefined,
+        receipt_type: receiptType || 'receipt',
+        receipt_description: analysisDescription || undefined,
+      };
+
       try {
+        // ── Client-side signing path ──────────────────────────────
+        // 1) Ask Brain for the recipient list (read-only, no DB writes)
+        // 2) Sign the LANA TX locally with the WIF (WIF stays in browser)
+        // 3) Submit signed_tx_hex to Brain → Lana.Discount broadcasts
+        let purchaseBody: Record<string, any>;
+        try {
+          const previewRes = await fetch('/api/brain/purchase/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              unit_id: basePurchaseBody.unit_id,
+              customer_hex: basePurchaseBody.customer_hex,
+              customer_wallet: basePurchaseBody.customer_wallet,
+              amount: basePurchaseBody.amount,
+              currency: basePurchaseBody.currency,
+            }),
+          });
+          const previewData = await previewRes.json();
+          if (!previewRes.ok || !previewData.success) {
+            throw new Error(previewData.error || `preview HTTP ${previewRes.status}`);
+          }
+          const recipients = previewData.data.recipients || [];
+          if (!Array.isArray(recipients) || recipients.length === 0) {
+            throw new Error('No recipients in preview response');
+          }
+
+          // Sign locally — WIF never leaves the device
+          console.log(`[mobile] Signing LANA TX locally for ${recipients.length} recipient(s)`);
+          const signed = await signCustomerLanaTx({
+            wif: trimmed,
+            recipients: recipients.map((r: any) => ({
+              address: r.address,
+              amount: r.amount_lanoshis,
+            })),
+          });
+          console.log(`[mobile] Signed locally: ${signed.signedTxHex.length / 2} bytes, fee=${signed.fee}`);
+
+          purchaseBody = { ...basePurchaseBody, signed_tx_hex: signed.signedTxHex };
+        } catch (signErr: any) {
+          // Fallback: if anything in the client-signing path fails, fall back to
+          // legacy server-side WIF signing so the customer's purchase still goes through.
+          console.warn('[mobile] Client-side signing failed, falling back to server-side WIF:', signErr.message);
+          purchaseBody = { ...basePurchaseBody, customer_wif: trimmed };
+        }
+
         const purchaseRes = await fetch('/api/brain/purchase', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            unit_id: unitIdRef.current || '',
-            payment_type: 'lana',
-            customer_hex: ids.nostrHexId,
-            customer_wallet: ids.walletId,
-            customer_wif: trimmed,
-            amount: parsedAmount,
-            currency,
-            invoice_number: invoiceNumber.trim(),
-            receipt_url: receiptUrl || undefined,
-            receipt_type: receiptType || 'receipt',
-            receipt_description: analysisDescription || undefined,
-          }),
+          body: JSON.stringify(purchaseBody),
         });
 
         const brainData = await purchaseRes.json();

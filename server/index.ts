@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { getDb, closeDb } from './db/connection.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
-import { fetchSingleBalance, type ElectrumServer } from './lib/electrum.js';
+import { fetchSingleBalance, electrumCall, type ElectrumServer } from './lib/electrum.js';
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 import rateLimit from 'express-rate-limit';
 
@@ -151,6 +151,74 @@ app.get('/api/balance/:address', async (req, res) => {
   } catch (error: any) {
     console.error('[mobile-server]', error instanceof Error ? error.message : error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── LANA Transaction Helpers (for client-side signing) ─
+//
+// These two endpoints are used by the mobile client to build & sign
+// LANA transactions locally (so the customer's WIF never leaves the
+// device). Mobile fetches UTXOs and raw txs here, then signs in-browser
+// and sends the signed_tx_hex to Brain.
+
+function getElectrumServersOrFail(res: express.Response): ElectrumServer[] | null {
+  const sysRow = db.prepare('SELECT electrum_servers FROM kind_38888 ORDER BY id DESC LIMIT 1').get() as any;
+  if (!sysRow) {
+    res.status(503).json({ error: 'System parameters not yet available' });
+    return null;
+  }
+  const servers: ElectrumServer[] = JSON.parse(sysRow.electrum_servers || '[]')
+    .map((s: any) => ({ host: s.host, port: parseInt(s.port) }));
+  if (servers.length === 0) {
+    res.status(503).json({ error: 'No Electrum servers configured' });
+    return null;
+  }
+  return servers;
+}
+
+/**
+ * GET /api/lana-utxos/:address
+ * Returns the list of UTXOs for a LanaCoin address (for client-side signing).
+ */
+app.get('/api/lana-utxos/:address', async (req, res) => {
+  const { address } = req.params;
+  if (!/^L[a-zA-Z0-9]{25,34}$/.test(address)) {
+    return res.status(400).json({ error: 'Invalid LanaCoin address format' });
+  }
+  const servers = getElectrumServersOrFail(res);
+  if (!servers) return;
+
+  try {
+    const utxos = await electrumCall('blockchain.address.listunspent', [address], servers, 15000);
+    res.json({ address, utxos: Array.isArray(utxos) ? utxos : [] });
+  } catch (err: any) {
+    console.error(`[mobile] UTXO fetch failed for ${address}:`, err.message);
+    res.status(502).json({ error: 'Failed to fetch UTXOs from Electrum' });
+  }
+});
+
+/**
+ * GET /api/lana-raw-tx/:hash
+ * Returns the raw transaction hex for a given txid. Used by client-side signing
+ * to extract scriptPubKey of the inputs being spent.
+ */
+app.get('/api/lana-raw-tx/:hash', async (req, res) => {
+  const { hash } = req.params;
+  if (!/^[a-fA-F0-9]{64}$/.test(hash)) {
+    return res.status(400).json({ error: 'Invalid tx hash format' });
+  }
+  const servers = getElectrumServersOrFail(res);
+  if (!servers) return;
+
+  try {
+    const rawTxHex = await electrumCall('blockchain.transaction.get', [hash, false], servers, 15000);
+    if (typeof rawTxHex !== 'string' || !/^[a-fA-F0-9]+$/.test(rawTxHex)) {
+      return res.status(502).json({ error: 'Electrum returned non-hex response' });
+    }
+    res.json({ hash, raw: rawTxHex });
+  } catch (err: any) {
+    console.error(`[mobile] Raw TX fetch failed for ${hash}:`, err.message);
+    res.status(502).json({ error: 'Failed to fetch raw transaction from Electrum' });
   }
 });
 
@@ -636,6 +704,32 @@ const BRAIN_PURCHASE_KEY = process.env.BRAIN_PURCHASE_KEY || '';
  * Proxy purchase requests to Brain orchestration service
  * Sends BRAIN_PURCHASE_KEY as Bearer token for authentication
  */
+/**
+ * POST /api/brain/purchase/preview
+ * Proxy to Brain's read-only preview endpoint — returns LANA recipients
+ * for client-side signing, without committing the purchase.
+ */
+app.post('/api/brain/purchase/preview', purchaseLimiter, async (req, res) => {
+  if (!BRAIN_API_URL) {
+    return res.status(503).json({ success: false, error: 'Brain service not configured' });
+  }
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (BRAIN_PURCHASE_KEY) headers['Authorization'] = `Bearer ${BRAIN_PURCHASE_KEY}`;
+
+    const response = await fetch(`${BRAIN_API_URL}/api/purchase/preview-lana-recipients`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req.body),
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error: any) {
+    console.error('[mobile] Brain preview proxy error:', error.message);
+    res.status(502).json({ success: false, error: 'Failed to reach Brain service' });
+  }
+});
+
 app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
   if (!BRAIN_API_URL) {
     return res.status(503).json({ success: false, error: 'Brain service not configured' });
