@@ -568,7 +568,11 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
                       <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                       <span className="text-xs font-bold text-amber-700 dark:text-amber-400">{t('regulars.maxCapWarning')}</span>
                     </div>
-                    <p className="text-xs text-amber-600 dark:text-amber-400">{t('regulars.maxCapMessage', { lana: MAX_CAP_LANA.toLocaleString() })}</p>
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      {hasWonder
+                        ? t('regulars.maxCapMessageWonder', { lana: MAX_CAP_LANA.toLocaleString() })
+                        : t('regulars.maxCapMessage', { lana: MAX_CAP_LANA.toLocaleString() })}
+                    </p>
                     {!hasWonder && (
                       <a
                         href="https://www.lana8wonder.com"

@@ -372,6 +372,7 @@
   "regulars.frozenVideoLink": "Watch how to unfreeze",
   "regulars.maxCapWarning": "Approaching limit!",
   "regulars.maxCapMessage": "This customer has more than {{lana}} LANA. They need to spend, enroll in Lana8Wonder, or make a purchase before the next split — otherwise their account will be frozen.",
+  "regulars.maxCapMessageWonder": "This customer has more than {{lana}} LANA. They need to spend or make a purchase before the next split — otherwise their account will be frozen.",
   "regulars.lookupFailed": "Failed to look up customer. Please try again.",
   "regulars.walletNotRegistered": "This wallet is not registered and does not belong to anyone. The customer must register their wallet first."
 }

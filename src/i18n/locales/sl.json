@@ -372,6 +372,7 @@
   "regulars.frozenVideoLink": "Poglejte kako odmrzniti",
   "regulars.maxCapWarning": "Blizu omejitve!",
   "regulars.maxCapMessage": "Ta stranka ima več kot {{lana}} LANA. Potrebuje zapraviti sredstva, se vpisati v Lana8Wonder ali opraviti nakup pred naslednjim splitom — sicer bo račun zamrznjen.",
+  "regulars.maxCapMessageWonder": "Ta stranka ima več kot {{lana}} LANA. Potrebuje zapraviti sredstva ali opraviti nakup pred naslednjim splitom — sicer bo račun zamrznjen.",
   "regulars.lookupFailed": "Iskanje stranke ni uspelo. Poskusite znova.",
   "regulars.walletNotRegistered": "Ta denarnica ni registrirana in ne pripada nikomur. Stranka mora najprej registrirati svojo denarnico."
 }
