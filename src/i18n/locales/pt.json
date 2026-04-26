@@ -11,7 +11,6 @@
   "common.tryAgain": "Tentar novamente",
   "common.save": "Salvar",
   "common.saving": "Salvando...",
-
   "login.subtitle": "Escaneie sua chave privada WIF da Lana para entrar",
   "login.scanButton": "Escanear chave WIF",
   "login.signingIn": "Entrando...",
@@ -19,11 +18,9 @@
   "login.scanTitle": "Escanear chave WIF",
   "login.scanDescription": "Escaneie o código QR da sua chave privada WIF da Lana para entrar",
   "login.failed": "Falha no login",
-
   "notFound.title": "404",
   "notFound.message": "Ops! Página não encontrada",
   "notFound.returnHome": "Voltar ao início",
-
   "menu.title": "Menu",
   "menu.profile": "Perfil",
   "menu.shop": "Loja",
@@ -34,24 +31,21 @@
   "menu.signOut": "Sair",
   "menu.defaultUser": "Usuário Lana",
   "menu.copyHexId": "Copiar Nostr Hex ID",
-
   "home.loadingShops": "Carregando lojas...",
   "home.noShops": "Nenhuma loja atribuída à sua conta",
   "home.selectShop": "Selecionar loja",
   "home.maxInvoice": "Fatura máxima",
   "home.suspended": "Suspenso",
   "home.suspendedUntil": "Até: {{date}}",
-  "home.payWithCurrency": "Pagar com {{symbol}}",
-  "home.cashPayment": "Pagamento em dinheiro",
-  "home.payWithLana": "Pagar com $Lana",
-  "home.lanaPayment": "Pagamento com Lana coin",
+  "home.payWithCurrency": "Pagamento em {{symbol}}",
+  "home.cashPayment": "Dinheiro ou cartão",
+  "home.payWithLana": "Pagamento em $Lana",
+  "home.lanaPayment": "Lana registadas",
   "home.noFunds": "Sem fundos de investimento disponíveis — não é possível criar faturas",
-
   "qrScanner.defaultTitle": "Escanear código QR",
   "qrScanner.defaultDescription": "Posicione o código QR dentro do quadro",
   "qrScanner.noCamera": "Nenhuma câmera encontrada neste dispositivo.",
   "qrScanner.cameraError": "Falha ao acessar a câmera. Verifique as permissões.",
-
   "profile.basicInfo": "Informações básicas",
   "profile.locationCurrency": "Localização e moeda",
   "profile.contactInfo": "Informações de contato",
@@ -110,7 +104,6 @@
   "profile.broadcastFailed": "Falha ao transmitir para qualquer relay",
   "profile.noSigningKey": "Nenhuma chave de assinatura disponível. Faça login novamente.",
   "profile.failedToSave": "Falha ao salvar o perfil",
-
   "profile.validation.nameRequired": "Nome é obrigatório",
   "profile.validation.displayNameRequired": "Nome de exibição é obrigatório",
   "profile.validation.aboutRequired": "Sobre é obrigatório",
@@ -127,7 +120,6 @@
   "profile.validation.phoneCountryCodeRequired": "Código do país é obrigatório quando o telefone é fornecido",
   "profile.validation.phoneCountryCodeFormat": "Código do país do telefone deve começar com +",
   "profile.validation.phoneDigitsOnly": "Telefone deve conter apenas dígitos",
-
   "cash.title": "Pagamento em dinheiro",
   "cash.receiptSubtitle": "Tire uma foto do recibo ou da compra",
   "cash.receiptInstruction": "Fotografe o recibo ou fatura. Se não houver recibo disponível, tire uma foto mostrando a compra.",
@@ -142,7 +134,6 @@
   "cash.uploadFailed": "Falha no upload. Tente novamente.",
   "cash.networkErrorRetry": "Erro de rede. Foto salva localmente — será reenviada ao submeter.",
   "cash.photoCaptured": "Foto capturada",
-
   "cash.invoiceTitle": "Detalhes da fatura",
   "cash.invoiceSubtitle": "Digite o número da fatura e o valor",
   "cash.invoiceNumber": "Número da fatura",
@@ -157,12 +148,10 @@
   "cash.receiptAttached": "Recibo anexado",
   "cash.uploading": "Enviando...",
   "cash.scanCustomerWallet": "Escanear carteira do cliente",
-
   "cash.scanTitle": "Escanear cliente",
   "cash.scanSubtitle": "Escaneie a carteira ou chave WIF do cliente",
   "cash.scanDescription": "Escaneie um endereço de carteira ou chave privada WIF",
   "cash.checkingWallet": "Verificando carteira...",
-
   "cash.registerTitle": "Registrar carteira",
   "cash.registerSubtitle": "Esta carteira precisa ser registrada primeiro",
   "cash.customerBalance": "Saldo do cliente",
@@ -173,11 +162,9 @@
   "cash.phonePlaceholder": "Número de telefone",
   "cash.registerAndContinue": "Registrar e continuar",
   "cash.processing": "Processando...",
-
   "cash.confirmedTitle": "Pagamento confirmado",
   "cash.invoiceLabel": "Fatura #{{number}}",
   "cash.walletLabel": "Carteira: {{address}}",
-
   "cash.purchaseDataMissing": "Dados da compra ausentes. Volte e insira os detalhes da fatura.",
   "cash.invalidAmount": "Valor inválido",
   "cash.purchaseFailed": "Falha na compra. Tente novamente.",
@@ -187,7 +174,6 @@
   "cash.invalidScan": "Escaneamento inválido. Escaneie um ID de carteira Lana ou chave privada WIF válidos.",
   "cash.networkError": "Erro de rede. Tente novamente.",
   "cash.dataMissing": "Dados da compra ausentes.",
-
   "lana.title": "Pagamento LANA",
   "lana.entryTitle": "Pagamento $Lana",
   "lana.receiptSubtitle": "Tire uma foto do recibo ou da compra",
@@ -221,7 +207,6 @@
   "lana.networkError": "Erro de rede. Verifique a conexão e tente novamente.",
   "lana.exceedsMaxLimit": "Valor excede o limite máximo de transação de {{amount}}",
   "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
-
   "wallets.title": "Verificar carteira",
   "wallets.subtitle": "Escaneie um ID de carteira ou chave privada WIF",
   "wallets.scanToCheck": "Escanear para verificar",
@@ -237,7 +222,6 @@
   "wallets.scanTitle": "Escanear carteira",
   "wallets.scanDescription": "Escaneie um ID de carteira ou chave privada WIF",
   "wallets.invalidScan": "Escaneamento inválido. Escaneie um ID de carteira Lana ou chave privada WIF válidos.",
-
   "register.title": "Registrar carteira",
   "register.subtitle": "Escaneie sua chave privada WIF de LanaCoin para registrar sua carteira na rede Lana",
   "register.scanWifKey": "Escanear chave WIF",
@@ -276,11 +260,9 @@
   "register.failedToCheck": "Falha ao verificar a carteira",
   "register.registrationFailed": "Falha no registro",
   "register.fieldRequired": "{{field}} é obrigatório",
-
   "check.title": "Verificar saldo",
   "check.subtitle": "Escaneie seu ID de carteira Lana para verificar seu saldo",
   "check.scanButton": "Escanear ID da carteira",
-
   "discount.title": "Desconto",
   "discount.subtitle": "Insira os detalhes da fatura para desconto",
   "discount.takePhoto": "Tirar foto do recibo"

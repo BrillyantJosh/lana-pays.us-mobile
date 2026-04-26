@@ -11,7 +11,6 @@
   "common.tryAgain": "Intentar de nuevo",
   "common.save": "Guardar",
   "common.saving": "Guardando...",
-
   "login.subtitle": "Escanea tu clave privada WIF de Lana para iniciar sesión",
   "login.scanButton": "Escanear clave WIF",
   "login.signingIn": "Iniciando sesión...",
@@ -19,11 +18,9 @@
   "login.scanTitle": "Escanear clave WIF",
   "login.scanDescription": "Escanea el código QR de tu clave privada WIF de Lana para iniciar sesión",
   "login.failed": "Error de inicio de sesión",
-
   "notFound.title": "404",
   "notFound.message": "¡Ups! Página no encontrada",
   "notFound.returnHome": "Volver al inicio",
-
   "menu.title": "Menú",
   "menu.profile": "Perfil",
   "menu.shop": "Tienda",
@@ -34,24 +31,21 @@
   "menu.signOut": "Cerrar sesión",
   "menu.defaultUser": "Usuario Lana",
   "menu.copyHexId": "Copiar Nostr Hex ID",
-
   "home.loadingShops": "Cargando tiendas...",
   "home.noShops": "No hay tiendas asignadas a tu cuenta",
   "home.selectShop": "Seleccionar tienda",
   "home.maxInvoice": "Factura máxima",
   "home.suspended": "Suspendido",
   "home.suspendedUntil": "Hasta: {{date}}",
-  "home.payWithCurrency": "Pagar con {{symbol}}",
-  "home.cashPayment": "Pago en efectivo",
-  "home.payWithLana": "Pagar con $Lana",
-  "home.lanaPayment": "Pago con Lana coin",
+  "home.payWithCurrency": "Pago en {{symbol}}",
+  "home.cashPayment": "Efectivo o tarjeta",
+  "home.payWithLana": "Pago en $Lana",
+  "home.lanaPayment": "Lana registradas",
   "home.noFunds": "No hay fondos de inversión disponibles — no se pueden crear facturas",
-
   "qrScanner.defaultTitle": "Escanear código QR",
   "qrScanner.defaultDescription": "Posiciona el código QR dentro del marco",
   "qrScanner.noCamera": "No se encontró cámara en este dispositivo.",
   "qrScanner.cameraError": "Error al acceder a la cámara. Por favor, verifica los permisos.",
-
   "profile.basicInfo": "Información básica",
   "profile.locationCurrency": "Ubicación y moneda",
   "profile.contactInfo": "Información de contacto",
@@ -110,7 +104,6 @@
   "profile.broadcastFailed": "Error al transmitir a cualquier relay",
   "profile.noSigningKey": "No hay clave de firma disponible. Por favor, vuelve a iniciar sesión.",
   "profile.failedToSave": "Error al guardar el perfil",
-
   "profile.validation.nameRequired": "El nombre es obligatorio",
   "profile.validation.displayNameRequired": "El nombre visible es obligatorio",
   "profile.validation.aboutRequired": "La descripción es obligatoria",
@@ -127,7 +120,6 @@
   "profile.validation.phoneCountryCodeRequired": "El código de país del teléfono es obligatorio cuando se proporciona un número",
   "profile.validation.phoneCountryCodeFormat": "El código de país del teléfono debe comenzar con +",
   "profile.validation.phoneDigitsOnly": "El teléfono debe contener solo dígitos",
-
   "cash.title": "Pago en efectivo",
   "cash.receiptSubtitle": "Toma una foto del recibo o la compra",
   "cash.receiptInstruction": "Fotografía el recibo o la factura. Si no hay recibo disponible, toma una foto que muestre la compra.",
@@ -142,7 +134,6 @@
   "cash.uploadFailed": "Error al subir. Por favor, inténtalo de nuevo.",
   "cash.networkErrorRetry": "Error de red. Foto guardada localmente — se reintentará al enviar.",
   "cash.photoCaptured": "Foto capturada",
-
   "cash.invoiceTitle": "Detalles de factura",
   "cash.invoiceSubtitle": "Introduce el número de factura y el monto",
   "cash.invoiceNumber": "Número de factura",
@@ -157,12 +148,10 @@
   "cash.receiptAttached": "Recibo adjunto",
   "cash.uploading": "Subiendo...",
   "cash.scanCustomerWallet": "Escanear billetera del cliente",
-
   "cash.scanTitle": "Escanear cliente",
   "cash.scanSubtitle": "Escanea la billetera o clave WIF del cliente",
   "cash.scanDescription": "Escanea una dirección de billetera o clave privada WIF",
   "cash.checkingWallet": "Verificando billetera...",
-
   "cash.registerTitle": "Registrar billetera",
   "cash.registerSubtitle": "Esta billetera necesita ser registrada primero",
   "cash.customerBalance": "Saldo del cliente",
@@ -173,11 +162,9 @@
   "cash.phonePlaceholder": "Número de teléfono",
   "cash.registerAndContinue": "Registrar y continuar",
   "cash.processing": "Procesando...",
-
   "cash.confirmedTitle": "Pago confirmado",
   "cash.invoiceLabel": "Factura #{{number}}",
   "cash.walletLabel": "Billetera: {{address}}",
-
   "cash.purchaseDataMissing": "Faltan datos de compra. Por favor, vuelve atrás e introduce los detalles de la factura.",
   "cash.invalidAmount": "Monto inválido",
   "cash.purchaseFailed": "Error en la compra. Por favor, inténtalo de nuevo.",
@@ -187,7 +174,6 @@
   "cash.invalidScan": "Escaneo inválido. Por favor escanea un ID de billetera Lana o clave privada WIF válidos.",
   "cash.networkError": "Error de red. Por favor, inténtalo de nuevo.",
   "cash.dataMissing": "Faltan datos de compra.",
-
   "lana.title": "Pago LANA",
   "lana.entryTitle": "Pago $Lana",
   "lana.receiptSubtitle": "Toma una foto del recibo o la compra",
@@ -221,7 +207,6 @@
   "lana.networkError": "Error de red. Por favor, verifica la conexión e inténtalo de nuevo.",
   "lana.exceedsMaxLimit": "El monto excede el límite máximo de transacción de {{amount}}",
   "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
-
   "wallets.title": "Verificar billetera",
   "wallets.subtitle": "Escanea un ID de billetera o clave privada WIF",
   "wallets.scanToCheck": "Escanear para verificar",
@@ -237,7 +222,6 @@
   "wallets.scanTitle": "Escanear billetera",
   "wallets.scanDescription": "Escanea un ID de billetera o clave privada WIF",
   "wallets.invalidScan": "Escaneo inválido. Por favor escanea un ID de billetera Lana o clave privada WIF válidos.",
-
   "register.title": "Registrar billetera",
   "register.subtitle": "Escanea tu clave privada WIF de LanaCoin para registrar tu billetera en la red Lana",
   "register.scanWifKey": "Escanear clave WIF",
@@ -276,11 +260,9 @@
   "register.failedToCheck": "Error al verificar la billetera",
   "register.registrationFailed": "Error en el registro",
   "register.fieldRequired": "{{field}} es obligatorio",
-
   "check.title": "Verificar saldo",
   "check.subtitle": "Escanea tu ID de billetera Lana para verificar tu saldo",
   "check.scanButton": "Escanear ID de billetera",
-
   "discount.title": "Descuento",
   "discount.subtitle": "Introduce los detalles de la factura para el descuento",
   "discount.takePhoto": "Tomar foto del recibo"

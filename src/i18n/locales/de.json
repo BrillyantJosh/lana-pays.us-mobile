@@ -11,7 +11,6 @@
   "common.tryAgain": "Erneut versuchen",
   "common.save": "Speichern",
   "common.saving": "Speichern...",
-
   "login.subtitle": "Scannen Sie Ihren Lana WIF privaten Schlüssel zum Anmelden",
   "login.scanButton": "WIF-Schlüssel scannen",
   "login.signingIn": "Anmeldung...",
@@ -19,11 +18,9 @@
   "login.scanTitle": "WIF-Schlüssel scannen",
   "login.scanDescription": "Scannen Sie den QR-Code Ihres Lana WIF privaten Schlüssels zum Anmelden",
   "login.failed": "Anmeldung fehlgeschlagen",
-
   "notFound.title": "404",
   "notFound.message": "Ups! Seite nicht gefunden",
   "notFound.returnHome": "Zur Startseite zurückkehren",
-
   "menu.title": "Menü",
   "menu.profile": "Profil",
   "menu.shop": "Shop",
@@ -34,24 +31,21 @@
   "menu.signOut": "Abmelden",
   "menu.defaultUser": "Lana Benutzer",
   "menu.copyHexId": "Nostr Hex ID kopieren",
-
   "home.loadingShops": "Shops werden geladen...",
   "home.noShops": "Keine Shops Ihrem Konto zugewiesen",
   "home.selectShop": "Shop auswählen",
   "home.maxInvoice": "Max. Rechnung",
   "home.suspended": "Gesperrt",
   "home.suspendedUntil": "Bis: {{date}}",
-  "home.payWithCurrency": "Mit {{symbol}} bezahlen",
-  "home.cashPayment": "Barzahlung",
-  "home.payWithLana": "Mit $Lana bezahlen",
-  "home.lanaPayment": "Lana-Coin-Zahlung",
+  "home.payWithCurrency": "Zahlung in {{symbol}}",
+  "home.cashPayment": "Bar oder Karte",
+  "home.payWithLana": "Zahlung in $Lana",
+  "home.lanaPayment": "Registrierte Lana",
   "home.noFunds": "Keine Investorenmittel verfügbar — Rechnungen können nicht erstellt werden",
-
   "qrScanner.defaultTitle": "QR-Code scannen",
   "qrScanner.defaultDescription": "Positionieren Sie den QR-Code innerhalb des Rahmens",
   "qrScanner.noCamera": "Keine Kamera auf diesem Gerät gefunden.",
   "qrScanner.cameraError": "Kamerazugriff fehlgeschlagen. Bitte Berechtigungen prüfen.",
-
   "profile.basicInfo": "Grundinformationen",
   "profile.locationCurrency": "Standort & Währung",
   "profile.contactInfo": "Kontaktinformationen",
@@ -110,7 +104,6 @@
   "profile.broadcastFailed": "Übertragung an alle Relays fehlgeschlagen",
   "profile.noSigningKey": "Kein Signaturschlüssel verfügbar. Bitte melden Sie sich erneut an.",
   "profile.failedToSave": "Profil konnte nicht gespeichert werden",
-
   "profile.validation.nameRequired": "Name ist erforderlich",
   "profile.validation.displayNameRequired": "Anzeigename ist erforderlich",
   "profile.validation.aboutRequired": "Über mich ist erforderlich",
@@ -127,7 +120,6 @@
   "profile.validation.phoneCountryCodeRequired": "Ländervorwahl ist erforderlich, wenn eine Telefonnummer angegeben wird",
   "profile.validation.phoneCountryCodeFormat": "Ländervorwahl muss mit + beginnen",
   "profile.validation.phoneDigitsOnly": "Telefon darf nur Ziffern enthalten",
-
   "cash.title": "Barzahlung",
   "cash.receiptSubtitle": "Machen Sie ein Foto der Quittung oder des Kaufs",
   "cash.receiptInstruction": "Fotografieren Sie die Quittung oder Rechnung. Wenn keine Quittung vorhanden ist, machen Sie ein Foto des Kaufs.",
@@ -142,7 +134,6 @@
   "cash.uploadFailed": "Upload fehlgeschlagen. Bitte erneut versuchen.",
   "cash.networkErrorRetry": "Netzwerkfehler. Foto lokal gespeichert — erneuter Versuch beim Absenden.",
   "cash.photoCaptured": "Foto aufgenommen",
-
   "cash.invoiceTitle": "Rechnungsdetails",
   "cash.invoiceSubtitle": "Rechnungsnummer und Betrag eingeben",
   "cash.invoiceNumber": "Rechnungsnummer",
@@ -157,12 +148,10 @@
   "cash.receiptAttached": "Quittung angehängt",
   "cash.uploading": "Hochladen...",
   "cash.scanCustomerWallet": "Kunden-Wallet scannen",
-
   "cash.scanTitle": "Kunden scannen",
   "cash.scanSubtitle": "Kunden-Wallet oder WIF-Schlüssel scannen",
   "cash.scanDescription": "Wallet-Adresse oder WIF privaten Schlüssel scannen",
   "cash.checkingWallet": "Wallet wird geprüft...",
-
   "cash.registerTitle": "Wallet registrieren",
   "cash.registerSubtitle": "Dieses Wallet muss zuerst registriert werden",
   "cash.customerBalance": "Kundenguthaben",
@@ -173,11 +162,9 @@
   "cash.phonePlaceholder": "Telefonnummer",
   "cash.registerAndContinue": "Registrieren & weiter",
   "cash.processing": "Verarbeitung...",
-
   "cash.confirmedTitle": "Zahlung bestätigt",
   "cash.invoiceLabel": "Rechnung #{{number}}",
   "cash.walletLabel": "Wallet: {{address}}",
-
   "cash.purchaseDataMissing": "Kaufdaten fehlen. Bitte gehen Sie zurück und geben Sie die Rechnungsdetails ein.",
   "cash.invalidAmount": "Ungültiger Betrag",
   "cash.purchaseFailed": "Kauf fehlgeschlagen. Bitte erneut versuchen.",
@@ -187,7 +174,6 @@
   "cash.invalidScan": "Ungültiger Scan. Bitte scannen Sie eine gültige Lana Wallet-ID oder einen WIF privaten Schlüssel.",
   "cash.networkError": "Netzwerkfehler. Bitte erneut versuchen.",
   "cash.dataMissing": "Kaufdaten fehlen.",
-
   "lana.title": "LANA-Zahlung",
   "lana.entryTitle": "$Lana-Zahlung",
   "lana.receiptSubtitle": "Machen Sie ein Foto der Quittung oder des Kaufs",
@@ -221,7 +207,6 @@
   "lana.networkError": "Netzwerkfehler. Bitte Verbindung prüfen und erneut versuchen.",
   "lana.exceedsMaxLimit": "Betrag überschreitet das maximale Transaktionslimit von {{amount}}",
   "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
-
   "wallets.title": "Wallet prüfen",
   "wallets.subtitle": "Wallet-ID oder WIF privaten Schlüssel scannen",
   "wallets.scanToCheck": "Scannen zum Prüfen",
@@ -237,7 +222,6 @@
   "wallets.scanTitle": "Wallet scannen",
   "wallets.scanDescription": "Wallet-ID oder WIF privaten Schlüssel scannen",
   "wallets.invalidScan": "Ungültiger Scan. Bitte scannen Sie eine gültige Lana Wallet-ID oder einen WIF privaten Schlüssel.",
-
   "register.title": "Wallet registrieren",
   "register.subtitle": "Scannen Sie Ihren LanaCoin WIF privaten Schlüssel, um Ihr Wallet im Lana-Netzwerk zu registrieren",
   "register.scanWifKey": "WIF-Schlüssel scannen",
@@ -276,11 +260,9 @@
   "register.failedToCheck": "Wallet-Prüfung fehlgeschlagen",
   "register.registrationFailed": "Registrierung fehlgeschlagen",
   "register.fieldRequired": "{{field}} ist erforderlich",
-
   "check.title": "Guthaben prüfen",
   "check.subtitle": "Scannen Sie Ihre Lana Wallet-ID, um Ihr Guthaben zu prüfen",
   "check.scanButton": "Wallet-ID scannen",
-
   "discount.title": "Rabatt",
   "discount.subtitle": "Rechnungsdetails für Rabatt eingeben",
   "discount.takePhoto": "Foto der Quittung aufnehmen"

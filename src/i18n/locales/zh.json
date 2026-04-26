@@ -11,7 +11,6 @@
   "common.tryAgain": "重试",
   "common.save": "保存",
   "common.saving": "保存中...",
-
   "login.subtitle": "扫描您的 Lana WIF 私钥登录",
   "login.scanButton": "扫描 WIF 密钥",
   "login.signingIn": "登录中...",
@@ -19,11 +18,9 @@
   "login.scanTitle": "扫描 WIF 密钥",
   "login.scanDescription": "扫描您的 Lana WIF 私钥 QR 码进行登录",
   "login.failed": "登录失败",
-
   "notFound.title": "404",
   "notFound.message": "抱歉！页面未找到",
   "notFound.returnHome": "返回首页",
-
   "menu.title": "菜单",
   "menu.profile": "个人资料",
   "menu.shop": "商店",
@@ -34,24 +31,21 @@
   "menu.signOut": "退出登录",
   "menu.defaultUser": "Lana 用户",
   "menu.copyHexId": "复制 Nostr Hex ID",
-
   "home.loadingShops": "加载商店中...",
   "home.noShops": "您的账户未关联任何商店",
   "home.selectShop": "选择商店",
   "home.maxInvoice": "最大发票金额",
   "home.suspended": "已暂停",
   "home.suspendedUntil": "截止: {{date}}",
-  "home.payWithCurrency": "使用 {{symbol}} 支付",
-  "home.cashPayment": "现金支付",
-  "home.payWithLana": "使用 $Lana 支付",
-  "home.lanaPayment": "Lana 币支付",
+  "home.payWithCurrency": "使用 {{symbol}} 付款",
+  "home.cashPayment": "现金或卡",
+  "home.payWithLana": "使用 $Lana 付款",
+  "home.lanaPayment": "已注册的 Lana",
   "home.noFunds": "没有可用的投资者资金 — 无法创建发票",
-
   "qrScanner.defaultTitle": "扫描 QR 码",
   "qrScanner.defaultDescription": "将 QR 码对准框内",
   "qrScanner.noCamera": "未在此设备上找到摄像头。",
   "qrScanner.cameraError": "无法访问摄像头，请检查权限设置。",
-
   "profile.basicInfo": "基本信息",
   "profile.locationCurrency": "位置和货币",
   "profile.contactInfo": "联系方式",
@@ -110,7 +104,6 @@
   "profile.broadcastFailed": "未能广播到任何中继",
   "profile.noSigningKey": "签名密钥不可用，请重新登录。",
   "profile.failedToSave": "保存个人资料失败",
-
   "profile.validation.nameRequired": "姓名为必填项",
   "profile.validation.displayNameRequired": "显示名称为必填项",
   "profile.validation.aboutRequired": "关于为必填项",
@@ -127,7 +120,6 @@
   "profile.validation.phoneCountryCodeRequired": "提供电话号码时必须填写国家区号",
   "profile.validation.phoneCountryCodeFormat": "国家区号必须以 + 开头",
   "profile.validation.phoneDigitsOnly": "电话号码只能包含数字",
-
   "cash.title": "现金支付",
   "cash.receiptSubtitle": "拍摄收据或购买物品的照片",
   "cash.receiptInstruction": "拍摄收据或发票的照片。如果没有收据，请拍摄购买物品的照片。",
@@ -142,7 +134,6 @@
   "cash.uploadFailed": "上传失败，请重试。",
   "cash.networkErrorRetry": "网络错误。照片已本地保存 — 提交时将重试。",
   "cash.photoCaptured": "照片已拍摄",
-
   "cash.invoiceTitle": "发票详情",
   "cash.invoiceSubtitle": "输入发票号和金额",
   "cash.invoiceNumber": "发票号",
@@ -157,12 +148,10 @@
   "cash.receiptAttached": "收据已附上",
   "cash.uploading": "上传中...",
   "cash.scanCustomerWallet": "扫描客户钱包",
-
   "cash.scanTitle": "扫描客户",
   "cash.scanSubtitle": "扫描客户钱包或 WIF 密钥",
   "cash.scanDescription": "扫描钱包地址或 WIF 私钥",
   "cash.checkingWallet": "检查钱包中...",
-
   "cash.registerTitle": "注册钱包",
   "cash.registerSubtitle": "此钱包需要先注册",
   "cash.customerBalance": "客户余额",
@@ -173,11 +162,9 @@
   "cash.phonePlaceholder": "手机号码",
   "cash.registerAndContinue": "注册并继续",
   "cash.processing": "处理中...",
-
   "cash.confirmedTitle": "支付已确认",
   "cash.invoiceLabel": "发票 #{{number}}",
   "cash.walletLabel": "钱包: {{address}}",
-
   "cash.purchaseDataMissing": "缺少购买数据。请返回并输入发票详情。",
   "cash.invalidAmount": "无效金额",
   "cash.purchaseFailed": "购买失败，请重试。",
@@ -187,7 +174,6 @@
   "cash.invalidScan": "无效扫描。请扫描有效的 Lana Wallet ID 或 WIF 私钥。",
   "cash.networkError": "网络错误，请重试。",
   "cash.dataMissing": "缺少购买数据。",
-
   "lana.title": "LANA 支付",
   "lana.entryTitle": "$Lana 支付",
   "lana.receiptSubtitle": "拍摄收据或购买物品的照片",
@@ -221,7 +207,6 @@
   "lana.networkError": "网络错误。请检查连接后重试。",
   "lana.exceedsMaxLimit": "金额超出最大交易限额 {{amount}}",
   "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
-
   "wallets.title": "查看钱包",
   "wallets.subtitle": "扫描 Wallet ID 或 WIF 私钥",
   "wallets.scanToCheck": "扫描以查看",
@@ -237,7 +222,6 @@
   "wallets.scanTitle": "扫描钱包",
   "wallets.scanDescription": "扫描 Wallet ID 或 WIF 私钥",
   "wallets.invalidScan": "无效扫描。请扫描有效的 Lana Wallet ID 或 WIF 私钥。",
-
   "register.title": "注册钱包",
   "register.subtitle": "扫描您的 LanaCoin WIF 私钥以在 Lana 网络上注册钱包",
   "register.scanWifKey": "扫描 WIF 密钥",
@@ -276,11 +260,9 @@
   "register.failedToCheck": "检查钱包失败",
   "register.registrationFailed": "注册失败",
   "register.fieldRequired": "{{field}} 为必填项",
-
   "check.title": "查看余额",
   "check.subtitle": "扫描您的 Lana Wallet ID 查看余额",
   "check.scanButton": "扫描 Wallet ID",
-
   "discount.title": "折扣",
   "discount.subtitle": "输入折扣发票详情",
   "discount.takePhoto": "拍摄收据照片"

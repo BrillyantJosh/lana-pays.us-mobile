@@ -11,7 +11,6 @@
   "common.tryAgain": "Pokušaj ponovo",
   "common.save": "Sačuvaj",
   "common.saving": "Čuvanje...",
-
   "login.subtitle": "Skenirajte svoj Lana WIF privatni ključ za prijavu",
   "login.scanButton": "Skeniraj WIF ključ",
   "login.signingIn": "Prijavljivanje...",
@@ -19,11 +18,9 @@
   "login.scanTitle": "Skeniraj WIF ključ",
   "login.scanDescription": "Skenirajte QR kod vašeg Lana WIF privatnog ključa za prijavu",
   "login.failed": "Prijava nije uspela",
-
   "notFound.title": "404",
   "notFound.message": "Ups! Stranica nije pronađena",
   "notFound.returnHome": "Povratak na početnu",
-
   "menu.title": "Meni",
   "menu.profile": "Profil",
   "menu.shop": "Prodavnica",
@@ -34,24 +31,21 @@
   "menu.signOut": "Odjavi se",
   "menu.defaultUser": "Lana korisnik",
   "menu.copyHexId": "Kopiraj Nostr Hex ID",
-
   "home.loadingShops": "Učitavanje prodavnica...",
   "home.noShops": "Nema prodavnica dodeljenih vašem nalogu",
   "home.selectShop": "Izaberite prodavnicu",
   "home.maxInvoice": "Maksimalni račun",
   "home.suspended": "Suspendovano",
   "home.suspendedUntil": "Do: {{date}}",
-  "home.payWithCurrency": "Plati sa {{symbol}}",
-  "home.cashPayment": "Plaćanje gotovinom",
-  "home.payWithLana": "Plati sa $Lana",
-  "home.lanaPayment": "Plaćanje Lana novčićem",
+  "home.payWithCurrency": "Plaćanje u {{symbol}}",
+  "home.cashPayment": "Gotovina ili kartica",
+  "home.payWithLana": "Plaćanje u $Lana",
+  "home.lanaPayment": "Registrovane Lana",
   "home.noFunds": "Nema dostupnih investitorskih sredstava — nije moguće kreirati račune",
-
   "qrScanner.defaultTitle": "Skeniraj QR kod",
   "qrScanner.defaultDescription": "Postavite QR kod unutar okvira",
   "qrScanner.noCamera": "Kamera nije pronađena na ovom uređaju.",
   "qrScanner.cameraError": "Pristup kameri nije uspeo. Proverite dozvole.",
-
   "profile.basicInfo": "Osnovne informacije",
   "profile.locationCurrency": "Lokacija i valuta",
   "profile.contactInfo": "Kontakt informacije",
@@ -110,7 +104,6 @@
   "profile.broadcastFailed": "Emitovanje na releje nije uspelo",
   "profile.noSigningKey": "Ključ za potpisivanje nije dostupan. Ponovo se prijavite.",
   "profile.failedToSave": "Čuvanje profila nije uspelo",
-
   "profile.validation.nameRequired": "Ime je obavezno",
   "profile.validation.displayNameRequired": "Prikazano ime je obavezno",
   "profile.validation.aboutRequired": "Polje O meni je obavezno",
@@ -127,7 +120,6 @@
   "profile.validation.phoneCountryCodeRequired": "Pozivni broj države je obavezan kada je telefon unet",
   "profile.validation.phoneCountryCodeFormat": "Pozivni broj države mora počinjati sa +",
   "profile.validation.phoneDigitsOnly": "Telefon sme sadržati samo cifre",
-
   "cash.title": "Plaćanje gotovinom",
   "cash.receiptSubtitle": "Fotografišite račun ili kupovinu",
   "cash.receiptInstruction": "Fotografišite račun ili fakturu. Ako račun nije dostupan, fotografišite kupovinu.",
@@ -142,7 +134,6 @@
   "cash.uploadFailed": "Otpremanje nije uspelo. Pokušajte ponovo.",
   "cash.networkErrorRetry": "Greška mreže. Fotografija sačuvana lokalno — pokušaće se ponovo pri slanju.",
   "cash.photoCaptured": "Fotografija snimljena",
-
   "cash.invoiceTitle": "Detalji fakture",
   "cash.invoiceSubtitle": "Unesite broj fakture i iznos",
   "cash.invoiceNumber": "Broj fakture",
@@ -157,12 +148,10 @@
   "cash.receiptAttached": "Račun priložen",
   "cash.uploading": "Otpremanje...",
   "cash.scanCustomerWallet": "Skeniraj novčanik kupca",
-
   "cash.scanTitle": "Skeniraj kupca",
   "cash.scanSubtitle": "Skenirajte novčanik kupca ili WIF ključ",
   "cash.scanDescription": "Skenirajte adresu novčanika ili WIF privatni ključ",
   "cash.checkingWallet": "Provera novčanika...",
-
   "cash.registerTitle": "Registruj novčanik",
   "cash.registerSubtitle": "Ovaj novčanik mora prvo da bude registrovan",
   "cash.customerBalance": "Stanje kupca",
@@ -173,11 +162,9 @@
   "cash.phonePlaceholder": "Broj telefona",
   "cash.registerAndContinue": "Registruj i nastavi",
   "cash.processing": "Obrada...",
-
   "cash.confirmedTitle": "Plaćanje potvrđeno",
   "cash.invoiceLabel": "Faktura #{{number}}",
   "cash.walletLabel": "Novčanik: {{address}}",
-
   "cash.purchaseDataMissing": "Nedostaju podaci o kupovini. Vratite se i unesite detalje fakture.",
   "cash.invalidAmount": "Nevažeći iznos",
   "cash.purchaseFailed": "Kupovina nije uspela. Pokušajte ponovo.",
@@ -187,7 +174,6 @@
   "cash.invalidScan": "Nevažeće skeniranje. Skenirajte validan Lana Wallet ID ili WIF privatni ključ.",
   "cash.networkError": "Greška mreže. Pokušajte ponovo.",
   "cash.dataMissing": "Nedostaju podaci o kupovini.",
-
   "lana.title": "LANA plaćanje",
   "lana.entryTitle": "$Lana plaćanje",
   "lana.receiptSubtitle": "Fotografišite račun ili kupovinu",
@@ -221,7 +207,6 @@
   "lana.networkError": "Greška mreže. Proverite vezu i pokušajte ponovo.",
   "lana.exceedsMaxLimit": "Iznos premašuje maksimalni limit transakcije od {{amount}}",
   "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
-
   "wallets.title": "Proveri novčanik",
   "wallets.subtitle": "Skenirajte Wallet ID ili WIF privatni ključ",
   "wallets.scanToCheck": "Skeniraj za proveru",
@@ -237,7 +222,6 @@
   "wallets.scanTitle": "Skeniraj novčanik",
   "wallets.scanDescription": "Skenirajte Wallet ID ili WIF privatni ključ",
   "wallets.invalidScan": "Nevažeće skeniranje. Skenirajte validan Lana Wallet ID ili WIF privatni ključ.",
-
   "register.title": "Registruj novčanik",
   "register.subtitle": "Skenirajte vaš LanaCoin WIF privatni ključ da biste registrovali novčanik na Lana mreži",
   "register.scanWifKey": "Skeniraj WIF ključ",
@@ -276,11 +260,9 @@
   "register.failedToCheck": "Provera novčanika nije uspela",
   "register.registrationFailed": "Registracija nije uspela",
   "register.fieldRequired": "{{field}} je obavezno",
-
   "check.title": "Proveri stanje",
   "check.subtitle": "Skenirajte vaš Lana Wallet ID da biste proverili stanje",
   "check.scanButton": "Skeniraj Wallet ID",
-
   "discount.title": "Popust",
   "discount.subtitle": "Unesite detalje fakture za popust",
   "discount.takePhoto": "Fotografišite račun"

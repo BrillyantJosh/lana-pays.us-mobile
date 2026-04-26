@@ -11,7 +11,6 @@
   "common.tryAgain": "Riprova",
   "common.save": "Salva",
   "common.saving": "Salvataggio...",
-
   "login.subtitle": "Scansiona la tua chiave privata Lana WIF per accedere",
   "login.scanButton": "Scansiona chiave WIF",
   "login.signingIn": "Accesso in corso...",
@@ -19,11 +18,9 @@
   "login.scanTitle": "Scansiona chiave WIF",
   "login.scanDescription": "Scansiona il codice QR della tua chiave privata Lana WIF per accedere",
   "login.failed": "Accesso fallito",
-
   "notFound.title": "404",
   "notFound.message": "Ops! Pagina non trovata",
   "notFound.returnHome": "Torna alla home",
-
   "menu.title": "Menu",
   "menu.profile": "Profilo",
   "menu.shop": "Negozio",
@@ -34,24 +31,21 @@
   "menu.signOut": "Esci",
   "menu.defaultUser": "Utente Lana",
   "menu.copyHexId": "Copia Nostr Hex ID",
-
   "home.loadingShops": "Caricamento negozi...",
   "home.noShops": "Nessun negozio assegnato al tuo account",
   "home.selectShop": "Seleziona negozio",
   "home.maxInvoice": "Fattura max.",
   "home.suspended": "Sospeso",
   "home.suspendedUntil": "Fino al: {{date}}",
-  "home.payWithCurrency": "Paga con {{symbol}}",
-  "home.cashPayment": "Pagamento in contanti",
-  "home.payWithLana": "Paga con $Lana",
-  "home.lanaPayment": "Pagamento in Lana coin",
+  "home.payWithCurrency": "Pagamento in {{symbol}}",
+  "home.cashPayment": "Contanti o carta",
+  "home.payWithLana": "Pagamento in $Lana",
+  "home.lanaPayment": "Lana registrate",
   "home.noFunds": "Nessun fondo investitore disponibile — impossibile creare fatture",
-
   "qrScanner.defaultTitle": "Scansiona codice QR",
   "qrScanner.defaultDescription": "Posiziona il codice QR all'interno della cornice",
   "qrScanner.noCamera": "Nessuna fotocamera trovata su questo dispositivo.",
   "qrScanner.cameraError": "Accesso alla fotocamera fallito. Controlla i permessi.",
-
   "profile.basicInfo": "Informazioni di base",
   "profile.locationCurrency": "Posizione e valuta",
   "profile.contactInfo": "Informazioni di contatto",
@@ -110,7 +104,6 @@
   "profile.broadcastFailed": "Trasmissione a tutti i relay fallita",
   "profile.noSigningKey": "Chiave di firma non disponibile. Effettua nuovamente l'accesso.",
   "profile.failedToSave": "Salvataggio del profilo fallito",
-
   "profile.validation.nameRequired": "Il nome è obbligatorio",
   "profile.validation.displayNameRequired": "Il nome visualizzato è obbligatorio",
   "profile.validation.aboutRequired": "Il campo Chi sono è obbligatorio",
@@ -127,7 +120,6 @@
   "profile.validation.phoneCountryCodeRequired": "Il prefisso internazionale è obbligatorio quando il telefono è fornito",
   "profile.validation.phoneCountryCodeFormat": "Il prefisso internazionale deve iniziare con +",
   "profile.validation.phoneDigitsOnly": "Il telefono deve contenere solo cifre",
-
   "cash.title": "Pagamento in contanti",
   "cash.receiptSubtitle": "Scatta una foto dello scontrino o dell'acquisto",
   "cash.receiptInstruction": "Fotografa lo scontrino o la fattura. Se non è disponibile uno scontrino, scatta una foto dell'acquisto.",
@@ -142,7 +134,6 @@
   "cash.uploadFailed": "Caricamento fallito. Riprova.",
   "cash.networkErrorRetry": "Errore di rete. Foto salvata localmente — nuovo tentativo all'invio.",
   "cash.photoCaptured": "Foto acquisita",
-
   "cash.invoiceTitle": "Dettagli fattura",
   "cash.invoiceSubtitle": "Inserisci numero fattura e importo",
   "cash.invoiceNumber": "Numero fattura",
@@ -157,12 +148,10 @@
   "cash.receiptAttached": "Scontrino allegato",
   "cash.uploading": "Caricamento...",
   "cash.scanCustomerWallet": "Scansiona portafoglio cliente",
-
   "cash.scanTitle": "Scansiona cliente",
   "cash.scanSubtitle": "Scansiona il portafoglio o la chiave WIF del cliente",
   "cash.scanDescription": "Scansiona un indirizzo portafoglio o una chiave privata WIF",
   "cash.checkingWallet": "Verifica portafoglio...",
-
   "cash.registerTitle": "Registra portafoglio",
   "cash.registerSubtitle": "Questo portafoglio deve essere prima registrato",
   "cash.customerBalance": "Saldo cliente",
@@ -173,11 +162,9 @@
   "cash.phonePlaceholder": "Numero di telefono",
   "cash.registerAndContinue": "Registra e continua",
   "cash.processing": "Elaborazione...",
-
   "cash.confirmedTitle": "Pagamento confermato",
   "cash.invoiceLabel": "Fattura #{{number}}",
   "cash.walletLabel": "Portafoglio: {{address}}",
-
   "cash.purchaseDataMissing": "Dati dell'acquisto mancanti. Torna indietro e inserisci i dettagli della fattura.",
   "cash.invalidAmount": "Importo non valido",
   "cash.purchaseFailed": "Acquisto fallito. Riprova.",
@@ -187,7 +174,6 @@
   "cash.invalidScan": "Scansione non valida. Scansiona un ID portafoglio Lana o una chiave privata WIF validi.",
   "cash.networkError": "Errore di rete. Riprova.",
   "cash.dataMissing": "Dati dell'acquisto mancanti.",
-
   "lana.title": "Pagamento LANA",
   "lana.entryTitle": "Pagamento $Lana",
   "lana.receiptSubtitle": "Scatta una foto dello scontrino o dell'acquisto",
@@ -221,7 +207,6 @@
   "lana.networkError": "Errore di rete. Controlla la connessione e riprova.",
   "lana.exceedsMaxLimit": "L'importo supera il limite massimo della transazione di {{amount}}",
   "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
-
   "wallets.title": "Controlla portafoglio",
   "wallets.subtitle": "Scansiona un ID portafoglio o una chiave privata WIF",
   "wallets.scanToCheck": "Scansiona per controllare",
@@ -237,7 +222,6 @@
   "wallets.scanTitle": "Scansiona portafoglio",
   "wallets.scanDescription": "Scansiona un ID portafoglio o una chiave privata WIF",
   "wallets.invalidScan": "Scansione non valida. Scansiona un ID portafoglio Lana o una chiave privata WIF validi.",
-
   "register.title": "Registra portafoglio",
   "register.subtitle": "Scansiona la tua chiave privata LanaCoin WIF per registrare il portafoglio sulla rete Lana",
   "register.scanWifKey": "Scansiona chiave WIF",
@@ -276,11 +260,9 @@
   "register.failedToCheck": "Verifica del portafoglio fallita",
   "register.registrationFailed": "Registrazione fallita",
   "register.fieldRequired": "{{field}} è obbligatorio",
-
   "check.title": "Controlla saldo",
   "check.subtitle": "Scansiona il tuo ID portafoglio Lana per controllare il saldo",
   "check.scanButton": "Scansiona ID portafoglio",
-
   "discount.title": "Sconto",
   "discount.subtitle": "Inserisci i dettagli della fattura per lo sconto",
   "discount.takePhoto": "Scatta foto dello scontrino"

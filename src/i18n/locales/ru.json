@@ -11,7 +11,6 @@
   "common.tryAgain": "Попробовать снова",
   "common.save": "Сохранить",
   "common.saving": "Сохранение...",
-
   "login.subtitle": "Отсканируйте ваш Lana WIF приватный ключ для входа",
   "login.scanButton": "Сканировать WIF ключ",
   "login.signingIn": "Вход...",
@@ -19,11 +18,9 @@
   "login.scanTitle": "Сканировать WIF ключ",
   "login.scanDescription": "Отсканируйте QR-код вашего Lana WIF приватного ключа для входа",
   "login.failed": "Ошибка входа",
-
   "notFound.title": "404",
   "notFound.message": "Ой! Страница не найдена",
   "notFound.returnHome": "Вернуться на главную",
-
   "menu.title": "Меню",
   "menu.profile": "Профиль",
   "menu.shop": "Магазин",
@@ -34,24 +31,21 @@
   "menu.signOut": "Выйти",
   "menu.defaultUser": "Пользователь Lana",
   "menu.copyHexId": "Копировать Nostr Hex ID",
-
   "home.loadingShops": "Загрузка магазинов...",
   "home.noShops": "К вашему аккаунту не привязано ни одного магазина",
   "home.selectShop": "Выберите магазин",
   "home.maxInvoice": "Макс. счёт",
   "home.suspended": "Приостановлено",
   "home.suspendedUntil": "До: {{date}}",
-  "home.payWithCurrency": "Оплатить в {{symbol}}",
-  "home.cashPayment": "Оплата наличными",
-  "home.payWithLana": "Оплатить в $Lana",
-  "home.lanaPayment": "Оплата монетой Lana",
+  "home.payWithCurrency": "Оплата в {{symbol}}",
+  "home.cashPayment": "Наличные или карта",
+  "home.payWithLana": "Оплата в $Lana",
+  "home.lanaPayment": "Зарегистрированные Lana",
   "home.noFunds": "Нет доступных инвестиционных средств — невозможно создать счета",
-
   "qrScanner.defaultTitle": "Сканировать QR-код",
   "qrScanner.defaultDescription": "Расположите QR-код в рамке",
   "qrScanner.noCamera": "Камера не найдена на этом устройстве.",
   "qrScanner.cameraError": "Не удалось получить доступ к камере. Проверьте разрешения.",
-
   "profile.basicInfo": "Основная информация",
   "profile.locationCurrency": "Местоположение и валюта",
   "profile.contactInfo": "Контактная информация",
@@ -110,7 +104,6 @@
   "profile.broadcastFailed": "Не удалось отправить ни на один релей",
   "profile.noSigningKey": "Ключ подписи недоступен. Войдите заново.",
   "profile.failedToSave": "Не удалось сохранить профиль",
-
   "profile.validation.nameRequired": "Имя обязательно",
   "profile.validation.displayNameRequired": "Отображаемое имя обязательно",
   "profile.validation.aboutRequired": "Поле «О себе» обязательно",
@@ -127,7 +120,6 @@
   "profile.validation.phoneCountryCodeRequired": "Код страны обязателен, если указан телефон",
   "profile.validation.phoneCountryCodeFormat": "Код страны должен начинаться с +",
   "profile.validation.phoneDigitsOnly": "Телефон должен содержать только цифры",
-
   "cash.title": "Оплата наличными",
   "cash.receiptSubtitle": "Сфотографируйте чек или покупку",
   "cash.receiptInstruction": "Сфотографируйте чек или счёт. Если чек отсутствует, сфотографируйте покупку.",
@@ -142,7 +134,6 @@
   "cash.uploadFailed": "Загрузка не удалась. Попробуйте снова.",
   "cash.networkErrorRetry": "Ошибка сети. Фото сохранено локально — повторная попытка при отправке.",
   "cash.photoCaptured": "Фото сделано",
-
   "cash.invoiceTitle": "Детали счёта",
   "cash.invoiceSubtitle": "Введите номер счёта и сумму",
   "cash.invoiceNumber": "Номер счёта",
@@ -157,12 +148,10 @@
   "cash.receiptAttached": "Чек прикреплён",
   "cash.uploading": "Загрузка...",
   "cash.scanCustomerWallet": "Сканировать кошелёк клиента",
-
   "cash.scanTitle": "Сканировать клиента",
   "cash.scanSubtitle": "Отсканируйте кошелёк или WIF ключ клиента",
   "cash.scanDescription": "Отсканируйте адрес кошелька или WIF приватный ключ",
   "cash.checkingWallet": "Проверка кошелька...",
-
   "cash.registerTitle": "Регистрация кошелька",
   "cash.registerSubtitle": "Этот кошелёк необходимо сначала зарегистрировать",
   "cash.customerBalance": "Баланс клиента",
@@ -173,11 +162,9 @@
   "cash.phonePlaceholder": "Номер телефона",
   "cash.registerAndContinue": "Зарегистрировать и продолжить",
   "cash.processing": "Обработка...",
-
   "cash.confirmedTitle": "Платёж подтверждён",
   "cash.invoiceLabel": "Счёт #{{number}}",
   "cash.walletLabel": "Кошелёк: {{address}}",
-
   "cash.purchaseDataMissing": "Данные о покупке отсутствуют. Вернитесь и введите детали счёта.",
   "cash.invalidAmount": "Неверная сумма",
   "cash.purchaseFailed": "Покупка не удалась. Попробуйте снова.",
@@ -187,7 +174,6 @@
   "cash.invalidScan": "Неверное сканирование. Отсканируйте действительный Lana Wallet ID или WIF приватный ключ.",
   "cash.networkError": "Ошибка сети. Попробуйте снова.",
   "cash.dataMissing": "Данные о покупке отсутствуют.",
-
   "lana.title": "Оплата LANA",
   "lana.entryTitle": "Оплата $Lana",
   "lana.receiptSubtitle": "Сфотографируйте чек или покупку",
@@ -221,7 +207,6 @@
   "lana.networkError": "Ошибка сети. Проверьте подключение и попробуйте снова.",
   "lana.exceedsMaxLimit": "Сумма превышает максимальный лимит транзакции {{amount}}",
   "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered.",
-
   "wallets.title": "Проверить кошелёк",
   "wallets.subtitle": "Отсканируйте Wallet ID или WIF приватный ключ",
   "wallets.scanToCheck": "Сканировать для проверки",
@@ -237,7 +222,6 @@
   "wallets.scanTitle": "Сканировать кошелёк",
   "wallets.scanDescription": "Отсканируйте Wallet ID или WIF приватный ключ",
   "wallets.invalidScan": "Неверное сканирование. Отсканируйте действительный Lana Wallet ID или WIF приватный ключ.",
-
   "register.title": "Регистрация кошелька",
   "register.subtitle": "Отсканируйте ваш LanaCoin WIF приватный ключ для регистрации кошелька в сети Lana",
   "register.scanWifKey": "Сканировать WIF ключ",
@@ -276,11 +260,9 @@
   "register.failedToCheck": "Не удалось проверить кошелёк",
   "register.registrationFailed": "Ошибка регистрации",
   "register.fieldRequired": "{{field}} обязательно",
-
   "check.title": "Проверить баланс",
   "check.subtitle": "Отсканируйте ваш Lana Wallet ID для проверки баланса",
   "check.scanButton": "Сканировать Wallet ID",
-
   "discount.title": "Скидка",
   "discount.subtitle": "Введите детали счёта для скидки",
   "discount.takePhoto": "Сфотографируйте чек"
