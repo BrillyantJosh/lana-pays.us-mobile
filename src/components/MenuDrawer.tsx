@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, HelpCircle, LogOut, Store, UserPen, Copy, Check, History, Wallet, Globe, Shield, Users } from "lucide-react";
+import { X, LogOut, Store, UserPen, Copy, Check, History, Wallet, Globe, Shield, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -62,13 +62,16 @@ const MenuDrawer = ({ open, onClose, onEditProfile, onRegularCustomers }: MenuDr
   const currentLang = getCurrentLanguage();
   const currentLangName = LANGUAGES.find(l => l.code === currentLang)?.native || 'English';
 
-  const menuItems = [
-    { label: t('menu.profile'), icon: UserPen, action: handleEditProfile },
-    { label: t('menu.shop'), icon: Store, action: () => { onClose(); window.open('https://shop.lanapays.us', '_blank'); } },
-    { label: t('menu.checkWallet'), icon: Wallet, action: () => { onClose(); window.open('https://check.lanapays.us', '_blank'); } },
+  // Two-section layout
+  const myShopItems = [
+    { label: t('menu.editProfile'), icon: UserPen, action: handleEditProfile },
+    { label: t('menu.editShop'), icon: Store, action: () => { onClose(); window.open('https://shop.lanapays.us', '_blank'); } },
+    { label: t('menu.myTrades'), icon: History, action: () => { onClose(); window.open('https://brain.lanapays.us', '_blank'); } },
+  ];
+
+  const myCustomersItems = [
+    { label: t('menu.checkCustomerBalance'), icon: Wallet, action: () => { onClose(); window.open('https://check.lanapays.us', '_blank'); } },
     { label: t('menu.regularCustomers'), icon: Users, action: () => { onClose(); onRegularCustomers?.(); } },
-    { label: t('menu.history'), icon: History, action: () => { onClose(); window.open('https://brain.lanapays.us', '_blank'); } },
-    { label: t('menu.help'), icon: HelpCircle, action: () => {} },
   ];
 
   return (
@@ -124,8 +127,23 @@ const MenuDrawer = ({ open, onClose, onEditProfile, onRegularCustomers }: MenuDr
           </div>
         )}
 
-        <div className="p-3 flex flex-col gap-1">
-          {menuItems.map(({ label, icon: Icon, action }) => (
+        <div className="p-3 flex flex-col gap-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 11rem)' }}>
+          {/* My Shop section */}
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-4 pt-2 pb-1">{t('menu.myShop')}</p>
+          {myShopItems.map(({ label, icon: Icon, action }) => (
+            <button
+              key={label}
+              onClick={action}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl text-foreground hover:bg-secondary transition-colors text-sm font-medium"
+            >
+              <Icon className="w-5 h-5 text-muted-foreground" />
+              {label}
+            </button>
+          ))}
+
+          {/* My Customers section */}
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-4 pt-3 pb-1">{t('menu.myCustomers')}</p>
+          {myCustomersItems.map(({ label, icon: Icon, action }) => (
             <button
               key={label}
               onClick={action}
