@@ -45,13 +45,13 @@ const Login = () => {
         </div>
 
         {/* Mandala + scan button — mandala perfectly centred on the circle */}
-        <div className="relative flex items-center justify-center" style={{ width: 340, height: 340 }}>
+        <div className="relative flex items-center justify-center w-[min(95vw,540px)] aspect-square">
           {/* Mandala behind button, same centre */}
           <img
             src={mandalaGreen}
             alt=""
             aria-hidden="true"
-            className="absolute inset-0 w-full h-full object-contain opacity-35 dark:opacity-20 pointer-events-none select-none"
+            className="absolute inset-0 w-full h-full object-contain opacity-55 dark:opacity-25 pointer-events-none select-none"
           />
 
         {/* Big scan button */}
