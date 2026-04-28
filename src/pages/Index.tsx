@@ -422,7 +422,7 @@ const Index = () => {
                       src={mandalaMesh}
                       alt=""
                       aria-hidden="true"
-                      className="absolute inset-0 w-full h-full object-cover opacity-[0.18] dark:opacity-[0.10] pointer-events-none select-none"
+                      className="absolute inset-0 w-full h-full object-cover opacity-25 dark:opacity-15 mix-blend-multiply dark:mix-blend-screen pointer-events-none select-none"
                     />
                     {/* Content */}
                     <div className="relative z-10 w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
@@ -442,7 +442,7 @@ const Index = () => {
                       src={mandalaMesh}
                       alt=""
                       aria-hidden="true"
-                      className="absolute inset-0 w-full h-full object-cover opacity-[0.18] dark:opacity-[0.10] pointer-events-none select-none"
+                      className="absolute inset-0 w-full h-full object-cover opacity-25 dark:opacity-15 mix-blend-multiply dark:mix-blend-screen pointer-events-none select-none"
                     />
                     {/* Content */}
                     <div className="relative z-10 w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
