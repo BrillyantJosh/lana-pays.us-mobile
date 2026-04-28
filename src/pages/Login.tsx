@@ -31,55 +31,55 @@ const Login = () => {
     <div className="min-h-screen bg-white dark:bg-background flex flex-col items-center justify-center relative overflow-hidden px-6">
 
       {/* ── Content ──────────────────────────────────────────────────── */}
-      <div className="relative z-10 flex flex-col items-center gap-6 max-w-sm w-full">
+      <div className="relative z-10 flex flex-col items-center gap-4 max-w-sm w-full py-4">
 
         {/* Top: icon + title + subtitle */}
-        <div className="flex flex-col items-center gap-3 pt-4">
-          <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center shadow-sm">
-            <img src={lanaIconGreen} alt="Lana" className="w-9 h-9 object-contain" />
+        <div className="flex flex-col items-center gap-2">
+          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shadow-sm">
+            <img src={lanaIconGreen} alt="Lana" className="w-8 h-8 object-contain" />
           </div>
-          <div className="text-center space-y-1">
+          <div className="text-center space-y-0.5">
             <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">Lana Pays.Us</h1>
             <p className="text-sm text-muted-foreground">{t('login.subtitle')}</p>
           </div>
         </div>
 
         {/* Mandala + scan button — mandala perfectly centred on the circle */}
-        <div className="relative flex items-center justify-center w-[min(95vw,540px)] aspect-square">
+        <div className="relative flex items-center justify-center w-full max-w-[340px] aspect-square">
           {/* Mandala behind button, same centre */}
           <img
             src={mandalaGreen}
             alt=""
             aria-hidden="true"
-            className="absolute inset-0 w-full h-full object-contain opacity-55 dark:opacity-25 pointer-events-none select-none"
+            className="absolute inset-0 w-full h-full object-contain opacity-60 dark:opacity-25 pointer-events-none select-none"
           />
 
         {/* Big scan button */}
         <button
           onClick={() => setScannerOpen(true)}
           disabled={isLoggingIn}
-          className="group relative flex flex-col items-center justify-center w-[200px] h-[200px] rounded-full transition-transform duration-200 active:scale-95 hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none z-10"
+          className="group relative flex flex-col items-center justify-center w-[160px] h-[160px] rounded-full transition-transform duration-200 active:scale-95 hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none z-10"
           style={{
             background: 'radial-gradient(circle at 42% 36%, #34b07a, #155c3e)',
-            boxShadow: '0 0 48px rgba(34,160,90,.38), 0 8px 32px rgba(21,92,62,.45), inset 0 1px 0 rgba(255,255,255,.12)',
+            boxShadow: '0 0 40px rgba(34,160,90,.38), 0 6px 24px rgba(21,92,62,.45), inset 0 1px 0 rgba(255,255,255,.12)',
           }}
         >
           {/* Outer glow ring */}
-          <div className="absolute inset-[-6px] rounded-full opacity-30 group-hover:opacity-50 transition-opacity"
+          <div className="absolute inset-[-5px] rounded-full opacity-30 group-hover:opacity-50 transition-opacity"
             style={{ background: 'radial-gradient(circle, rgba(52,176,122,.3) 0%, transparent 70%)' }} />
 
           {isLoggingIn ? (
-            <Loader2 className="w-12 h-12 text-white animate-spin" />
+            <Loader2 className="w-10 h-10 text-white animate-spin" />
           ) : (
             <>
               <img
                 src={lanaIconGreen}
                 alt=""
-                className="w-16 h-16 object-contain mb-2"
+                className="w-12 h-12 object-contain mb-1.5"
                 style={{ filter: 'brightness(0) invert(1)' }}
               />
-              <span className="text-white font-bold text-lg leading-tight">{t('login.scanToEnter')}</span>
-              <span className="text-white/75 text-xs mt-0.5">{t('login.useYourKey')}</span>
+              <span className="text-white font-bold text-base leading-tight">{t('login.scanToEnter')}</span>
+              <span className="text-white/75 text-[10px] mt-0.5">{t('login.useYourKey')}</span>
             </>
           )}
         </button>
