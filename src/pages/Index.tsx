@@ -173,23 +173,11 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background relative">
-      {/* Subtle mandala watermark — fixed centre, behind all content */}
-      <div
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none select-none z-0"
-        aria-hidden="true"
-      >
-        <img
-          src={mandalaGreen}
-          alt=""
-          className="w-[min(120vw,700px)] aspect-square object-contain opacity-[0.07] dark:opacity-[0.04]"
-        />
-      </div>
-
+    <div className="min-h-screen bg-background">
       <TopBar onMenuOpen={() => setMenuOpen(true)} />
       <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onEditProfile={handleEditProfile} onRegularCustomers={handleRegularCustomers} />
 
-      <main className="pt-14 relative z-10">
+      <main className="pt-14">
         {/* ─── Home: two big buttons ─── */}
         {activeView === "home" && (
           <div className="flex flex-col gap-5 px-6 py-6" style={{ minHeight: 'calc(100vh - 3.5rem)' }}>
@@ -427,25 +415,41 @@ const Index = () => {
                   <button
                     onClick={() => setActiveView("cash")}
                     disabled={payDisabled}
-                    className="flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                    className="relative overflow-hidden flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
-                    <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
+                    {/* Mandala background mesh */}
+                    <img
+                      src={mandalaGreen}
+                      alt=""
+                      aria-hidden="true"
+                      className="absolute inset-0 w-full h-full object-cover opacity-[0.18] dark:opacity-[0.10] pointer-events-none select-none"
+                    />
+                    {/* Content */}
+                    <div className="relative z-10 w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
                       <Banknote className="w-11 h-11 text-primary" />
                     </div>
-                    <span className="text-3xl font-bold text-foreground">{t('home.payWithCurrency', { symbol: CURRENCY_SYMBOL[effectiveUnit?.currency || ''] || currencySymbol })}</span>
-                    <span className="text-base text-muted-foreground">{t('home.cashPayment')}</span>
+                    <span className="relative z-10 text-3xl font-bold text-foreground">{t('home.payWithCurrency', { symbol: CURRENCY_SYMBOL[effectiveUnit?.currency || ''] || currencySymbol })}</span>
+                    <span className="relative z-10 text-base text-muted-foreground">{t('home.cashPayment')}</span>
                   </button>
 
                   <button
                     onClick={() => setActiveView("lana")}
                     disabled={payDisabled}
-                    className="flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                    className="relative overflow-hidden flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
-                    <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
+                    {/* Mandala background mesh */}
+                    <img
+                      src={mandalaGreen}
+                      alt=""
+                      aria-hidden="true"
+                      className="absolute inset-0 w-full h-full object-cover opacity-[0.18] dark:opacity-[0.10] pointer-events-none select-none"
+                    />
+                    {/* Content */}
+                    <div className="relative z-10 w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
                       <img src={lanaIcon} alt="Lana" className="w-11 h-11 object-contain dark:invert" />
                     </div>
-                    <span className="text-3xl font-bold text-foreground">{t('home.payWithLana')}</span>
-                    <span className="text-base text-muted-foreground">{t('home.lanaPayment')}</span>
+                    <span className="relative z-10 text-3xl font-bold text-foreground">{t('home.payWithLana')}</span>
+                    <span className="relative z-10 text-base text-muted-foreground">{t('home.lanaPayment')}</span>
                   </button>
 
                   {noFunds && !noShopSelected && !isSuspended && (
