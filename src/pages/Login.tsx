@@ -30,17 +30,8 @@ const Login = () => {
   return (
     <div className="min-h-screen bg-white dark:bg-background flex flex-col items-center justify-center relative overflow-hidden px-6">
 
-      {/* ── Mandala background decoration ────────────────────────────── */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none" aria-hidden="true">
-        <img
-          src={mandalaGreen}
-          alt=""
-          className="w-[min(88vw,420px)] h-[min(88vw,420px)] object-contain opacity-30 dark:opacity-20"
-        />
-      </div>
-
       {/* ── Content ──────────────────────────────────────────────────── */}
-      <div className="relative z-10 flex flex-col items-center gap-7 max-w-sm w-full">
+      <div className="relative z-10 flex flex-col items-center gap-6 max-w-sm w-full">
 
         {/* Top: icon + title + subtitle */}
         <div className="flex flex-col items-center gap-3 pt-4">
@@ -53,11 +44,21 @@ const Login = () => {
           </div>
         </div>
 
+        {/* Mandala + scan button — mandala perfectly centred on the circle */}
+        <div className="relative flex items-center justify-center" style={{ width: 340, height: 340 }}>
+          {/* Mandala behind button, same centre */}
+          <img
+            src={mandalaGreen}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 w-full h-full object-contain opacity-35 dark:opacity-20 pointer-events-none select-none"
+          />
+
         {/* Big scan button */}
         <button
           onClick={() => setScannerOpen(true)}
           disabled={isLoggingIn}
-          className="group relative flex flex-col items-center justify-center w-[200px] h-[200px] rounded-full transition-transform duration-200 active:scale-95 hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none"
+          className="group relative flex flex-col items-center justify-center w-[200px] h-[200px] rounded-full transition-transform duration-200 active:scale-95 hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none z-10"
           style={{
             background: 'radial-gradient(circle at 42% 36%, #34b07a, #155c3e)',
             boxShadow: '0 0 48px rgba(34,160,90,.38), 0 8px 32px rgba(21,92,62,.45), inset 0 1px 0 rgba(255,255,255,.12)',
@@ -82,6 +83,7 @@ const Login = () => {
             </>
           )}
         </button>
+        </div>{/* end mandala+button wrapper */}
 
         {/* Security note */}
         <div className="flex items-center gap-2 text-muted-foreground/60">
