@@ -11,22 +11,19 @@
   "common.tryAgain": "Poskusi znova",
   "common.save": "Shrani",
   "common.saving": "Shranjujem...",
-
-  "login.subtitle": "Skenirajte svoj Lana WIF zasebni ključ za prijavo",
+  "login.subtitle": "Vaš ključ. Vaš dostop. Vaša pot.",
   "login.scanButton": "Skeniraj WIF ključ",
   "login.signingIn": "Prijavljanje...",
-  "login.keysNeverLeave": "Vaši ključi nikoli ne zapustijo vaše naprave",
+  "login.keysNeverLeave": "Vaš ključ nikoli ne zapusti naprave. Vi ste vedno v nadzoru.",
   "login.scanTitle": "Skeniraj WIF ključ",
   "login.scanDescription": "Skenirajte QR kodo vašega Lana WIF zasebnega ključa za prijavo",
   "login.failed": "Prijava ni uspela",
   "login.enterManually": "Vnesi WIF ključ ročno",
   "login.wifPlaceholder": "Prilepite svoj WIF zasebni ključ tukaj...",
   "login.signInButton": "Prijava",
-
   "notFound.title": "404",
   "notFound.message": "Ups! Stran ni najdena",
   "notFound.returnHome": "Nazaj na začetno stran",
-
   "menu.title": "Meni",
   "menu.profile": "Profil",
   "menu.shop": "Trgovina",
@@ -45,7 +42,6 @@
   "menu.signOut": "Odjava",
   "menu.defaultUser": "Lana uporabnik",
   "menu.copyHexId": "Kopiraj Nostr Hex ID",
-
   "home.loadingShops": "Nalagam trgovine...",
   "home.noShops": "Na vaš račun ni dodeljenih trgovin",
   "home.selectShop": "Izberite trgovino",
@@ -57,12 +53,10 @@
   "home.payWithLana": "Plačilo z $Lana",
   "home.lanaPayment": "Registrirane Lane",
   "home.noFunds": "Ni razpoložljivih investitorskih sredstev — ni mogoče ustvariti računov",
-
   "qrScanner.defaultTitle": "Skeniraj QR kodo",
   "qrScanner.defaultDescription": "Postavite QR kodo znotraj okvirja",
   "qrScanner.noCamera": "Na tej napravi ni kamere.",
   "qrScanner.cameraError": "Dostop do kamere ni uspel. Preverite dovoljenja.",
-
   "profile.basicInfo": "Osnovni podatki",
   "profile.locationCurrency": "Lokacija in valuta",
   "profile.contactInfo": "Kontaktni podatki",
@@ -121,7 +115,6 @@
   "profile.broadcastFailed": "Oddaja na releje ni uspela",
   "profile.noSigningKey": "Podpisni ključ ni na voljo. Prosimo, prijavite se znova.",
   "profile.failedToSave": "Shranjevanje profila ni uspelo",
-
   "profile.validation.nameRequired": "Ime je obvezno",
   "profile.validation.displayNameRequired": "Prikazno ime je obvezno",
   "profile.validation.aboutRequired": "Polje 'O meni' je obvezno",
@@ -138,7 +131,6 @@
   "profile.validation.phoneCountryCodeRequired": "Klicna številka države je obvezna, ko je telefon podan",
   "profile.validation.phoneCountryCodeFormat": "Klicna številka države se mora začeti z +",
   "profile.validation.phoneDigitsOnly": "Telefon sme vsebovati le številke",
-
   "cash.title": "Plačilo z gotovino",
   "cash.receiptSubtitle": "Fotografirajte račun ali nakup",
   "cash.receiptInstruction": "Fotografirajte račun ali fakturo. Če račun ni na voljo, fotografirajte nakup.",
@@ -153,7 +145,6 @@
   "cash.uploadFailed": "Nalaganje ni uspelo. Poskusite znova.",
   "cash.networkErrorRetry": "Napaka omrežja. Fotografija shranjena lokalno — ponovni poskus ob oddaji.",
   "cash.photoCaptured": "Fotografija zajeta",
-
   "cash.invoiceTitle": "Podrobnosti računa",
   "cash.invoiceSubtitle": "Vnesite številko računa in znesek",
   "cash.invoiceNumber": "Številka računa",
@@ -173,12 +164,10 @@
   "cash.saveAsRegular": "Shrani med redne stranke",
   "cash.savingRegular": "Shranjujem...",
   "cash.savedAsRegular": "Shranjeno med redne stranke",
-
   "cash.scanTitle": "Skeniraj stranko",
   "cash.scanSubtitle": "Skenirajte denarnico ali WIF ključ stranke",
   "cash.scanDescription": "Skenirajte naslov denarnice ali WIF zasebni ključ",
   "cash.checkingWallet": "Preverjam denarnico...",
-
   "cash.registerTitle": "Registriraj denarnico",
   "cash.registerSubtitle": "To denarnico je treba najprej registrirati",
   "cash.customerBalance": "Stanje stranke",
@@ -189,11 +178,9 @@
   "cash.phonePlaceholder": "Telefonska številka",
   "cash.registerAndContinue": "Registriraj in nadaljuj",
   "cash.processing": "Obdelava...",
-
   "cash.confirmedTitle": "Plačilo potrjeno",
   "cash.invoiceLabel": "Račun #{{number}}",
   "cash.walletLabel": "Denarnica: {{address}}",
-
   "cash.purchaseDataMissing": "Podatki o nakupu manjkajo. Prosimo, pojdite nazaj in vnesite podrobnosti računa.",
   "cash.invalidAmount": "Neveljaven znesek",
   "cash.purchaseFailed": "Nakup ni uspel. Poskusite znova.",
@@ -203,7 +190,6 @@
   "cash.invalidScan": "Neveljaven sken. Skenirajte veljaven Lana ID denarnice ali WIF zasebni ključ.",
   "cash.networkError": "Napaka omrežja. Poskusite znova.",
   "cash.dataMissing": "Podatki o nakupu manjkajo.",
-
   "lana.title": "LANA plačilo",
   "lana.entryTitle": "$Lana plačilo",
   "lana.receiptSubtitle": "Fotografirajte račun ali nakup",
@@ -237,7 +223,6 @@
   "lana.networkError": "Napaka omrežja. Preverite povezavo in poskusite znova.",
   "lana.exceedsMaxLimit": "Znesek presega največjo omejitev transakcije {{amount}}",
   "lana.walletNotVirgin": "Ta denarnica ni registrirana in je ni mogoče registrirati, ker ima stanje ({{balance}} LANA). Samo prazne denarnice se lahko registrirajo. Stranka mora uporabiti registrirano denarnico.",
-
   "wallets.title": "Preveri denarnico",
   "wallets.subtitle": "Skenirajte ID denarnice ali WIF zasebni ključ",
   "wallets.scanToCheck": "Skeniraj za preverjanje",
@@ -253,7 +238,6 @@
   "wallets.scanTitle": "Skeniraj denarnico",
   "wallets.scanDescription": "Skenirajte ID denarnice ali WIF zasebni ključ",
   "wallets.invalidScan": "Neveljaven sken. Skenirajte veljaven Lana ID denarnice ali WIF zasebni ključ.",
-
   "register.title": "Registracija denarnice",
   "register.subtitle": "Skenirajte svoj LanaCoin WIF zasebni ključ za registracijo denarnice v omrežju Lana",
   "register.scanWifKey": "Skeniraj WIF ključ",
@@ -292,15 +276,12 @@
   "register.failedToCheck": "Preverjanje denarnice ni uspelo",
   "register.registrationFailed": "Registracija ni uspela",
   "register.fieldRequired": "{{field}} je obvezno",
-
   "check.title": "Preveri stanje",
   "check.subtitle": "Skenirajte svoj Lana ID denarnice za preverjanje stanja",
   "check.scanButton": "Skeniraj ID denarnice",
-
   "discount.title": "Popust",
   "discount.subtitle": "Vnesite podrobnosti računa za popust",
   "discount.takePhoto": "Fotografiraj račun",
-
   "principles.banner": "Lana temelji na zaupanju, preglednosti in skupni odgovornosti.",
   "principles.title": "Načela sodelovanja in odgovornosti v Lani",
   "principles.subtitle": "Dobrodošli v ekosistemu Lana. Lana temelji na zaupanju, preglednosti in skupni odgovornosti. Ta dokument določa načela in postopke, ki ohranjajo ekosistem pošten za vse.",
@@ -344,7 +325,6 @@
   "principles.s4Repeated": "Ponavljajoča se ali namerna zloraba lahko privede do trajne odstranitve iz ekosistema.",
   "principles.core": "Svoboda vključuje polno lastništvo posledic. Lana raste skozi zaupanje. Zaupanje raste skozi resnico.",
   "principles.closing": "Hvala, da ste del živega gospodarstva, zgrajenega na odgovornosti in medsebojnem spoštovanju.",
-
   "regulars.title": "Redne stranke",
   "regulars.subtitle": "Upravljajte s svojimi rednimi strankami",
   "regulars.noShopSelected": "Najprej izberite trgovino",
@@ -381,5 +361,7 @@
   "regulars.maxCapMessage": "Ta stranka ima več kot {{lana}} LANA. Potrebuje zapraviti sredstva, se vpisati v Lana8Wonder ali opraviti nakup pred naslednjim splitom — sicer bo račun zamrznjen.",
   "regulars.maxCapMessageWonder": "Ta stranka ima več kot {{lana}} LANA. Potrebuje zapraviti sredstva ali opraviti nakup pred naslednjim splitom — sicer bo račun zamrznjen.",
   "regulars.lookupFailed": "Iskanje stranke ni uspelo. Poskusite znova.",
-  "regulars.walletNotRegistered": "Ta denarnica ni registrirana in ne pripada nikomur. Stranka mora najprej registrirati svojo denarnico."
+  "regulars.walletNotRegistered": "Ta denarnica ni registrirana in ne pripada nikomur. Stranka mora najprej registrirati svojo denarnico.",
+  "login.scanToEnter": "Skeniraj za vstop",
+  "login.useYourKey": "Uporabi Lana ključ"
 }

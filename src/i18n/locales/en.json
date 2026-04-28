@@ -11,22 +11,19 @@
   "common.tryAgain": "Try Again",
   "common.save": "Save",
   "common.saving": "Saving...",
-
-  "login.subtitle": "Scan your Lana WIF Private Key to sign in",
+  "login.subtitle": "Your key. Your access. Your journey.",
   "login.scanButton": "Scan WIF Key",
   "login.signingIn": "Signing in...",
-  "login.keysNeverLeave": "Your keys never leave your device",
+  "login.keysNeverLeave": "Your key never leaves your device. You are always in control.",
   "login.scanTitle": "Scan WIF Key",
   "login.scanDescription": "Scan your Lana WIF Private Key QR code to sign in",
   "login.failed": "Login failed",
   "login.enterManually": "Enter WIF key manually",
   "login.wifPlaceholder": "Paste your WIF private key here...",
   "login.signInButton": "Sign In",
-
   "notFound.title": "404",
   "notFound.message": "Oops! Page not found",
   "notFound.returnHome": "Return to Home",
-
   "menu.title": "Menu",
   "menu.profile": "Profile",
   "menu.shop": "Shop",
@@ -45,7 +42,6 @@
   "menu.signOut": "Sign Out",
   "menu.defaultUser": "Lana User",
   "menu.copyHexId": "Copy Nostr Hex ID",
-
   "home.loadingShops": "Loading shops...",
   "home.noShops": "No shops assigned to your account",
   "home.selectShop": "Select shop",
@@ -56,13 +52,11 @@
   "home.cashPayment": "Cash or card",
   "home.payWithLana": "Payment with $Lana",
   "home.lanaPayment": "Registered Lana",
-  "home.noFunds": "No investor funds available \u2014 cannot create invoices",
-
+  "home.noFunds": "No investor funds available — cannot create invoices",
   "qrScanner.defaultTitle": "Scan QR Code",
   "qrScanner.defaultDescription": "Position the QR code within the frame",
   "qrScanner.noCamera": "No camera found on this device.",
   "qrScanner.cameraError": "Failed to access camera. Please check permissions.",
-
   "profile.basicInfo": "Basic Information",
   "profile.locationCurrency": "Location & Currency",
   "profile.contactInfo": "Contact Information",
@@ -107,13 +101,13 @@
   "profile.lanoshi2lash": "Lanoshi to Lash (exchange rate)",
   "profile.lanoshi2lashPlaceholder": "10000",
   "profile.orgasmicProfile": "Orgasmic Profile",
-  "profile.orgasmicProfilePlaceholder": "Things that bring you joy \u2014 activities and passions that make you happy...",
+  "profile.orgasmicProfilePlaceholder": "Things that bring you joy — activities and passions that make you happy...",
   "profile.interests": "Interests (t tags)",
   "profile.addInterestPlaceholder": "Add interest...",
   "profile.intimacyInterests": "Intimacy Interests (o tags)",
   "profile.addIntimacyPlaceholder": "Add intimacy interest...",
   "profile.statementMandatory": "Mandatory.",
-  "profile.statementInstruction": "Write in your own words that you accept unconditional self-responsibility. This is a legally-significant personal declaration. No templates \u2014 it must be written by you.",
+  "profile.statementInstruction": "Write in your own words that you accept unconditional self-responsibility. This is a legally-significant personal declaration. No templates — it must be written by you.",
   "profile.yourStatement": "Your Statement",
   "profile.statementPlaceholder": "I accept full and unconditional self-responsibility for everything I do or don't do inside the Lana World.",
   "profile.saveProfile": "Save Profile",
@@ -121,7 +115,6 @@
   "profile.broadcastFailed": "Failed to broadcast to any relay",
   "profile.noSigningKey": "No signing key available. Please re-login.",
   "profile.failedToSave": "Failed to save profile",
-
   "profile.validation.nameRequired": "Name is required",
   "profile.validation.displayNameRequired": "Display name is required",
   "profile.validation.aboutRequired": "About is required",
@@ -138,29 +131,27 @@
   "profile.validation.phoneCountryCodeRequired": "Phone country code is required when phone is provided",
   "profile.validation.phoneCountryCodeFormat": "Phone country code must start with +",
   "profile.validation.phoneDigitsOnly": "Phone must contain digits only",
-
   "cash.title": "Cash Payment",
   "cash.receiptSubtitle": "Take a photo of the receipt or purchase",
   "cash.receiptInstruction": "Photograph the receipt or invoice. If no receipt is available, take a photo showing the purchase.",
   "cash.takePhoto": "Take Photo",
   "cash.retakePhoto": "Retake Photo",
   "cash.continueToInvoice": "Continue to Invoice",
-  "cash.skipNoReceipt": "Skip \u2014 no receipt available",
+  "cash.skipNoReceipt": "Skip — no receipt available",
   "cash.analyzingImage": "Analyzing image...",
   "cash.receiptDetected": "Receipt detected",
   "cash.photoNotReceipt": "Photo (not a receipt)",
   "cash.fileTooLarge": "File too large ({{size}} MB). Maximum is 10 MB.",
   "cash.uploadFailed": "Upload failed. Please try again.",
-  "cash.networkErrorRetry": "Network error. Photo saved locally \u2014 will retry on submit.",
+  "cash.networkErrorRetry": "Network error. Photo saved locally — will retry on submit.",
   "cash.photoCaptured": "Photo captured",
-
   "cash.invoiceTitle": "Invoice Details",
   "cash.invoiceSubtitle": "Enter invoice number and amount",
   "cash.invoiceNumber": "Invoice Number",
   "cash.transactionDescription": "Transaction Description",
   "cash.invoicePlaceholder": "e.g. 2024-001234",
   "cash.descriptionPlaceholder": "Describe the transaction",
-  "cash.noReceiptDescription": "No receipt detected \u2014 please describe what was purchased.",
+  "cash.noReceiptDescription": "No receipt detected — please describe what was purchased.",
   "cash.amount": "Amount ({{symbol}})",
   "cash.amountPlaceholder": "0.00",
   "cash.noFunds": "No investor funds available",
@@ -173,12 +164,10 @@
   "cash.saveAsRegular": "Save as regular customer",
   "cash.savingRegular": "Saving...",
   "cash.savedAsRegular": "Saved as regular customer",
-
   "cash.scanTitle": "Scan Customer",
   "cash.scanSubtitle": "Scan customer wallet or WIF key",
   "cash.scanDescription": "Scan a wallet address or WIF private key",
   "cash.checkingWallet": "Checking wallet...",
-
   "cash.registerTitle": "Register Wallet",
   "cash.registerSubtitle": "This wallet needs to be registered first",
   "cash.customerBalance": "Customer Balance",
@@ -189,11 +178,9 @@
   "cash.phonePlaceholder": "Phone number",
   "cash.registerAndContinue": "Register & Continue",
   "cash.processing": "Processing...",
-
   "cash.confirmedTitle": "Payment Confirmed",
   "cash.invoiceLabel": "Invoice #{{number}}",
   "cash.walletLabel": "Wallet: {{address}}",
-
   "cash.purchaseDataMissing": "Purchase data missing. Please go back and enter invoice details.",
   "cash.invalidAmount": "Invalid amount",
   "cash.purchaseFailed": "Purchase failed. Please try again.",
@@ -203,7 +190,6 @@
   "cash.invalidScan": "Invalid scan. Please scan a valid Lana Wallet ID or WIF Private Key.",
   "cash.networkError": "Network error. Please try again.",
   "cash.dataMissing": "Purchase data missing.",
-
   "lana.title": "LANA Payment",
   "lana.entryTitle": "$Lana Payment",
   "lana.receiptSubtitle": "Take a photo of the receipt or purchase",
@@ -237,7 +223,6 @@
   "lana.networkError": "Network error. Please check connection and try again.",
   "lana.exceedsMaxLimit": "Amount exceeds maximum transaction limit of {{amount}}",
   "lana.walletNotVirgin": "This wallet is not registered and cannot be registered because it has a balance ({{balance}} LANA). Only empty wallets can be registered. The customer must use a registered wallet.",
-
   "wallets.title": "Check Wallet",
   "wallets.subtitle": "Scan a Wallet ID or WIF Private Key",
   "wallets.scanToCheck": "Scan to Check",
@@ -253,7 +238,6 @@
   "wallets.scanTitle": "Scan Wallet",
   "wallets.scanDescription": "Scan a Wallet ID or WIF Private Key",
   "wallets.invalidScan": "Invalid scan. Please scan a valid Lana Wallet ID or WIF Private Key.",
-
   "register.title": "Register Wallet",
   "register.subtitle": "Scan your LanaCoin WIF private key to register your wallet on the Lana network",
   "register.scanWifKey": "Scan WIF Key",
@@ -292,15 +276,12 @@
   "register.failedToCheck": "Failed to check wallet",
   "register.registrationFailed": "Registration failed",
   "register.fieldRequired": "{{field}} is required",
-
   "check.title": "Check Balance",
   "check.subtitle": "Scan your Lana Wallet ID to check your balance",
   "check.scanButton": "Scan Wallet ID",
-
   "discount.title": "Discount",
   "discount.subtitle": "Enter invoice details for discount",
   "discount.takePhoto": "Take photo of receipt",
-
   "principles.banner": "Lana is built on trust, transparency, and shared responsibility.",
   "principles.title": "Lana Participation & Responsibility Principles",
   "principles.subtitle": "Welcome to the Lana ecosystem. Lana is built on trust, transparency, and shared responsibility. This document sets out the principles and process that keep the ecosystem fair for everyone.",
@@ -344,7 +325,6 @@
   "principles.s4Repeated": "Repeated or deliberate misuse may lead to permanent removal from the ecosystem.",
   "principles.core": "Freedom includes full ownership of consequences. Lana grows through trust. Trust grows through truth.",
   "principles.closing": "Thank you for being part of a living economy built on responsibility and mutual respect.",
-
   "regulars.title": "Regular Customers",
   "regulars.subtitle": "Manage your regular customers",
   "regulars.noShopSelected": "Please select a shop first",
@@ -381,5 +361,7 @@
   "regulars.maxCapMessage": "This customer has more than {{lana}} LANA. They need to spend, enroll in Lana8Wonder, or make a purchase before the next split — otherwise their account will be frozen.",
   "regulars.maxCapMessageWonder": "This customer has more than {{lana}} LANA. They need to spend or make a purchase before the next split — otherwise their account will be frozen.",
   "regulars.lookupFailed": "Failed to look up customer. Please try again.",
-  "regulars.walletNotRegistered": "This wallet is not registered and does not belong to anyone. The customer must register their wallet first."
+  "regulars.walletNotRegistered": "This wallet is not registered and does not belong to anyone. The customer must register their wallet first.",
+  "login.scanToEnter": "Scan to Enter",
+  "login.useYourKey": "Use your Lana Key"
 }
