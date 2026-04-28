@@ -10,7 +10,7 @@ import EditProfile from "@/components/EditProfile";
 import RegularCustomersTab from "@/components/tabs/RegularCustomersTab";
 import { useAuth } from "@/contexts/AuthContext";
 import lanaIcon from "@/assets/lana-icon.png";
-import mandalaGreen from "@/assets/mandala-green.png";
+import mandalaMesh from "@/assets/mandala-mesh.png";
 
 interface BusinessUnit {
   unit_id: string;
@@ -419,7 +419,7 @@ const Index = () => {
                   >
                     {/* Mandala background mesh */}
                     <img
-                      src={mandalaGreen}
+                      src={mandalaMesh}
                       alt=""
                       aria-hidden="true"
                       className="absolute inset-0 w-full h-full object-cover opacity-[0.18] dark:opacity-[0.10] pointer-events-none select-none"
@@ -439,7 +439,7 @@ const Index = () => {
                   >
                     {/* Mandala background mesh */}
                     <img
-                      src={mandalaGreen}
+                      src={mandalaMesh}
                       alt=""
                       aria-hidden="true"
                       className="absolute inset-0 w-full h-full object-cover opacity-[0.18] dark:opacity-[0.10] pointer-events-none select-none"
