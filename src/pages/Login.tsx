@@ -28,43 +28,37 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-background flex flex-col items-center justify-center relative overflow-hidden px-6">
+    <div className="min-h-screen bg-white dark:bg-background flex flex-col items-center justify-center relative overflow-hidden py-4 gap-3">
 
-      {/* ── Content ──────────────────────────────────────────────────── */}
-      <div className="relative z-10 flex flex-col items-center gap-4 max-w-sm w-full py-4">
-
-        {/* Top: icon + title + subtitle */}
-        <div className="flex flex-col items-center gap-2">
-          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shadow-sm">
-            <img src={lanaIconGreen} alt="Lana" className="w-8 h-8 object-contain" />
-          </div>
-          <div className="text-center space-y-0.5">
-            <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">Lana Pays.Us</h1>
-            <p className="text-sm text-muted-foreground">{t('login.subtitle')}</p>
-          </div>
+      {/* Top: icon + title + subtitle ─ inside max-w-sm */}
+      <div className="px-6 w-full max-w-sm flex flex-col items-center gap-2 relative z-10">
+        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shadow-sm">
+          <img src={lanaIconGreen} alt="Lana" className="w-8 h-8 object-contain" />
         </div>
+        <div className="text-center space-y-0.5">
+          <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">Lana Pays.Us</h1>
+          <p className="text-sm text-muted-foreground">{t('login.subtitle')}</p>
+        </div>
+      </div>
 
-        {/* Mandala + scan button — mandala perfectly centred on the circle */}
-        <div className="relative flex items-center justify-center w-full max-w-[340px] aspect-square">
-          {/* Mandala behind button, same centre */}
-          <img
-            src={mandalaGreen}
-            alt=""
-            aria-hidden="true"
-            className="absolute inset-0 w-full h-full object-contain opacity-60 dark:opacity-25 pointer-events-none select-none"
-          />
+      {/* Mandala + scan button ─ wider, escapes max-w-sm */}
+      <div className="relative z-10 flex items-center justify-center w-full max-w-[480px] aspect-square px-2">
+        <img
+          src={mandalaGreen}
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 w-full h-full object-contain opacity-65 dark:opacity-30 pointer-events-none select-none"
+        />
 
-        {/* Big scan button */}
         <button
           onClick={() => setScannerOpen(true)}
           disabled={isLoggingIn}
-          className="group relative flex flex-col items-center justify-center w-[160px] h-[160px] rounded-full transition-transform duration-200 active:scale-95 hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none z-10"
+          className="group relative flex flex-col items-center justify-center w-[170px] h-[170px] rounded-full transition-transform duration-200 active:scale-95 hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none z-10"
           style={{
             background: 'radial-gradient(circle at 42% 36%, #34b07a, #155c3e)',
             boxShadow: '0 0 40px rgba(34,160,90,.38), 0 6px 24px rgba(21,92,62,.45), inset 0 1px 0 rgba(255,255,255,.12)',
           }}
         >
-          {/* Outer glow ring */}
           <div className="absolute inset-[-5px] rounded-full opacity-30 group-hover:opacity-50 transition-opacity"
             style={{ background: 'radial-gradient(circle, rgba(52,176,122,.3) 0%, transparent 70%)' }} />
 
@@ -83,7 +77,10 @@ const Login = () => {
             </>
           )}
         </button>
-        </div>{/* end mandala+button wrapper */}
+      </div>
+
+      {/* Bottom: security + manual + principles ─ inside max-w-sm */}
+      <div className="px-6 w-full max-w-sm flex flex-col items-center gap-3 relative z-10">
 
         {/* Security note */}
         <div className="flex items-center gap-2 text-muted-foreground/60">
