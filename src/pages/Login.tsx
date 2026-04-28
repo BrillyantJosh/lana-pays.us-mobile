@@ -30,15 +30,10 @@ const Login = () => {
   return (
     <div className="min-h-screen bg-white dark:bg-background flex flex-col items-center justify-center relative overflow-hidden py-4 gap-3">
 
-      {/* Top: icon + title + subtitle ─ inside max-w-sm */}
-      <div className="px-6 w-full max-w-sm flex flex-col items-center gap-2 relative z-10">
-        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shadow-sm">
-          <img src={lanaIconGreen} alt="Lana" className="w-8 h-8 object-contain" />
-        </div>
-        <div className="text-center space-y-0.5">
-          <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">Lana Pays.Us</h1>
-          <p className="text-sm text-muted-foreground">{t('login.subtitle')}</p>
-        </div>
+      {/* Top: title + subtitle ─ inside max-w-sm */}
+      <div className="px-6 w-full max-w-sm flex flex-col items-center gap-1 relative z-10">
+        <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">Lana Pays.Us</h1>
+        <p className="text-sm text-muted-foreground text-center">{t('login.subtitle')}</p>
       </div>
 
       {/* Mandala + scan button ─ wider, escapes max-w-sm */}
