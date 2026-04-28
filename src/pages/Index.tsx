@@ -10,6 +10,7 @@ import EditProfile from "@/components/EditProfile";
 import RegularCustomersTab from "@/components/tabs/RegularCustomersTab";
 import { useAuth } from "@/contexts/AuthContext";
 import lanaIcon from "@/assets/lana-icon.png";
+import mandalaGreen from "@/assets/mandala-green.png";
 
 interface BusinessUnit {
   unit_id: string;
@@ -172,11 +173,23 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative">
+      {/* Subtle mandala watermark — fixed centre, behind all content */}
+      <div
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none select-none z-0"
+        aria-hidden="true"
+      >
+        <img
+          src={mandalaGreen}
+          alt=""
+          className="w-[min(120vw,700px)] aspect-square object-contain opacity-[0.07] dark:opacity-[0.04]"
+        />
+      </div>
+
       <TopBar onMenuOpen={() => setMenuOpen(true)} />
       <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onEditProfile={handleEditProfile} onRegularCustomers={handleRegularCustomers} />
 
-      <main className="pt-14">
+      <main className="pt-14 relative z-10">
         {/* ─── Home: two big buttons ─── */}
         {activeView === "home" && (
           <div className="flex flex-col gap-5 px-6 py-6" style={{ minHeight: 'calc(100vh - 3.5rem)' }}>
