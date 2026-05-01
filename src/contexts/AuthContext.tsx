@@ -136,8 +136,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (profileData.profile.currency) {
             currency = profileData.profile.currency.toUpperCase();
           }
-          // Set UI language from KIND 0 profile (only if no manual override in localStorage)
-          if (profileData.profile.lang && !localStorage.getItem('lang')) {
+          // Set UI language from KIND 0 profile — profile is the source of truth
+          if (profileData.profile.lang) {
             try {
               const { changeLanguage } = await import('../i18n/index');
               changeLanguage(profileData.profile.lang);

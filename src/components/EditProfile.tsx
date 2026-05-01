@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/contexts/AuthContext';
 import { createAndSignKind0, type Kind0Content } from '@/lib/nostr-sign';
+import { changeLanguage } from '@/i18n';
 import {
   Save, Loader2, CheckCircle, AlertCircle, ChevronDown, ChevronUp,
   User, MapPin, Phone, Wallet, Globe, Heart, FileText, Plus, X
@@ -253,6 +254,8 @@ const EditProfile = () => {
       const result = await res.json();
 
       if (result.success?.length > 0) {
+        // Sync UI language with the profile language we just saved
+        changeLanguage(lang);
         setSaveResult({ ok: true, message: t('profile.savedToRelays', { count: result.success.length }) });
       } else {
         setSaveResult({ ok: false, message: t('profile.broadcastFailed') });
