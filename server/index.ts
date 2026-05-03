@@ -552,6 +552,36 @@ app.get('/api/lana8wonder/:hexId', async (req, res) => {
 });
 
 /**
+ * Proxy profile search via mejmoSeFajn Lana Transparency module.
+ * Returns ONLY profiles with a Lana wallet ID (walletOnly: true) so the
+ * caller can immediately add them as regular customers.
+ */
+const profileSearchLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+app.post('/api/profile-search', profileSearchLimiter, async (req, res) => {
+  const { search } = req.body;
+  if (!search || typeof search !== 'string' || search.trim().length < 2) {
+    return res.status(400).json({ error: 'search query must be at least 2 characters' });
+  }
+  try {
+    const r = await fetch('https://app.mejmosefajn.org/api/functions/list-profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletOnly: true, search: search.trim() }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await r.json();
+    // Only return profiles that ACTUALLY have a wallet (defence in depth)
+    const profiles = (data.profiles || [])
+      .filter((p: any) => p.lanaWalletID && p.pubkey)
+      .slice(0, 30); // cap results
+    res.json({ profiles, total: profiles.length });
+  } catch (e: any) {
+    console.error('Profile search failed:', e.message);
+    res.status(502).json({ error: 'Profile search service unavailable' });
+  }
+});
+
+/**
  * Proxy wallet list + freeze status check (avoids CORS)
  */
 app.get('/api/wallets/:hexId', async (req, res) => {

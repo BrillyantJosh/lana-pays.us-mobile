@@ -1,8 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Users, UserPlus, Loader2, Trash2, Search, Store, Sparkles, TrendingUp, Snowflake, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Users, UserPlus, Loader2, Trash2, Search, Store, Sparkles, TrendingUp, Snowflake, AlertTriangle, ExternalLink, ScanLine, X } from 'lucide-react';
 import { QRScanner } from '@/components/QRScanner';
 import { convertWifToIds } from '@/lib/crypto';
+
+interface SearchProfile {
+  pubkey: string;
+  name?: string;
+  display_name?: string;
+  picture?: string;
+  about?: string;
+  location?: string;
+  lanaWalletID?: string;
+}
 
 interface RegularCustomer {
   id: number;
@@ -58,6 +68,12 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
   const [scannerOpen, setScannerOpen] = useState(false);
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
+
+  // Profile search state
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [profileQuery, setProfileQuery] = useState('');
+  const [profileResults, setProfileResults] = useState<SearchProfile[]>([]);
+  const [searching, setSearching] = useState(false);
 
   // Confirm state
   const [resolvedHexId, setResolvedHexId] = useState<string | null>(null);
@@ -132,6 +148,49 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
         .catch(() => {});
     });
   }, [customers, businessUnits]);
+
+  // Profile search — debounced lookup against mejmoSeFajn Lana Transparency
+  useEffect(() => {
+    if (!searchOpen) return;
+    const q = profileQuery.trim();
+    if (q.length < 2) {
+      setProfileResults([]);
+      return;
+    }
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/profile-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ search: q }),
+        });
+        const data = await r.json();
+        setProfileResults(data.profiles || []);
+      } catch {
+        setProfileResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [profileQuery, searchOpen]);
+
+  // Pick a profile from search results → jump straight to confirm step
+  const handlePickProfile = (profile: SearchProfile) => {
+    if (!profile.lanaWalletID || !profile.pubkey) return;
+    setSearchOpen(false);
+    setProfileQuery('');
+    setProfileResults([]);
+    setLookupError(null);
+    setResolvedHexId(profile.pubkey);
+    setResolvedWallet(profile.lanaWalletID);
+    setResolvedNpub(null);
+    setResolvedName(profile.display_name || profile.name || null);
+    setResolvedPicture(profile.picture || null);
+    setNote('');
+    setStep('confirm');
+  };
 
   // Handle QR scan result
   const handleScan = async (data: string) => {
@@ -411,14 +470,23 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
         </div>
       </div>
 
-      {/* Add button */}
-      <button
-        onClick={() => { setLookupError(null); setAddToUnitId(businessUnits[0]?.unit_id || ''); setScannerOpen(true); }}
-        className="w-full rounded-xl bg-primary text-primary-foreground py-3.5 font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
-      >
-        <UserPlus className="w-4 h-4" />
-        {t('regulars.addCustomer')}
-      </button>
+      {/* Add buttons — Scan QR + Search profile */}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={() => { setLookupError(null); setAddToUnitId(businessUnits[0]?.unit_id || ''); setScannerOpen(true); }}
+          className="rounded-xl bg-primary text-primary-foreground py-3.5 font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+        >
+          <ScanLine className="w-4 h-4" />
+          {t('regulars.addByScan')}
+        </button>
+        <button
+          onClick={() => { setLookupError(null); setAddToUnitId(businessUnits[0]?.unit_id || ''); setProfileQuery(''); setProfileResults([]); setSearchOpen(true); }}
+          className="rounded-xl border-2 border-primary text-primary bg-primary/5 py-3.5 font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+        >
+          <Search className="w-4 h-4" />
+          {t('regulars.addBySearch')}
+        </button>
+      </div>
 
       {/* Error from lookup */}
       {lookupError && (
@@ -600,6 +668,84 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
         title={t('regulars.scanTitle')}
         description={t('regulars.scanDescription')}
       />
+
+      {/* Profile Search Drawer */}
+      {searchOpen && (
+        <>
+          <div className="fixed inset-0 bg-foreground/30 backdrop-blur-sm z-[80]" onClick={() => setSearchOpen(false)} />
+          <div className="fixed inset-x-3 top-3 bottom-3 z-[90] bg-card rounded-2xl border border-border shadow-xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
+              <div>
+                <h2 className="font-display font-bold text-foreground text-base">{t('regulars.searchTitle')}</h2>
+                <p className="text-xs text-muted-foreground">{t('regulars.searchSubtitle')}</p>
+              </div>
+              <button onClick={() => setSearchOpen(false)} className="w-9 h-9 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 border-b border-border shrink-0">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  autoFocus
+                  value={profileQuery}
+                  onChange={e => setProfileQuery(e.target.value)}
+                  placeholder={t('regulars.searchPlaceholder')}
+                  className={inputClass + ' pl-9'}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground/70 mt-2">{t('regulars.searchHint')}</p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2">
+              {searching ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-sm">{t('regulars.searching')}</span>
+                </div>
+              ) : profileQuery.trim().length < 2 ? (
+                <div className="py-12 text-center text-xs text-muted-foreground/60 px-4">
+                  {t('regulars.searchPlaceholder')}
+                </div>
+              ) : profileResults.length === 0 ? (
+                <div className="py-12 text-center text-xs text-muted-foreground/60 px-4">
+                  {t('regulars.searchEmpty')}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {profileResults.map(p => (
+                    <button
+                      key={p.pubkey}
+                      onClick={() => handlePickProfile(p)}
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-secondary active:scale-[0.99] transition-all text-left"
+                    >
+                      {p.picture ? (
+                        <img src={p.picture} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                          <Users className="w-5 h-5 text-primary" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">
+                          {p.display_name || p.name || t('regulars.unknownCustomer')}
+                        </p>
+                        {p.location && (
+                          <p className="text-xs text-muted-foreground truncate">📍 {p.location}</p>
+                        )}
+                        <p className="text-[10px] font-mono text-muted-foreground/70 truncate">
+                          {p.lanaWalletID}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };

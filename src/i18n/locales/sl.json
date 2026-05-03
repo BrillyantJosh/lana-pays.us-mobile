@@ -329,7 +329,7 @@
   "regulars.subtitle": "Upravljajte s svojimi rednimi strankami",
   "regulars.noShopSelected": "Najprej izberite trgovino",
   "regulars.empty": "Še ni rednih strank",
-  "regulars.emptyHint": "Dodajte stranke s skeniranjem njihove denarnice ali zasebnega ključa",
+  "regulars.emptyHint": "Dodaj stranke s skeniranjem denarnice ali iskanjem profila",
   "regulars.addCustomer": "Dodaj stranko",
   "regulars.scanTitle": "Skeniraj stranko",
   "regulars.scanDescription": "Skenirajte naslov denarnice ali WIF zasebni ključ stranke",
@@ -363,5 +363,13 @@
   "regulars.lookupFailed": "Iskanje stranke ni uspelo. Poskusite znova.",
   "regulars.walletNotRegistered": "Ta denarnica ni registrirana in ne pripada nikomur. Stranka mora najprej registrirati svojo denarnico.",
   "login.scanToEnter": "Skeniraj za vstop",
-  "login.useYourKey": "Uporabi Lana ključ"
+  "login.useYourKey": "Uporabi Lana ključ",
+  "regulars.addByScan": "Skeniraj QR",
+  "regulars.addBySearch": "Najdi profil",
+  "regulars.searchTitle": "Najdi profil",
+  "regulars.searchSubtitle": "Poišči stranko po imenu Nostr profila",
+  "regulars.searchPlaceholder": "Vnesi vsaj 2 črki...",
+  "regulars.searching": "Iščem profile...",
+  "regulars.searchEmpty": "Ni profilov z Lana denarnico",
+  "regulars.searchHint": "Prikazujejo se samo profili z Lana denarnico"
 }

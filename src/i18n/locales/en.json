@@ -329,7 +329,7 @@
   "regulars.subtitle": "Manage your regular customers",
   "regulars.noShopSelected": "Please select a shop first",
   "regulars.empty": "No regular customers yet",
-  "regulars.emptyHint": "Add customers by scanning their wallet or private key",
+  "regulars.emptyHint": "Add customers by scanning their wallet or searching their profile",
   "regulars.addCustomer": "Add Customer",
   "regulars.scanTitle": "Scan Customer",
   "regulars.scanDescription": "Scan customer's wallet address or WIF private key",
@@ -363,5 +363,13 @@
   "regulars.lookupFailed": "Failed to look up customer. Please try again.",
   "regulars.walletNotRegistered": "This wallet is not registered and does not belong to anyone. The customer must register their wallet first.",
   "login.scanToEnter": "Scan to Enter",
-  "login.useYourKey": "Use your Lana Key"
+  "login.useYourKey": "Use your Lana Key",
+  "regulars.addByScan": "Scan QR",
+  "regulars.addBySearch": "Search profile",
+  "regulars.searchTitle": "Search Profile",
+  "regulars.searchSubtitle": "Find a customer by their Nostr profile name",
+  "regulars.searchPlaceholder": "Type at least 2 letters...",
+  "regulars.searching": "Searching profiles...",
+  "regulars.searchEmpty": "No profiles found with a Lana wallet",
+  "regulars.searchHint": "Only profiles with a Lana wallet are shown"
 }
