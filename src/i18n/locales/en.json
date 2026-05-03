@@ -373,5 +373,7 @@
   "regulars.searchEmpty": "No profiles found with a Lana wallet",
   "regulars.searchHint": "Only profiles with a Lana wallet are shown",
   "cash.uploadFromGallery": "From gallery",
-  "cash.takePhotoLabel": "Take photo"
+  "cash.takePhotoLabel": "Take photo",
+  "cash.compressing": "Optimizing image...",
+  "cash.compressedNotice": "Compressed: {{from}} → {{to}}"
 }
