@@ -48,8 +48,6 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isCompressing, setIsCompressing] = useState(false);
-  const [compressionInfo, setCompressionInfo] = useState<string | null>(null);
   const [receiptType, setReceiptType] = useState<'receipt' | 'photo'>('receipt');
   const [analysisDescription, setAnalysisDescription] = useState<string | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
@@ -331,25 +329,16 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
     }
 
     setUploadError(null);
-    setCompressionInfo(null);
-    setIsCompressing(true);
 
     // Show preview from the ORIGINAL so the seller sees what they captured
     const reader = new FileReader();
     reader.onload = (e) => setReceiptPreview(e.target?.result as string);
     reader.readAsDataURL(rawFile);
 
-    // Compress on-device — typical 8 MB phone photo → ~400 KB
-    const { file, originalSize, finalSize, compressed } = await compressImage(rawFile);
-    setIsCompressing(false);
-    if (compressed) {
-      const fmt = (b: number) => b > 1024 * 1024
-        ? `${(b / 1024 / 1024).toFixed(1)} MB`
-        : `${Math.round(b / 1024)} KB`;
-      setCompressionInfo(t('cash.compressedNotice', { from: fmt(originalSize), to: fmt(finalSize) }));
-    }
-
     setIsUploading(true);
+
+    // Silently compress on-device — typical 8 MB phone photo → ~400 KB
+    const { file } = await compressImage(rawFile);
     try {
       const formData = new FormData();
       formData.append('receipt', file, file.name);
@@ -408,15 +397,6 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           </div>
         ) : null}
         {uploadError && <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-3"><p className="text-sm text-destructive text-center">{uploadError}</p></div>}
-        {isCompressing && (
-          <div className="rounded-2xl bg-primary/5 border border-primary/10 p-3 flex items-center gap-2">
-            <Loader2 className="w-4 h-4 animate-spin text-primary" />
-            <p className="text-xs text-primary">{t('cash.compressing')}</p>
-          </div>
-        )}
-        {!isCompressing && compressionInfo && (
-          <p className="text-[11px] text-muted-foreground/70 text-center">{compressionInfo}</p>
-        )}
         {isAnalyzing && (
           <div className="rounded-2xl bg-primary/5 border border-primary/10 p-3 flex items-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin text-primary" />

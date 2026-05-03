@@ -373,7 +373,5 @@
   "regulars.searchEmpty": "Ni profilov z Lana denarnico",
   "regulars.searchHint": "Prikazujejo se samo profili z Lana denarnico",
   "cash.uploadFromGallery": "Iz galerije",
-  "cash.takePhotoLabel": "Slikaj",
-  "cash.compressing": "Optimiziram sliko...",
-  "cash.compressedNotice": "Stisnjeno: {{from}} → {{to}}"
+  "cash.takePhotoLabel": "Slikaj"
 }
