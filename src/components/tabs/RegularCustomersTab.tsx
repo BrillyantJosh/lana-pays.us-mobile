@@ -730,6 +730,9 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-foreground truncate">
                           {p.display_name || p.name || t('regulars.unknownCustomer')}
+                          {p.name && p.display_name && p.name !== p.display_name && (
+                            <span className="ml-1.5 text-xs font-normal text-muted-foreground">@{p.name}</span>
+                          )}
                         </p>
                         {p.location && (
                           <p className="text-xs text-muted-foreground truncate">📍 {p.location}</p>
