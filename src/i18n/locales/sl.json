@@ -371,5 +371,7 @@
   "regulars.searchPlaceholder": "Vnesi vsaj 2 črki...",
   "regulars.searching": "Iščem profile...",
   "regulars.searchEmpty": "Ni profilov z Lana denarnico",
-  "regulars.searchHint": "Prikazujejo se samo profili z Lana denarnico"
+  "regulars.searchHint": "Prikazujejo se samo profili z Lana denarnico",
+  "cash.uploadFromGallery": "Iz galerije",
+  "cash.takePhotoLabel": "Slikaj"
 }

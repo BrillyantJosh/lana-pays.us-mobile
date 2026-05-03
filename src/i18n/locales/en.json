@@ -371,5 +371,7 @@
   "regulars.searchPlaceholder": "Type at least 2 letters...",
   "regulars.searching": "Searching profiles...",
   "regulars.searchEmpty": "No profiles found with a Lana wallet",
-  "regulars.searchHint": "Only profiles with a Lana wallet are shown"
+  "regulars.searchHint": "Only profiles with a Lana wallet are shown",
+  "cash.uploadFromGallery": "From gallery",
+  "cash.takePhotoLabel": "Take photo"
 }

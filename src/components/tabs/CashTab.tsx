@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from 'react-i18next';
-import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2, UserPlus, Receipt, Users, Search } from "lucide-react";
+import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2, UserPlus, Receipt, Users, Search, ImagePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -71,6 +71,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
 
   // Receipt state
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -565,19 +566,30 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           </div>
         )}
         <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptFile(f); }} className="hidden" />
+        <input ref={galleryInputRef} type="file" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptFile(f); }} className="hidden" />
         <div className="flex flex-col gap-3">
           {!receiptPreview ? (
-            <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isAnalyzing} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
-              <Camera className="w-5 h-5" />{t('cash.takePhoto')}
-            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isAnalyzing} className="h-14 rounded-2xl text-sm font-semibold gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
+                <Camera className="w-5 h-5" />{t('cash.takePhotoLabel')}
+              </Button>
+              <Button onClick={() => galleryInputRef.current?.click()} disabled={isUploading || isAnalyzing} variant="outline" className="h-14 rounded-2xl text-sm font-semibold gap-2 border-2 border-primary text-primary bg-primary/5 hover:bg-primary/10">
+                <ImagePlus className="w-5 h-5" />{t('cash.uploadFromGallery')}
+              </Button>
+            </div>
           ) : (
             <>
               {!isAnalyzing && (
                 <Button onClick={() => setStep("invoice")} disabled={isUploading} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">{t('cash.continueToInvoice')}</Button>
               )}
-              <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isAnalyzing} variant="outline" className="w-full h-12 rounded-2xl text-sm font-medium gap-2">
-                <Camera className="w-4 h-4" />{t('cash.retakePhoto')}
-              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isAnalyzing} variant="outline" className="h-12 rounded-2xl text-sm font-medium gap-2">
+                  <Camera className="w-4 h-4" />{t('cash.retakePhoto')}
+                </Button>
+                <Button onClick={() => galleryInputRef.current?.click()} disabled={isUploading || isAnalyzing} variant="outline" className="h-12 rounded-2xl text-sm font-medium gap-2">
+                  <ImagePlus className="w-4 h-4" />{t('cash.uploadFromGallery')}
+                </Button>
+              </div>
             </>
           )}
           <button onClick={() => setStep("invoice")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">{t('cash.skipNoReceipt')}</button>
