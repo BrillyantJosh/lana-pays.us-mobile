@@ -192,7 +192,15 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
     setStep('confirm');
   };
 
-  // Handle QR scan result
+  // Handle QR scan result.
+  //
+  // A user can have multiple wallets but only their MAIN wallet carries the
+  // Nostr hex ID that publishes KIND 0. Other wallets don't. So we must NOT
+  // trust the locally-derived hex (from a WIF scan) or a stale `users` lookup
+  // — the Lana Register service is the source of truth and returns the
+  // owner's main nostr_hex_id for any of their wallets. We always go through
+  // /api/check-wallet and use wallet.nostr_hex_id from that response so the
+  // KIND 0 profile (and therefore the customer name + picture) always loads.
   const handleScan = async (data: string) => {
     const trimmed = data.trim();
     setScannerOpen(false);
@@ -206,49 +214,25 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
     setNote('');
 
     try {
-      let hexId: string | null = null;
+      // Step 1: derive the wallet address (from a Lana wallet QR or WIF QR)
       let wallet: string;
-      let npub: string | null = null;
-
       const isWalletAddress = trimmed.startsWith('L') && trimmed.length >= 26 && trimmed.length <= 35;
-
       if (isWalletAddress) {
         wallet = trimmed;
-        const userRes = await fetch(`/api/users/by-wallet/${encodeURIComponent(wallet)}`);
-        const userData = await userRes.json();
-        if (userData.user?.hex_id) {
-          hexId = userData.user.hex_id;
-          npub = userData.user.npub;
-        } else {
-          const checkRes = await fetch('/api/check-wallet', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ wallet_id: wallet }),
-          });
-          const checkData = await checkRes.json();
-          if (checkData.wallet?.nostr_hex_id) {
-            hexId = checkData.wallet.nostr_hex_id;
-          }
-        }
       } else {
         const ids = await convertWifToIds(trimmed);
         wallet = ids.walletId;
-        hexId = ids.nostrHexId;
-        npub = ids.nostrNpubId;
       }
 
-      // Check registration
-      let isRegistered = false;
-      try {
-        const regCheck = await fetch('/api/check-wallet', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ wallet_id: wallet }),
-        });
-        const regData = await regCheck.json();
-        isRegistered = regData.success && regData.registered;
-        if (!hexId && regData.wallet?.nostr_hex_id) hexId = regData.wallet.nostr_hex_id;
-      } catch {}
+      // Step 2: check the registry — this gives us the OWNER's main nostr_hex_id
+      // (the one with KIND 0), even if `wallet` is a secondary wallet of theirs.
+      const regCheck = await fetch('/api/check-wallet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet_id: wallet }),
+      });
+      const regData = await regCheck.json();
+      const isRegistered = regData.success && regData.registered;
 
       if (!isRegistered) {
         setLookupError(t('regulars.walletNotRegistered'));
@@ -257,22 +241,27 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
         return;
       }
 
-      if (!hexId) {
+      const mainHexId: string | null = regData.wallet?.nostr_hex_id || null;
+      if (!mainHexId) {
         setLookupError(t('regulars.lookupFailed'));
         setStep('list');
         setIsLookingUp(false);
         return;
       }
 
-      setResolvedHexId(hexId);
+      setResolvedHexId(mainHexId);
       setResolvedWallet(wallet);
-      setResolvedNpub(npub);
+      // We deliberately don't carry the WIF-derived npub here — it would belong
+      // to the scanned wallet, not the main identity. The server can derive
+      // npub from mainHexId on its own when displaying the customer.
+      setResolvedNpub(null);
 
+      // Step 3: fetch KIND 0 profile via the MAIN hex — name + picture always load
       try {
         const profileRes = await fetch('/api/profile-lookup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ hex_id: hexId }),
+          body: JSON.stringify({ hex_id: mainHexId }),
         });
         const profileData = await profileRes.json();
         if (profileData.profile) {
