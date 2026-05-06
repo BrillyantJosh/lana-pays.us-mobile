@@ -8,6 +8,7 @@ import WalletsTab from "@/components/tabs/WalletsTab";
 import LanaTab from "@/components/tabs/LanaTab";
 import EditProfile from "@/components/EditProfile";
 import RegularCustomersTab from "@/components/tabs/RegularCustomersTab";
+import RegisterCustomerTab from "@/components/tabs/RegisterCustomerTab";
 import { useAuth } from "@/contexts/AuthContext";
 import lanaIcon from "@/assets/lana-icon.png";
 import mandalaMesh from "@/assets/mandala-mesh.png";
@@ -45,7 +46,7 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
-type View = "home" | "cash" | "wallets" | "lana" | "profile" | "regulars";
+type View = "home" | "cash" | "wallets" | "lana" | "profile" | "regulars" | "register";
 
 const Index = () => {
   const { t } = useTranslation();
@@ -172,10 +173,16 @@ const Index = () => {
     setActiveView("regulars");
   };
 
+  const handleRegisterCustomer = () => {
+    setSelectedWallet(null);
+    setLanaPaymentRequest(null);
+    setActiveView("register");
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <TopBar onMenuOpen={() => setMenuOpen(true)} />
-      <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onEditProfile={handleEditProfile} onRegularCustomers={handleRegularCustomers} />
+      <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onEditProfile={handleEditProfile} onRegularCustomers={handleRegularCustomers} onRegisterCustomer={handleRegisterCustomer} />
 
       <main className="pt-14">
         {/* ─── Home: two big buttons ─── */}
@@ -557,6 +564,9 @@ const Index = () => {
             )}
             {activeView === "regulars" && (
               <RegularCustomersTab unitId={effectiveUnit?.unit_id} staffHexId={session?.nostrHexId} businessUnits={businessUnits.filter(u => u.suspension_status !== 'suspended')} />
+            )}
+            {activeView === "register" && (
+              <RegisterCustomerTab unitCurrency={effectiveUnit?.currency} />
             )}
           </div>
         )}
