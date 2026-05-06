@@ -20,7 +20,7 @@ interface DerivedIds {
   walletId: string;
   nostrHexId: string;
   nostrNpubId: string;
-  nostrPrivateKey: string;
+  privateKeyHex: string;
 }
 
 const RegisterCustomerTab = ({ unitCurrency }: RegisterCustomerTabProps) => {
@@ -44,7 +44,13 @@ const RegisterCustomerTab = ({ unitCurrency }: RegisterCustomerTabProps) => {
 
     try {
       const ids = await convertWifToIds(trimmed);
-      setDerived(ids);
+      // convertWifToIds returns several extra fields (walletIdCompressed/Uncompressed/isCompressed) — pick only what we need.
+      setDerived({
+        walletId: ids.walletId,
+        nostrHexId: ids.nostrHexId,
+        nostrNpubId: ids.nostrNpubId,
+        privateKeyHex: ids.privateKeyHex,
+      });
 
       const res = await fetch('/api/check-wallet', {
         method: 'POST',
@@ -89,7 +95,7 @@ const RegisterCustomerTab = ({ unitCurrency }: RegisterCustomerTabProps) => {
           'I accept full and unconditional self-responsibility for everything I do or do not do inside the Lana World.',
       };
       const tags: string[][] = [['lang', i18n.language || 'en']];
-      const signed = createAndSignKind0(derived.nostrPrivateKey, kind0, tags);
+      const signed = createAndSignKind0(derived.privateKeyHex, kind0, tags);
 
       const broadcast = await fetch('/api/broadcast-event', {
         method: 'POST',
