@@ -131,8 +131,9 @@ function BlockedStatusPanel({ unit }: { unit: BusinessUnit }) {
 }
 
 /**
- * Toggle button + collapsible quota panel. Renders inline under the unit
- * name in every selector layout. Closed by default per unit.
+ * Compact "Quota ▾" toggle button. Renders only the trigger; the expanded
+ * MobileQuotaPanel is rendered separately by the parent so it can occupy
+ * full card width (the button itself sits under the Max Invoice number).
  */
 function QuotaToggle({
   unit,
@@ -146,21 +147,14 @@ function QuotaToggle({
   const hasQuota = (unit.quota_volume_limit ?? 0) > 0 || (unit.quota_tx_limit ?? 0) > 0;
   if (!hasQuota) return null;
   return (
-    <>
-      <button
-        onClick={onToggle}
-        className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
-      >
-        <Info className="w-3 h-3" />
-        Quota
-        {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-      </button>
-      {open && (
-        <div className="mt-2">
-          <MobileQuotaPanel unit={unit} />
-        </div>
-      )}
-    </>
+    <button
+      onClick={onToggle}
+      className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+    >
+      <Info className="w-3 h-3" />
+      Quota
+      {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+    </button>
   );
 }
 
@@ -398,10 +392,20 @@ const Index = () => {
                         <p className={`text-2xl font-black leading-tight ${noFunds ? 'text-destructive' : 'text-primary'}`}>
                           {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </p>
+                        <div className="flex justify-end">
+                          <QuotaToggle
+                            unit={businessUnits[0]}
+                            open={!!quotaOpen[businessUnits[0].unit_id]}
+                            onToggle={() => setQuotaOpen(s => ({ ...s, [businessUnits[0].unit_id]: !s[businessUnits[0].unit_id] }))}
+                          />
+                        </div>
                       </div>
                     );
                   })()}
                 </div>
+                {quotaOpen[businessUnits[0].unit_id] && (
+                  <MobileQuotaPanel unit={businessUnits[0]} />
+                )}
                 {(isUnitBlocked(businessUnits[0]) || businessUnits[0].suspension_status === 'quota_warning_80') && (
                   <div className={`flex items-start gap-2 rounded-xl p-3 ${
                     isUnitBlocked(businessUnits[0]) ? 'bg-destructive/10' : 'bg-yellow-100'
@@ -511,6 +515,21 @@ const Index = () => {
                     </button>
                   ))}
                 </div>
+                {/* Quota toggle for selected unit (2-unit layout has buttons-as-rows;
+                    nesting another button inside is bad HTML/A11y, so the trigger
+                    sits outside the row group). */}
+                {selectedUnit && (
+                  <div className="px-1 flex justify-end">
+                    <QuotaToggle
+                      unit={selectedUnit}
+                      open={!!quotaOpen[selectedUnit.unit_id]}
+                      onToggle={() => setQuotaOpen(s => ({ ...s, [selectedUnit.unit_id]: !s[selectedUnit.unit_id] }))}
+                    />
+                  </div>
+                )}
+                {selectedUnit && quotaOpen[selectedUnit.unit_id] && (
+                  <MobileQuotaPanel unit={selectedUnit} />
+                )}
               </div>
             ) : (
               /* ─── 3+ units: dropdown selector ─── */
@@ -556,10 +575,20 @@ const Index = () => {
                             <p className={`text-2xl font-black leading-tight ${noFunds ? 'text-destructive' : 'text-primary'}`}>
                               {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
+                            <div className="flex justify-end">
+                              <QuotaToggle
+                                unit={selectedUnit}
+                                open={!!quotaOpen[selectedUnit.unit_id]}
+                                onToggle={() => setQuotaOpen(s => ({ ...s, [selectedUnit.unit_id]: !s[selectedUnit.unit_id] }))}
+                              />
+                            </div>
                           </div>
                         );
                       })()}
                     </div>
+                    {quotaOpen[selectedUnit.unit_id] && (
+                      <MobileQuotaPanel unit={selectedUnit} />
+                    )}
                     {(isUnitBlocked(selectedUnit) || selectedUnit.suspension_status === 'quota_warning_80') && (
                       <div className={`flex items-start gap-2 rounded-xl p-3 ${
                         isUnitBlocked(selectedUnit) ? 'bg-destructive/10' : 'bg-yellow-100'
@@ -606,16 +635,6 @@ const Index = () => {
                   })}
                 </select>
               </div>
-            )}
-
-            {/* ─── Quota toggle for the active selection (sits between
-                 selector and payment buttons; works for all 3 layouts) ─── */}
-            {effectiveUnit && (
-              <QuotaToggle
-                unit={effectiveUnit}
-                open={!!quotaOpen[effectiveUnit.unit_id]}
-                onToggle={() => setQuotaOpen(s => ({ ...s, [effectiveUnit.unit_id]: !s[effectiveUnit.unit_id] }))}
-              />
             )}
 
             {/* ─── Payment buttons OR blocked-status panel ─── */}

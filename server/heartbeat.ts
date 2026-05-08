@@ -232,6 +232,43 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
       console.log(`KIND 30902: upserted ${feePolicies.length} fee policies`);
     }
 
+    // ── Sync merchant_quota_usage from brain ────────────────────────────
+    // Brain owns the canonical write (orchestrator increments on every
+    // successful purchase). Mobile pulls a snapshot here so the staff sees
+    // current usage right away, not just on the next status transition.
+    // Updates only the *_used columns; *_limit + status come from KIND 30903.
+    try {
+      const BRAIN_URL = process.env.BRAIN_API_URL || 'http://lana-brain-web:3007';
+      const adminHex = '56e8670aa65491f8595dc3a71c94aa7445dcdca755ca5f77c07218498a362061';
+      const period = new Date().toISOString().slice(0, 7);
+      const usageRes = await fetch(`${BRAIN_URL}/api/admin/merchant-usage?period=${period}`, {
+        headers: { 'x-admin-hex-id': adminHex },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (usageRes.ok) {
+        const data = await usageRes.json();
+        const rows = (data.usage || []) as Array<{
+          unit_id: string; tx_count: number; volume_native: number;
+        }>;
+        const upd = db.prepare(`
+          UPDATE business_units SET
+            quota_volume_used = ?,
+            quota_tx_used = ?,
+            quota_period = ?
+          WHERE unit_id = ?
+        `);
+        const txn = db.transaction(() => {
+          for (const r of rows) upd.run(r.volume_native, r.tx_count, period, r.unit_id);
+        });
+        txn();
+        console.log(`merchant_quota_usage: synced ${rows.length} usage rows from brain`);
+      } else {
+        console.warn(`merchant-usage fetch returned HTTP ${usageRes.status}`);
+      }
+    } catch (e: any) {
+      console.warn('merchant_quota_usage sync failed (non-fatal):', e.message);
+    }
+
     // Fetch Direct Fund capacity
     const DIRECT_FUND_URL = process.env.DIRECT_FUND_URL || 'http://lana-direct-fund-web:3005';
     const currencies = ['EUR', 'USD', 'GBP'];
