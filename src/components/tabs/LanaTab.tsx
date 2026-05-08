@@ -498,6 +498,19 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
                   </p>
                 );
               }
+              // Pre-flight quota check
+              const u = (window as any).__selectedUnit;
+              if (u && u.quota_volume_limit > 0 && !isNaN(parsed)) {
+                const remainingVolume = Math.max(0, u.quota_volume_limit - (u.quota_volume_used || 0));
+                const remainingTx = Math.max(0, (u.quota_tx_limit || 0) - (u.quota_tx_used || 0));
+                const sameCurrency = (u.quota_currency || 'EUR') === currency;
+                if (remainingTx <= 0) {
+                  return <p className="text-xs text-destructive mt-1">Monthly transaction limit reached. Resets next month.</p>;
+                }
+                if (sameCurrency && parsed > remainingVolume) {
+                  return <p className="text-xs text-destructive mt-1">This payment would exceed the monthly quota. Available: {remainingVolume.toFixed(2)} {currency}</p>;
+                }
+              }
               return null;
             })()}
           </div>
@@ -515,7 +528,16 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             const maxTx = (window as any).__maxTransactionAmount;
             if (maxTx !== null && maxTx !== undefined && maxTx <= 0) return true;
             const parsed = parseFloat(amount.replace(',', '.'));
-            return maxTx !== null && maxTx !== undefined && !isNaN(parsed) && parsed > maxTx;
+            if (maxTx !== null && maxTx !== undefined && !isNaN(parsed) && parsed > maxTx) return true;
+            // Pre-flight quota check
+            const u = (window as any).__selectedUnit;
+            if (u && u.quota_volume_limit > 0 && !isNaN(parsed)) {
+              const remainingVolume = Math.max(0, u.quota_volume_limit - (u.quota_volume_used || 0));
+              const remainingTx = Math.max(0, (u.quota_tx_limit || 0) - (u.quota_tx_used || 0));
+              if (remainingTx <= 0) return true;
+              if ((u.quota_currency || 'EUR') === currency && parsed > remainingVolume) return true;
+            }
+            return false;
           })()}
           className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
         >

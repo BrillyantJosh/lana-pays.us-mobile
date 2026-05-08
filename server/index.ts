@@ -770,6 +770,58 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
     return res.status(503).json({ success: false, error: 'Brain service not configured' });
   }
 
+  // ── Defense in depth: gateway gate using last-synced KIND 30903 state ──
+  // The brain is authoritative for any race condition (its own kind_30903 is
+  // freshest), but a quick local check catches the obvious blocked-merchant
+  // and quota-exceeded cases without burning a brain round-trip.
+  const unitId = req.body?.unit_id;
+  const amount = Number(req.body?.amount || 0);
+  if (typeof unitId === 'string' && unitId.length > 0) {
+    const u = db.prepare(`
+      SELECT suspension_status, quota_volume_used, quota_volume_limit,
+             quota_tx_used, quota_tx_limit, quota_currency, currency
+      FROM business_units WHERE unit_id = ?
+    `).get(unitId) as any;
+
+    if (u) {
+      const BLOCKED = ['pending', 'quota_blocked', 'suspended', 'rejected'];
+      if (BLOCKED.includes(u.suspension_status)) {
+        const errCode = `MERCHANT_${String(u.suspension_status).toUpperCase()}`;
+        console.warn(`[mobile] Blocking purchase pre-flight: unit ${unitId.slice(0, 12)} status=${u.suspension_status}`);
+        return res.status(403).json({
+          success: false,
+          error: errCode,
+          message: u.suspension_status === 'pending'
+            ? 'Merchant is awaiting admin approval — payments paused'
+            : u.suspension_status === 'quota_blocked'
+              ? 'Monthly quota reached, resets 1st of next month'
+              : `Cannot process purchase: merchant is ${u.suspension_status}`,
+        });
+      }
+      // Pre-flight quota — only when currencies match (otherwise let brain do
+      // the conversion via KIND 38888 rates).
+      const reqCurrency = String(req.body?.currency || '').toUpperCase();
+      const quotaCurrency = String(u.quota_currency || u.currency || 'EUR').toUpperCase();
+      if (u.quota_volume_limit > 0 && reqCurrency === quotaCurrency
+          && u.quota_volume_used + amount > u.quota_volume_limit) {
+        console.warn(`[mobile] Blocking purchase pre-flight: unit ${unitId.slice(0, 12)} would exceed volume quota`);
+        return res.status(403).json({
+          success: false,
+          error: 'MERCHANT_QUOTA_EXCEEDED',
+          message: 'This purchase would exceed the monthly volume limit',
+        });
+      }
+      if (u.quota_tx_limit > 0 && u.quota_tx_used + 1 > u.quota_tx_limit) {
+        console.warn(`[mobile] Blocking purchase pre-flight: unit ${unitId.slice(0, 12)} would exceed tx quota`);
+        return res.status(403).json({
+          success: false,
+          error: 'MERCHANT_QUOTA_EXCEEDED',
+          message: 'Monthly transaction limit reached',
+        });
+      }
+    }
+  }
+
   // Debug: log what we're sending to Brain
   console.log('[mobile] Purchase request body:', JSON.stringify({
     unit_id: req.body?.unit_id || 'EMPTY',

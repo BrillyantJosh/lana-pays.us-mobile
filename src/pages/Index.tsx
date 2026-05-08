@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from 'react-i18next';
-import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X } from "lucide-react";
+import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import MenuDrawer from "@/components/MenuDrawer";
 import CashTab from "@/components/tabs/CashTab";
@@ -9,6 +9,7 @@ import LanaTab from "@/components/tabs/LanaTab";
 import EditProfile from "@/components/EditProfile";
 import RegularCustomersTab from "@/components/tabs/RegularCustomersTab";
 import RegisterCustomerTab from "@/components/tabs/RegisterCustomerTab";
+import MobileQuotaPanel from "@/components/MobileQuotaPanel";
 import { useAuth } from "@/contexts/AuthContext";
 import lanaIcon from "@/assets/lana-icon.png";
 import mandalaMesh from "@/assets/mandala-mesh.png";
@@ -107,6 +108,62 @@ function resolveImageUrl(url: string | null | undefined): string | null {
   return url;
 }
 
+/**
+ * Compact panel that explains why a unit is blocked (pending / quota_blocked
+ * / suspended / rejected). Replaces the cash/LANA payment buttons so the
+ * staff can't confuse a disabled button for an outage.
+ */
+function BlockedStatusPanel({ unit }: { unit: BusinessUnit }) {
+  return (
+    <div className="rounded-3xl bg-destructive/5 border-2 border-destructive/20 p-6 text-center space-y-3">
+      <div className="w-14 h-14 mx-auto rounded-full bg-destructive/10 flex items-center justify-center">
+        <ShieldAlert className="w-7 h-7 text-destructive" />
+      </div>
+      <h3 className="text-lg font-bold text-destructive">{statusLabel(unit.suspension_status)}</h3>
+      <p className="text-sm text-destructive/80 leading-relaxed">{statusBlurb(unit)}</p>
+      {unit.suspension_until && (
+        <p className="text-xs text-destructive/60">
+          Until: {new Date(unit.suspension_until * 1000).toLocaleDateString()}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Toggle button + collapsible quota panel. Renders inline under the unit
+ * name in every selector layout. Closed by default per unit.
+ */
+function QuotaToggle({
+  unit,
+  open,
+  onToggle,
+}: {
+  unit: BusinessUnit;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const hasQuota = (unit.quota_volume_limit ?? 0) > 0 || (unit.quota_tx_limit ?? 0) > 0;
+  if (!hasQuota) return null;
+  return (
+    <>
+      <button
+        onClick={onToggle}
+        className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+      >
+        <Info className="w-3 h-3" />
+        Quota
+        {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+      </button>
+      {open && (
+        <div className="mt-2">
+          <MobileQuotaPanel unit={unit} />
+        </div>
+      )}
+    </>
+  );
+}
+
 const CURRENCY_SYMBOL: Record<string, string> = {
   GBP: '£',
   USD: '$',
@@ -135,14 +192,42 @@ const Index = () => {
     fund_limit: number | null;
   }>>({});
 
+  // Per-unit toggle for quota detail panel under the selected card
+  const [quotaOpen, setQuotaOpen] = useState<Record<string, boolean>>({});
+
   // Sync selected unit ID to window for payment tabs to access
   const effectiveUnit = selectedUnit || (businessUnits.length === 1 ? businessUnits[0] : null);
   const selectedMaxTx = effectiveUnit ? maxTransactions[effectiveUnit.unit_id] : null;
 
   useEffect(() => {
     (window as any).__selectedUnitId = effectiveUnit?.unit_id || '';
+    (window as any).__selectedUnit = effectiveUnit || null;
     (window as any).__maxTransactionAmount = selectedMaxTx?.max_amount ?? null;
   }, [effectiveUnit, selectedMaxTx]);
+
+  // Whenever the polled list refreshes, swap our selected reference for the
+  // fresh row so suspension_status / quota fields stay current. This drives
+  // the auto-deselect-when-blocked UX without a separate effect.
+  useEffect(() => {
+    if (!selectedUnit || businessUnits.length === 0) return;
+    const fresh = businessUnits.find(u => u.unit_id === selectedUnit.unit_id);
+    if (!fresh) {
+      setSelectedUnit(null);
+      return;
+    }
+    if (fresh !== selectedUnit) {
+      // Compare on the fields we care about; preserve referential stability
+      // so React doesn't re-render unnecessarily.
+      const changed = (
+        fresh.suspension_status !== selectedUnit.suspension_status
+        || fresh.quota_volume_used !== selectedUnit.quota_volume_used
+        || fresh.quota_volume_limit !== selectedUnit.quota_volume_limit
+        || fresh.quota_tx_used !== selectedUnit.quota_tx_used
+        || fresh.quota_tx_limit !== selectedUnit.quota_tx_limit
+      );
+      if (changed) setSelectedUnit(fresh);
+    }
+  }, [businessUnits]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch business units for logged-in user (initial + poll every 30s)
   useEffect(() => {
@@ -523,12 +608,30 @@ const Index = () => {
               </div>
             )}
 
-            {/* ─── Payment buttons ─── */}
+            {/* ─── Quota toggle for the active selection (sits between
+                 selector and payment buttons; works for all 3 layouts) ─── */}
+            {effectiveUnit && (
+              <QuotaToggle
+                unit={effectiveUnit}
+                open={!!quotaOpen[effectiveUnit.unit_id]}
+                onToggle={() => setQuotaOpen(s => ({ ...s, [effectiveUnit.unit_id]: !s[effectiveUnit.unit_id] }))}
+              />
+            )}
+
+            {/* ─── Payment buttons OR blocked-status panel ─── */}
             {(() => {
               const noShopSelected = (businessUnits.length > 1 && !selectedUnit);
-              const isSuspended = (selectedUnit ? isUnitBlocked(selectedUnit) : false) || (businessUnits.length === 1 && isUnitBlocked(businessUnits[0]));
+              const isBlocked = (selectedUnit ? isUnitBlocked(selectedUnit) : false) || (businessUnits.length === 1 && isUnitBlocked(businessUnits[0]));
               const noFunds = selectedMaxTx !== null && selectedMaxTx !== undefined && (selectedMaxTx.max_amount === null || selectedMaxTx.max_amount === undefined || selectedMaxTx.max_amount <= 0);
-              const payDisabled = noShopSelected || isSuspended || noFunds;
+
+              // Blocked statuses (pending / quota_blocked / suspended /
+              // rejected) replace the payment buttons entirely with a
+              // status panel — no confusion about why buttons are greyed.
+              if (isBlocked && effectiveUnit) {
+                return <BlockedStatusPanel unit={effectiveUnit} />;
+              }
+
+              const payDisabled = noShopSelected || noFunds;
               return (
                 <>
                   <button
@@ -571,7 +674,7 @@ const Index = () => {
                     <span className="relative z-10 text-base text-muted-foreground">{t('home.lanaPayment')}</span>
                   </button>
 
-                  {noFunds && !noShopSelected && !isSuspended && (
+                  {noFunds && !noShopSelected && (
                     <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
                       <p className="text-sm text-destructive text-center font-medium">{t('home.noFunds')}</p>
                     </div>
