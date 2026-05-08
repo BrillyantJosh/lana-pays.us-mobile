@@ -131,6 +131,43 @@ function BlockedStatusPanel({ unit }: { unit: BusinessUnit }) {
 }
 
 /**
+ * Compute the effective maximum amount the staff can charge on a single
+ * invoice for this unit. Three constraints all apply, the smallest wins:
+ *
+ *   1. fund_limit / merchant_limit — already merged into maxTx.max_amount
+ *      by the /api/max-transaction endpoint (Direct Fund capacity etc.).
+ *   2. monthly volume quota remaining — only counted when the merchant's
+ *      currency matches the quota currency (cross-currency conversion is
+ *      left to brain).
+ *   3. monthly tx quota — if the next purchase would be tx N+1 and the
+ *      limit is N, the cap is 0 (staff cannot charge anything more this
+ *      period).
+ *
+ * Returns null when the underlying maxTx is unknown (still loading).
+ */
+function effectiveMaxInvoice(
+  unit: BusinessUnit,
+  maxTx: { max_amount: number | null } | null | undefined,
+): number | null {
+  if (!maxTx || maxTx.max_amount == null) return null;
+  let max = maxTx.max_amount;
+
+  // Tx count constraint: 0 if quota already used up
+  const txLimit = unit.quota_tx_limit ?? 0;
+  const txUsed = unit.quota_tx_used ?? 0;
+  if (txLimit > 0 && txUsed >= txLimit) return 0;
+
+  // Volume constraint: only if currency matches
+  const volLimit = unit.quota_volume_limit ?? 0;
+  const volUsed = unit.quota_volume_used ?? 0;
+  if (volLimit > 0 && (unit.quota_currency || unit.currency) === unit.currency) {
+    const remaining = Math.max(0, volLimit - volUsed);
+    if (remaining < max) max = remaining;
+  }
+  return max;
+}
+
+/**
  * Compact "Quota ▾" toggle button. Renders only the trigger; the expanded
  * MobileQuotaPanel is rendered separately by the parent so it can occupy
  * full card width (the button itself sits under the Max Invoice number).
@@ -196,7 +233,11 @@ const Index = () => {
   useEffect(() => {
     (window as any).__selectedUnitId = effectiveUnit?.unit_id || '';
     (window as any).__selectedUnit = effectiveUnit || null;
-    (window as any).__maxTransactionAmount = selectedMaxTx?.max_amount ?? null;
+    // Effective max already applies quota — payment tabs can rely on this
+    // single value for both the user-facing limit hint and the disable check.
+    (window as any).__maxTransactionAmount = effectiveUnit
+      ? effectiveMaxInvoice(effectiveUnit, selectedMaxTx)
+      : null;
   }, [effectiveUnit, selectedMaxTx]);
 
   // Whenever the polled list refreshes, swap our selected reference for the
@@ -383,15 +424,20 @@ const Index = () => {
                   </div>
                   {(() => {
                     const tx = maxTransactions[businessUnits[0].unit_id];
-                    if (!tx || tx.max_amount === null || tx.max_amount === undefined) return null;
+                    const eff = effectiveMaxInvoice(businessUnits[0], tx);
+                    if (eff === null) return null;
                     const sym = CURRENCY_SYMBOL[businessUnits[0].currency] || currencySymbol;
-                    const noFunds = tx.max_amount <= 0;
+                    const noFunds = eff <= 0;
+                    const cappedByQuota = tx && tx.max_amount != null && eff < tx.max_amount;
                     return (
                       <div className="shrink-0 text-right">
                         <p className="text-xs text-muted-foreground">{t('home.maxInvoice')}</p>
                         <p className={`text-2xl font-black leading-tight ${noFunds ? 'text-destructive' : 'text-primary'}`}>
-                          {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {sym}{eff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </p>
+                        {cappedByQuota && (
+                          <p className="text-[10px] text-muted-foreground">capped by quota</p>
+                        )}
                         <div className="flex justify-end">
                           <QuotaToggle
                             unit={businessUnits[0]}
@@ -470,15 +516,20 @@ const Index = () => {
                         </div>
                         {(() => {
                           const tx = maxTransactions[unit.unit_id];
-                          if (tx && tx.max_amount !== null && tx.max_amount !== undefined) {
+                          const eff = effectiveMaxInvoice(unit, tx);
+                          if (eff !== null) {
                             const sym = CURRENCY_SYMBOL[unit.currency] || currencySymbol;
-                            const noFunds = tx.max_amount <= 0;
+                            const noFunds = eff <= 0;
+                            const cappedByQuota = tx && tx.max_amount != null && eff < tx.max_amount;
                             return (
                               <div className="shrink-0 text-right">
                                 <p className="text-xs text-muted-foreground">{t('home.maxInvoice')}</p>
                                 <p className={`text-2xl font-black leading-tight ${noFunds ? 'text-destructive' : 'text-primary'}`}>
-                                  {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  {sym}{eff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
+                                {cappedByQuota && (
+                                  <p className="text-[10px] text-muted-foreground">capped by quota</p>
+                                )}
                               </div>
                             );
                           }
@@ -566,15 +617,20 @@ const Index = () => {
                       </div>
                       {(() => {
                         const tx = maxTransactions[selectedUnit.unit_id];
-                        if (!tx || tx.max_amount === null || tx.max_amount === undefined) return null;
+                        const eff = effectiveMaxInvoice(selectedUnit, tx);
+                        if (eff === null) return null;
                         const sym = CURRENCY_SYMBOL[selectedUnit.currency] || currencySymbol;
-                        const noFunds = tx.max_amount <= 0;
+                        const noFunds = eff <= 0;
+                        const cappedByQuota = tx && tx.max_amount != null && eff < tx.max_amount;
                         return (
                           <div className="shrink-0 text-right">
                             <p className="text-xs text-muted-foreground">{t('home.maxInvoice')}</p>
                             <p className={`text-2xl font-black leading-tight ${noFunds ? 'text-destructive' : 'text-primary'}`}>
-                              {sym}{tx.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {sym}{eff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
+                            {cappedByQuota && (
+                              <p className="text-[10px] text-muted-foreground">capped by quota</p>
+                            )}
                             <div className="flex justify-end">
                               <QuotaToggle
                                 unit={selectedUnit}
