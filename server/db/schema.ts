@@ -175,5 +175,20 @@ export function initializeSchema(db: Database.Database): void {
     console.log('Migrated: added max_tx_currency to fee_policies');
   }
 
+  // Migration: Merchant Registration Gateway quota columns on business_units.
+  // The existing suspension_status / suspension_reason columns hold the gateway
+  // status string (now extended to include pending|quota_warning_80|quota_blocked|rejected).
+  const buCols = db.pragma('table_info(business_units)') as any[];
+  const buColNames = buCols.map((c: any) => c.name);
+  if (!buColNames.includes('quota_volume_used')) {
+    db.exec(`ALTER TABLE business_units ADD COLUMN quota_volume_used REAL DEFAULT 0`);
+    db.exec(`ALTER TABLE business_units ADD COLUMN quota_volume_limit REAL DEFAULT 0`);
+    db.exec(`ALTER TABLE business_units ADD COLUMN quota_tx_used INTEGER DEFAULT 0`);
+    db.exec(`ALTER TABLE business_units ADD COLUMN quota_tx_limit INTEGER DEFAULT 0`);
+    db.exec(`ALTER TABLE business_units ADD COLUMN quota_currency TEXT DEFAULT ''`);
+    db.exec(`ALTER TABLE business_units ADD COLUMN quota_period TEXT DEFAULT ''`);
+    console.log('Migrated: added gateway quota columns to business_units');
+  }
+
   console.log('Database schema initialized');
 }

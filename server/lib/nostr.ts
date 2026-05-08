@@ -433,11 +433,22 @@ export interface Kind30903Event {
   event_id: string;
   pubkey: string;
   created_at: number;
-  status: string;        // "suspended" or "active"
+  status: string;        // pending|active|quota_warning_80|quota_blocked|suspended|rejected
   reason: string;
   content: string;
   active_until?: number; // unix timestamp, undefined = indefinite
+  // Merchant Registration Gateway quota fields (optional — older events may lack them)
+  quota_period?: string;        // YYYY-MM
+  quota_volume_used?: number;   // in merchant currency
+  quota_volume_limit?: number;
+  quota_tx_used?: number;
+  quota_tx_limit?: number;
+  quota_currency?: string;
 }
+
+const VALID_KIND30903_STATUSES = new Set([
+  'pending', 'active', 'quota_warning_80', 'quota_blocked', 'suspended', 'rejected',
+]);
 
 function parseKind30903Event(event: NostrEvent): Kind30903Event | null {
   const tags = event.tags;
@@ -447,18 +458,30 @@ function parseKind30903Event(event: NostrEvent): Kind30903Event | null {
   const status = getTag('status');
 
   if (!unit_id || !status) return null;
+  // Accept legacy values too, but tag known ones for downstream UI.
+  const knownStatus = VALID_KIND30903_STATUSES.has(status) ? status : status;
 
   const activeUntilStr = getTag('active_until');
+  const volUsed = getTag('quota_volume_used');
+  const volLimit = getTag('quota_volume_limit');
+  const txUsed = getTag('quota_tx_used');
+  const txLimit = getTag('quota_tx_limit');
 
   return {
     unit_id,
     event_id: event.id,
     pubkey: event.pubkey,
     created_at: event.created_at,
-    status,
+    status: knownStatus,
     reason: getTag('reason') || '',
     content: event.content || '',
     active_until: activeUntilStr ? parseInt(activeUntilStr) : undefined,
+    quota_period: getTag('quota_period'),
+    quota_volume_used: volUsed != null ? parseFloat(volUsed) : undefined,
+    quota_volume_limit: volLimit != null ? parseFloat(volLimit) : undefined,
+    quota_tx_used: txUsed != null ? parseInt(txUsed, 10) : undefined,
+    quota_tx_limit: txLimit != null ? parseInt(txLimit, 10) : undefined,
+    quota_currency: getTag('quota_currency'),
   };
 }
 

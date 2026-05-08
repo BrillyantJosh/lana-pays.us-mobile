@@ -26,10 +26,77 @@ interface BusinessUnit {
   status: string;
   receiver_city: string;
   lanapays_payout_method: string;
+  // suspension_status now carries the Merchant Registration Gateway status:
+  //   'pending' | 'active' | 'quota_warning_80' | 'quota_blocked' | 'suspended' | 'rejected'
   suspension_status: string;
   suspension_reason: string | null;
   suspension_until: number | null;
   suspension_content: string | null;
+  quota_volume_used?: number;
+  quota_volume_limit?: number;
+  quota_tx_used?: number;
+  quota_tx_limit?: number;
+  quota_currency?: string;
+  quota_period?: string;
+}
+
+/**
+ * The unit cannot accept new purchases.
+ * - 'pending'        → awaiting admin approval
+ * - 'quota_blocked'  → monthly limit reached, auto-resets 1st of next month
+ * - 'suspended'      → admin suspension
+ * - 'rejected'       → terminal rejection
+ */
+const BLOCKING_STATUSES = new Set(['pending', 'quota_blocked', 'suspended', 'rejected']);
+function isUnitBlocked(u: { suspension_status?: string | null }): boolean {
+  return BLOCKING_STATUSES.has(u.suspension_status || 'active');
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case 'pending': return 'Awaiting approval';
+    case 'quota_warning_80': return 'Approaching limit';
+    case 'quota_blocked': return 'Monthly limit reached';
+    case 'suspended': return 'Suspended';
+    case 'rejected': return 'Rejected';
+    default: return '';
+  }
+}
+
+function nextMonthLabel(): string {
+  const now = new Date();
+  const nm = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return nm.toLocaleDateString(undefined, { day: '2-digit', month: 'short' });
+}
+
+function statusBlurb(u: BusinessUnit): string {
+  switch (u.suspension_status) {
+    case 'pending': return 'Admin is reviewing this business unit. Payments are paused until approved.';
+    case 'quota_warning_80': return `Approaching monthly limit. Resets ${nextMonthLabel()}.`;
+    case 'quota_blocked': return `Monthly limit reached. Resumes ${nextMonthLabel()}.`;
+    case 'suspended': return u.suspension_reason || u.suspension_content || 'Suspended — contact admin.';
+    case 'rejected': return u.suspension_reason || u.suspension_content || 'Registration rejected — contact admin.';
+    default: return '';
+  }
+}
+
+/**
+ * Compact pill rendering the gateway status. Returns null for plain 'active'.
+ */
+function StatusPill({ status }: { status: string }) {
+  if (status === 'active' || !status) return null;
+  const cls =
+    status === 'pending' ? 'bg-amber-100 text-amber-800' :
+    status === 'quota_warning_80' ? 'bg-yellow-100 text-yellow-800' :
+    status === 'quota_blocked' ? 'bg-red-100 text-red-800' :
+    status === 'suspended' ? 'bg-gray-200 text-gray-800' :
+    status === 'rejected' ? 'bg-rose-100 text-rose-800' :
+    'bg-gray-100 text-gray-700';
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${cls}`}>
+      {statusLabel(status)}
+    </span>
+  );
 }
 
 /** Convert relative /api/uploads/ paths to absolute shop.lanapays.us URLs */
@@ -118,7 +185,7 @@ const Index = () => {
       const results: typeof maxTransactions = {};
       await Promise.all(
         businessUnits
-          .filter(u => u.suspension_status !== 'suspended')
+          .filter(u => !isUnitBlocked(u))
           .map(async (unit) => {
             try {
               const currency = unit.currency || session?.currency || 'EUR';
@@ -210,9 +277,11 @@ const Index = () => {
               </div>
             ) : businessUnits.length === 1 ? (
               <div className={`rounded-2xl border-2 p-4 flex flex-col gap-2 ${
-                businessUnits[0].suspension_status === 'suspended'
+                isUnitBlocked(businessUnits[0])
                   ? 'bg-destructive/5 border-destructive/20'
-                  : 'bg-primary/5 border-primary/20'
+                  : businessUnits[0].suspension_status === 'quota_warning_80'
+                    ? 'bg-yellow-50 border-yellow-300'
+                    : 'bg-primary/5 border-primary/20'
               }`}>
                 <div className="flex items-center gap-3">
                   {resolveImageUrl(businessUnits[0].image) ? (
@@ -223,7 +292,10 @@ const Index = () => {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{businessUnits[0].name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-foreground truncate">{businessUnits[0].name}</p>
+                      <StatusPill status={businessUnits[0].suspension_status} />
+                    </div>
                     <p className="text-xs text-muted-foreground flex items-center gap-1">
                       {businessUnits[0].receiver_city && <><MapPin className="w-3 h-3" />{businessUnits[0].receiver_city}</>}
                       {businessUnits[0].receiver_city && businessUnits[0].category && ' · '}
@@ -245,12 +317,22 @@ const Index = () => {
                     );
                   })()}
                 </div>
-                {businessUnits[0].suspension_status === 'suspended' && (
-                  <div className="flex items-start gap-2 rounded-xl bg-destructive/10 p-3">
-                    <ShieldAlert className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                {(isUnitBlocked(businessUnits[0]) || businessUnits[0].suspension_status === 'quota_warning_80') && (
+                  <div className={`flex items-start gap-2 rounded-xl p-3 ${
+                    isUnitBlocked(businessUnits[0]) ? 'bg-destructive/10' : 'bg-yellow-100'
+                  }`}>
+                    <ShieldAlert className={`w-4 h-4 shrink-0 mt-0.5 ${
+                      isUnitBlocked(businessUnits[0]) ? 'text-destructive' : 'text-yellow-700'
+                    }`} />
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold text-destructive">{t('home.suspended')}</p>
-                      <p className="text-xs text-destructive/80">{businessUnits[0].suspension_reason || businessUnits[0].suspension_content}</p>
+                      <p className={`text-xs font-semibold ${
+                        isUnitBlocked(businessUnits[0]) ? 'text-destructive' : 'text-yellow-800'
+                      }`}>
+                        {statusLabel(businessUnits[0].suspension_status)}
+                      </p>
+                      <p className={`text-xs ${
+                        isUnitBlocked(businessUnits[0]) ? 'text-destructive/80' : 'text-yellow-800/80'
+                      }`}>{statusBlurb(businessUnits[0])}</p>
                       {businessUnits[0].suspension_until && (
                         <p className="text-xs text-destructive/60 mt-1">{t('home.suspendedUntil', { date: new Date(businessUnits[0].suspension_until * 1000).toLocaleDateString() })}</p>
                       )}
@@ -266,14 +348,16 @@ const Index = () => {
                   {businessUnits.map(unit => (
                     <button
                       key={unit.unit_id}
-                      onClick={() => unit.suspension_status !== 'suspended' && setSelectedUnit(unit)}
-                      disabled={unit.suspension_status === 'suspended'}
+                      onClick={() => !isUnitBlocked(unit) && setSelectedUnit(unit)}
+                      disabled={isUnitBlocked(unit)}
                       className={`rounded-2xl border-2 p-4 flex flex-col gap-2 transition-all active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100 ${
-                        unit.suspension_status === 'suspended'
+                        isUnitBlocked(unit)
                           ? 'bg-destructive/5 border-destructive/20'
-                          : selectedUnit?.unit_id === unit.unit_id
-                            ? 'bg-primary/5 border-primary/30 shadow-md'
-                            : 'bg-card border-border hover:border-primary/20'
+                          : unit.suspension_status === 'quota_warning_80'
+                            ? 'bg-yellow-50 border-yellow-300'
+                            : selectedUnit?.unit_id === unit.unit_id
+                              ? 'bg-primary/5 border-primary/30 shadow-md'
+                              : 'bg-card border-border hover:border-primary/20'
                       }`}
                     >
                       <div className="flex items-center gap-3 w-full">
@@ -285,7 +369,10 @@ const Index = () => {
                           </div>
                         )}
                         <div className="flex-1 min-w-0 text-left">
-                          <p className="text-sm font-semibold text-foreground truncate">{unit.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-semibold text-foreground truncate">{unit.name}</p>
+                            <StatusPill status={unit.suspension_status} />
+                          </div>
                           <p className="text-xs text-muted-foreground flex items-center gap-1">
                             {unit.receiver_city && <><MapPin className="w-3 h-3" />{unit.receiver_city}</>}
                             {unit.receiver_city && unit.category && ' · '}
@@ -306,7 +393,7 @@ const Index = () => {
                               </div>
                             );
                           }
-                          if (unit.suspension_status !== 'suspended' && selectedUnit?.unit_id === unit.unit_id) {
+                          if (!isUnitBlocked(unit) && selectedUnit?.unit_id === unit.unit_id) {
                             return (
                               <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0">
                                 <div className="w-2 h-2 rounded-full bg-white" />
@@ -316,12 +403,20 @@ const Index = () => {
                           return null;
                         })()}
                       </div>
-                      {unit.suspension_status === 'suspended' && (
-                        <div className="flex items-start gap-2 rounded-xl bg-destructive/10 p-3 w-full">
-                          <ShieldAlert className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                      {(isUnitBlocked(unit) || unit.suspension_status === 'quota_warning_80') && (
+                        <div className={`flex items-start gap-2 rounded-xl p-3 w-full ${
+                          isUnitBlocked(unit) ? 'bg-destructive/10' : 'bg-yellow-100'
+                        }`}>
+                          <ShieldAlert className={`w-4 h-4 shrink-0 mt-0.5 ${
+                            isUnitBlocked(unit) ? 'text-destructive' : 'text-yellow-700'
+                          }`} />
                           <div className="min-w-0 text-left">
-                            <p className="text-xs font-semibold text-destructive">{t('home.suspended')}</p>
-                            <p className="text-xs text-destructive/80">{unit.suspension_reason || unit.suspension_content}</p>
+                            <p className={`text-xs font-semibold ${
+                              isUnitBlocked(unit) ? 'text-destructive' : 'text-yellow-800'
+                            }`}>{statusLabel(unit.suspension_status)}</p>
+                            <p className={`text-xs ${
+                              isUnitBlocked(unit) ? 'text-destructive/80' : 'text-yellow-800/80'
+                            }`}>{statusBlurb(unit)}</p>
                             {unit.suspension_until && (
                               <p className="text-xs text-destructive/60 mt-1">{t('home.suspendedUntil', { date: new Date(unit.suspension_until * 1000).toLocaleDateString() })}</p>
                             )}
@@ -340,9 +435,11 @@ const Index = () => {
                 {/* Selected unit card (or prompt to select) */}
                 {selectedUnit ? (
                   <div className={`rounded-2xl border-2 p-4 flex flex-col gap-2 ${
-                    selectedUnit.suspension_status === 'suspended'
+                    isUnitBlocked(selectedUnit)
                       ? 'bg-destructive/5 border-destructive/20'
-                      : 'bg-primary/5 border-primary/20'
+                      : selectedUnit.suspension_status === 'quota_warning_80'
+                        ? 'bg-yellow-50 border-yellow-300'
+                        : 'bg-primary/5 border-primary/20'
                   }`}>
                     <div className="flex items-center gap-3">
                       {resolveImageUrl(selectedUnit.image) ? (
@@ -353,7 +450,10 @@ const Index = () => {
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-foreground truncate">{selectedUnit.name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-foreground truncate">{selectedUnit.name}</p>
+                          <StatusPill status={selectedUnit.suspension_status} />
+                        </div>
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
                           {selectedUnit.receiver_city && <><MapPin className="w-3 h-3" />{selectedUnit.receiver_city}</>}
                           {selectedUnit.receiver_city && selectedUnit.category && ' · '}
@@ -375,12 +475,20 @@ const Index = () => {
                         );
                       })()}
                     </div>
-                    {selectedUnit.suspension_status === 'suspended' && (
-                      <div className="flex items-start gap-2 rounded-xl bg-destructive/10 p-3">
-                        <ShieldAlert className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                    {(isUnitBlocked(selectedUnit) || selectedUnit.suspension_status === 'quota_warning_80') && (
+                      <div className={`flex items-start gap-2 rounded-xl p-3 ${
+                        isUnitBlocked(selectedUnit) ? 'bg-destructive/10' : 'bg-yellow-100'
+                      }`}>
+                        <ShieldAlert className={`w-4 h-4 shrink-0 mt-0.5 ${
+                          isUnitBlocked(selectedUnit) ? 'text-destructive' : 'text-yellow-700'
+                        }`} />
                         <div className="min-w-0">
-                          <p className="text-xs font-semibold text-destructive">{t('home.suspended')}</p>
-                          <p className="text-xs text-destructive/80">{selectedUnit.suspension_reason || selectedUnit.suspension_content}</p>
+                          <p className={`text-xs font-semibold ${
+                            isUnitBlocked(selectedUnit) ? 'text-destructive' : 'text-yellow-800'
+                          }`}>{statusLabel(selectedUnit.suspension_status)}</p>
+                          <p className={`text-xs ${
+                            isUnitBlocked(selectedUnit) ? 'text-destructive/80' : 'text-yellow-800/80'
+                          }`}>{statusBlurb(selectedUnit)}</p>
                         </div>
                       </div>
                     )}
@@ -392,21 +500,25 @@ const Index = () => {
                   value={selectedUnit?.unit_id || ''}
                   onChange={(e) => {
                     const unit = businessUnits.find(u => u.unit_id === e.target.value);
-                    if (unit && unit.suspension_status !== 'suspended') setSelectedUnit(unit);
+                    if (unit && !isUnitBlocked(unit)) setSelectedUnit(unit);
                   }}
                   className="w-full h-14 rounded-2xl border-2 border-border bg-card px-4 text-base font-semibold text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                   style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '24px', paddingRight: '44px' }}
                 >
                   <option value="">{t('home.selectShop')}...</option>
-                  {businessUnits.map(unit => (
-                    <option
-                      key={unit.unit_id}
-                      value={unit.unit_id}
-                      disabled={unit.suspension_status === 'suspended'}
-                    >
-                      {unit.name}{unit.suspension_status === 'suspended' ? ` (${t('home.suspended')})` : ''}{unit.receiver_city ? ` — ${unit.receiver_city}` : ''}
-                    </option>
-                  ))}
+                  {businessUnits.map(unit => {
+                    const blocked = isUnitBlocked(unit);
+                    const label = statusLabel(unit.suspension_status);
+                    return (
+                      <option
+                        key={unit.unit_id}
+                        value={unit.unit_id}
+                        disabled={blocked}
+                      >
+                        {unit.name}{blocked && label ? ` (${label})` : ''}{unit.receiver_city ? ` — ${unit.receiver_city}` : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             )}
@@ -414,7 +526,7 @@ const Index = () => {
             {/* ─── Payment buttons ─── */}
             {(() => {
               const noShopSelected = (businessUnits.length > 1 && !selectedUnit);
-              const isSuspended = (selectedUnit?.suspension_status === 'suspended') || (businessUnits.length === 1 && businessUnits[0]?.suspension_status === 'suspended');
+              const isSuspended = (selectedUnit ? isUnitBlocked(selectedUnit) : false) || (businessUnits.length === 1 && isUnitBlocked(businessUnits[0]));
               const noFunds = selectedMaxTx !== null && selectedMaxTx !== undefined && (selectedMaxTx.max_amount === null || selectedMaxTx.max_amount === undefined || selectedMaxTx.max_amount <= 0);
               const payDisabled = noShopSelected || isSuspended || noFunds;
               return (
@@ -563,7 +675,7 @@ const Index = () => {
               <EditProfile />
             )}
             {activeView === "regulars" && (
-              <RegularCustomersTab unitId={effectiveUnit?.unit_id} staffHexId={session?.nostrHexId} businessUnits={businessUnits.filter(u => u.suspension_status !== 'suspended')} />
+              <RegularCustomersTab unitId={effectiveUnit?.unit_id} staffHexId={session?.nostrHexId} businessUnits={businessUnits.filter(u => !isUnitBlocked(u))} />
             )}
             {activeView === "register" && (
               <RegisterCustomerTab unitCurrency={effectiveUnit?.currency} />

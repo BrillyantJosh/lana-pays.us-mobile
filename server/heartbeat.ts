@@ -131,12 +131,25 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
       console.log(`KIND 30901: upserted ${businessUnits.length} business units`);
     }
 
-    // Fetch KIND 30903 suspensions and apply to business units
+    // Fetch KIND 30903 — Merchant Registration Gateway status & quota
     const suspensions = await fetchKind30903(systemParams.relays);
     const now = Math.floor(Date.now() / 1000);
 
-    // Reset all suspension_status to 'active' first, then apply current suspensions
-    db.prepare(`UPDATE business_units SET suspension_status = 'active', suspension_reason = NULL, suspension_until = NULL, suspension_content = NULL`).run();
+    // Reset gateway state to 'active' baseline; events below override per unit.
+    // Units with no KIND 30903 stay 'active' (legacy / pre-gateway merchants).
+    db.prepare(`UPDATE business_units SET
+      suspension_status = 'active',
+      suspension_reason = NULL,
+      suspension_until = NULL,
+      suspension_content = NULL,
+      quota_volume_used = 0,
+      quota_volume_limit = 0,
+      quota_tx_used = 0,
+      quota_tx_limit = 0,
+      quota_currency = '',
+      quota_period = ''`).run();
+
+    const NEW_STATUSES = new Set(['pending', 'active', 'quota_warning_80', 'quota_blocked', 'suspended', 'rejected']);
 
     for (const s of suspensions) {
       // Only apply if the unit exists in our DB
@@ -145,21 +158,42 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
 
       let effectiveStatus = s.status;
       if (s.status === 'suspended' && s.active_until && s.active_until < now) {
-        // Suspension expired — unit is active again
+        // Legacy time-bound suspension expired — unit is active again
         effectiveStatus = 'active';
       }
 
-      if (effectiveStatus === 'suspended') {
-        db.prepare(`
-          UPDATE business_units SET
-            suspension_status = 'suspended',
-            suspension_reason = ?,
-            suspension_until = ?,
-            suspension_content = ?
-          WHERE unit_id = ?
-        `).run(s.reason, s.active_until || null, s.content, s.unit_id);
+      // Persist gateway status (overloaded onto suspension_status column) + quota fields.
+      const knownStatus = NEW_STATUSES.has(effectiveStatus) ? effectiveStatus : 'active';
 
-        console.log(`KIND 30903: suspended unit ${s.unit_id.slice(0, 12)}... reason: ${s.reason.slice(0, 50)}`);
+      db.prepare(`
+        UPDATE business_units SET
+          suspension_status = ?,
+          suspension_reason = ?,
+          suspension_until = ?,
+          suspension_content = ?,
+          quota_volume_used = ?,
+          quota_volume_limit = ?,
+          quota_tx_used = ?,
+          quota_tx_limit = ?,
+          quota_currency = ?,
+          quota_period = ?
+        WHERE unit_id = ?
+      `).run(
+        knownStatus,
+        s.reason,
+        s.active_until || null,
+        s.content,
+        s.quota_volume_used ?? 0,
+        s.quota_volume_limit ?? 0,
+        s.quota_tx_used ?? 0,
+        s.quota_tx_limit ?? 0,
+        s.quota_currency ?? '',
+        s.quota_period ?? '',
+        s.unit_id,
+      );
+
+      if (knownStatus !== 'active') {
+        console.log(`KIND 30903: ${knownStatus} unit ${s.unit_id.slice(0, 12)}… reason: ${s.reason.slice(0, 50)}`);
       }
     }
 

@@ -387,12 +387,17 @@ app.get('/api/users/by-wallet/:address', (req, res) => {
 app.get('/api/business-units/:hexId', (req, res) => {
   const { hexId } = req.params;
 
-  // Query units where owner_hex matches OR hexId is in the authorized_hex JSON array
+  // Query units where owner_hex matches OR hexId is in the authorized_hex JSON array.
+  // suspension_status now carries the Merchant Registration Gateway status:
+  //   pending|active|quota_warning_80|quota_blocked|suspended|rejected
+  // Quota fields are populated from KIND 30903 by the heartbeat.
   const units = db.prepare(`
     SELECT unit_id, name, owner_hex, authorized_hex, category, category_detail,
            currency, country, image, logo, status, receiver_city,
            lanapays_payout_method, suspension_status, suspension_reason,
-           suspension_until, suspension_content, updated_at
+           suspension_until, suspension_content,
+           quota_volume_used, quota_volume_limit, quota_tx_used, quota_tx_limit,
+           quota_currency, quota_period, updated_at
     FROM business_units
     WHERE status = 'active'
       AND (owner_hex = ? OR authorized_hex LIKE ?)
