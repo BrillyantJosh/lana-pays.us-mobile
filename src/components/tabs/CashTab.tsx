@@ -567,11 +567,11 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           </div>
         )}
         {!isAnalyzing && analysisDescription && receiptPreview && (
-          <div className={`rounded-2xl p-3 border ${receiptType === 'receipt' ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/10' : 'bg-amber-50 dark:bg-amber-500/5 border-amber-200 dark:border-amber-500/10'}`}>
-            <p className={`text-xs font-medium ${receiptType === 'receipt' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}`}>
+          <div className={`rounded-2xl p-4 border ${receiptType === 'receipt' ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/10' : 'bg-amber-50 dark:bg-amber-500/5 border-amber-200 dark:border-amber-500/10'}`}>
+            <p className={`text-sm font-semibold ${receiptType === 'receipt' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}`}>
               {receiptType === 'receipt' ? t('cash.receiptDetected') : t('cash.photoNotReceipt')}
             </p>
-            <p className="text-xs text-muted-foreground mt-1">{analysisDescription}</p>
+            <p className="text-sm text-foreground/85 mt-1.5 leading-relaxed whitespace-pre-wrap break-words">{analysisDescription}</p>
           </div>
         )}
         <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptFile(f); }} className="hidden" />
