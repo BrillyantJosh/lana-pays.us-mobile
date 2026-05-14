@@ -14,6 +14,12 @@ import { getDb, closeDb } from './db/connection.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, electrumCall, type ElectrumServer } from './lib/electrum.js';
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
+import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js';
+
+const LANA_RELAYS = [
+  'wss://relay.lanavault.space',
+  'wss://relay.lanacoin-eternity.com',
+];
 import rateLimit from 'express-rate-limit';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -639,6 +645,94 @@ app.post('/api/broadcast-event', async (req, res) => {
   } catch (error: any) {
     console.error('Broadcast failed:', error.message);
     res.status(500).json({ error: 'Failed to broadcast event' });
+  }
+});
+
+// ─── Caretaker info ───────────────────────────────────────────────
+/**
+ * GET /api/caretaker/:unitId
+ * Returns the caretaker for a business unit (from KIND 30902 fee policy)
+ * plus the caretaker's KIND 0 profile (name, picture, contact info, …).
+ * If no caretaker is set or the profile isn't fetchable, returns 404.
+ */
+app.get('/api/caretaker/:unitId', async (req, res) => {
+  const { unitId } = req.params;
+  if (!unitId) return res.status(400).json({ error: 'unit_id is required' });
+
+  const policy = db.prepare(
+    'SELECT caretaker_hex, caretaker_wallet FROM fee_policies WHERE unit_id = ?'
+  ).get(unitId) as { caretaker_hex?: string; caretaker_wallet?: string } | undefined;
+
+  if (!policy?.caretaker_hex) {
+    return res.status(404).json({ error: 'No caretaker assigned to this unit' });
+  }
+
+  try {
+    const profile = await fetchKind0Full(policy.caretaker_hex);
+    res.json({
+      hex: policy.caretaker_hex,
+      wallet: policy.caretaker_wallet || null,
+      profile: profile?.content ?? null,
+      profileFetchedAt: profile?.created_at ?? null,
+    });
+  } catch (error: any) {
+    console.error(`Caretaker KIND 0 lookup failed for ${policy.caretaker_hex}:`, error.message);
+    res.json({
+      hex: policy.caretaker_hex,
+      wallet: policy.caretaker_wallet || null,
+      profile: null,
+      profileFetchedAt: null,
+    });
+  }
+});
+
+// ─── NIP-04 Direct Messages ───────────────────────────────────────
+/**
+ * POST /api/dm/fetch
+ * Body: { userPubkey, since? }
+ * Returns sent + received KIND 4 events for the user across all relays.
+ */
+app.post('/api/dm/fetch', async (req, res) => {
+  try {
+    const { userPubkey, since } = req.body;
+    if (!userPubkey || typeof userPubkey !== 'string' || !/^[0-9a-f]{64}$/i.test(userPubkey)) {
+      return res.status(400).json({ success: false, error: 'Valid userPubkey required', events: [] });
+    }
+
+    const relayRow = db.prepare('SELECT relays FROM kind_38888 ORDER BY id DESC LIMIT 1').get() as any;
+    const relays: string[] = relayRow?.relays ? JSON.parse(relayRow.relays) : LANA_RELAYS;
+    const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
+    const sinceTs = typeof since === 'number' && since > 0 ? since : thirtyDaysAgo;
+    const isPolling = typeof since === 'number' && since > Math.floor(Date.now() / 1000) - 300;
+
+    const events = await fetchDmEvents(relays, userPubkey, sinceTs, isPolling);
+    res.json({ success: true, events });
+  } catch (error: any) {
+    console.error('DM fetch error:', error.message);
+    res.status(500).json({ success: false, error: error.message, events: [] });
+  }
+});
+
+/**
+ * POST /api/dm/publish
+ * Body: { event } — signed KIND 4 ciphertext event (encrypted in the browser)
+ */
+app.post('/api/dm/publish', async (req, res) => {
+  try {
+    const { event } = req.body;
+    if (!event?.id || !event?.sig || !event?.pubkey || event.kind !== 4) {
+      return res.status(400).json({ success: false, error: 'Signed KIND 4 event required' });
+    }
+
+    const relayRow = db.prepare('SELECT relays FROM kind_38888 ORDER BY id DESC LIMIT 1').get() as any;
+    const relays: string[] = relayRow?.relays ? JSON.parse(relayRow.relays) : LANA_RELAYS;
+
+    const okCount = await publishDmToRelays(relays, event);
+    console.log(`DM: published to ${okCount}/${relays.length} relays`);
+    res.json({ success: okCount > 0, publishedTo: okCount });
+  } catch (error: any) {
+    console.error('DM publish error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

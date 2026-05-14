@@ -402,5 +402,22 @@
   "registerCustomer.registrationFailed": "Registracija denarnice ni uspela",
   "registerCustomer.doneTitle": "Registrirano!",
   "registerCustomer.doneSubtitle": "{{name}} ima zdaj aktivno denarnico in jo lahko uporablja.",
-  "registerCustomer.registerAnother": "Registriraj še eno denarnico"
+  "registerCustomer.registerAnother": "Registriraj še eno denarnico",
+  "menu.caretaker": "Skrbnik",
+  "home.contactCaretaker": "Potrebuješ pomoč? Stopi v stik s svojim skrbnikom",
+  "caretaker.pageTitle": "Skrbnik",
+  "caretaker.pageSubtitle": "Pokliči osebo, ki skrbi za posamezno trgovino",
+  "caretaker.loading": "Iščem skrbnika…",
+  "caretaker.notAssigned": "Za to trgovino skrbnik še ni dodeljen.",
+  "caretaker.noShops": "Še nimaš trgovin.",
+  "caretaker.messageButton": "Pošlji šifrirano sporočilo",
+  "caretaker.emailButton": "E-pošta",
+  "caretaker.callButton": "Pokliči",
+  "caretaker.webButton": "Spletna stran",
+  "caretaker.copyHex": "Kopiraj Nostr hex ID",
+  "caretaker.chat.placeholder": "Napiši sporočilo…",
+  "caretaker.chat.empty": "Še ni sporočil. Začni pogovor.",
+  "caretaker.chat.encryptedNote": "Konec-do-konca šifrirano prek Nostr NIP-04",
+  "caretaker.chat.loadFailed": "Sporočil ni bilo mogoče naložiti.",
+  "caretaker.chat.sendFailed": "Sporočila ni bilo mogoče poslati. Poskusi znova."
 }

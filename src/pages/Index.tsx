@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from 'react-i18next';
-import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import MenuDrawer from "@/components/MenuDrawer";
 import CashTab from "@/components/tabs/CashTab";
@@ -9,6 +9,7 @@ import LanaTab from "@/components/tabs/LanaTab";
 import EditProfile from "@/components/EditProfile";
 import RegularCustomersTab from "@/components/tabs/RegularCustomersTab";
 import RegisterCustomerTab from "@/components/tabs/RegisterCustomerTab";
+import CaretakerTab from "@/components/tabs/CaretakerTab";
 import MobileQuotaPanel from "@/components/MobileQuotaPanel";
 import { useAuth } from "@/contexts/AuthContext";
 import lanaIcon from "@/assets/lana-icon.png";
@@ -201,7 +202,7 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
-type View = "home" | "cash" | "wallets" | "lana" | "profile" | "regulars" | "register";
+type View = "home" | "cash" | "wallets" | "lana" | "profile" | "regulars" | "register" | "caretaker";
 
 const Index = () => {
   const { t } = useTranslation();
@@ -366,10 +367,28 @@ const Index = () => {
     setActiveView("register");
   };
 
+  // When opening Caretaker from a specific shop card we pre-select that unit
+  // so the chat opens directly with the right caretaker; from the menu we
+  // open the list and the seller picks.
+  const [caretakerInitialUnit, setCaretakerInitialUnit] = useState<string | null>(null);
+  const handleOpenCaretaker = (unitId: string | null = null) => {
+    setCaretakerInitialUnit(unitId);
+    setSelectedWallet(null);
+    setLanaPaymentRequest(null);
+    setActiveView("caretaker");
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <TopBar onMenuOpen={() => setMenuOpen(true)} />
-      <MenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} onEditProfile={handleEditProfile} onRegularCustomers={handleRegularCustomers} onRegisterCustomer={handleRegisterCustomer} />
+      <MenuDrawer
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onEditProfile={handleEditProfile}
+        onRegularCustomers={handleRegularCustomers}
+        onRegisterCustomer={handleRegisterCustomer}
+        onCaretaker={() => handleOpenCaretaker(null)}
+      />
 
       <main className="pt-14">
         {/* ─── Home: two big buttons ─── */}
@@ -693,6 +712,20 @@ const Index = () => {
               </div>
             )}
 
+            {/* ─── Need help? Contact caretaker for the active shop ─── */}
+            {effectiveUnit && (
+              <button
+                onClick={() => handleOpenCaretaker(effectiveUnit.unit_id)}
+                className="w-full rounded-2xl border border-primary/20 bg-primary/5 hover:bg-primary/10 transition-colors px-4 py-2.5 flex items-center gap-2 text-left active:scale-[0.98]"
+              >
+                <UserCog className="w-4 h-4 text-primary shrink-0" />
+                <span className="text-xs text-foreground flex-1 truncate">
+                  {t('home.contactCaretaker')}
+                </span>
+                <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+              </button>
+            )}
+
             {/* ─── Payment buttons OR blocked-status panel ─── */}
             {(() => {
               const noShopSelected = (businessUnits.length > 1 && !selectedUnit);
@@ -857,6 +890,13 @@ const Index = () => {
             )}
             {activeView === "register" && (
               <RegisterCustomerTab unitCurrency={effectiveUnit?.currency} />
+            )}
+            {activeView === "caretaker" && (
+              <CaretakerTab
+                businessUnits={businessUnits}
+                initialUnitId={caretakerInitialUnit}
+                onBack={goHome}
+              />
             )}
           </div>
         )}

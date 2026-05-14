@@ -402,5 +402,22 @@
   "registerCustomer.registrationFailed": "Wallet registration failed",
   "registerCustomer.doneTitle": "Registered!",
   "registerCustomer.doneSubtitle": "{{name}}'s wallet is now active and ready to use.",
-  "registerCustomer.registerAnother": "Register Another Wallet"
+  "registerCustomer.registerAnother": "Register Another Wallet",
+  "menu.caretaker": "Caretaker",
+  "home.contactCaretaker": "Need help? Contact your caretaker",
+  "caretaker.pageTitle": "Caretaker",
+  "caretaker.pageSubtitle": "Reach the person who looks after each of your shops",
+  "caretaker.loading": "Looking up caretaker…",
+  "caretaker.notAssigned": "No caretaker is assigned to this shop yet.",
+  "caretaker.noShops": "You don’t have any shops yet.",
+  "caretaker.messageButton": "Send encrypted message",
+  "caretaker.emailButton": "Email",
+  "caretaker.callButton": "Call",
+  "caretaker.webButton": "Website",
+  "caretaker.copyHex": "Copy Nostr hex id",
+  "caretaker.chat.placeholder": "Type a message…",
+  "caretaker.chat.empty": "No messages yet. Start the conversation.",
+  "caretaker.chat.encryptedNote": "End-to-end encrypted via Nostr NIP-04",
+  "caretaker.chat.loadFailed": "Failed to load messages.",
+  "caretaker.chat.sendFailed": "Message couldn’t be sent. Try again."
 }
