@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft, MessageCircle, Phone, Mail, Globe, MapPin, Store, ShieldCheck,
-  Loader2, UserCog, Copy, Check, AlertCircle,
+  Loader2, UserCog, Copy, Check, AlertCircle, ShieldAlert,
 } from 'lucide-react';
 import { CaretakerChat } from '@/components/CaretakerChat';
 
@@ -18,7 +18,22 @@ interface BusinessUnit {
   receiver_city: string;
   category: string;
   currency: string;
+  // Merchant Registration Gateway status:
+  //   'active' | 'pending' | 'quota_warning_80' | 'quota_blocked' | 'suspended' | 'rejected'
+  suspension_status?: string;
+  suspension_until?: number | null;
 }
+
+const BLOCKING = new Set(['pending', 'quota_blocked', 'suspended', 'rejected']);
+function isBlocked(status?: string): boolean { return BLOCKING.has(status || 'active'); }
+
+const STATUS_TONE: Record<string, { cls: string; label: string }> = {
+  pending:           { cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',         label: 'Pending' },
+  quota_blocked:     { cls: 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400',     label: 'Quota blocked' },
+  quota_warning_80:  { cls: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-500/15 dark:text-yellow-400',     label: '80% quota' },
+  suspended:         { cls: 'bg-destructive/10 text-destructive',                                            label: 'Suspended' },
+  rejected:          { cls: 'bg-destructive/10 text-destructive',                                            label: 'Rejected' },
+};
 
 interface CaretakerProfile {
   name?: string;
@@ -142,19 +157,28 @@ const CaretakerTab = ({ businessUnits, initialUnitId, onBack }: CaretakerTabProp
       ) : (
         businessUnits.map(unit => {
           const entry = data[unit.unit_id];
+          const tone = STATUS_TONE[unit.suspension_status || ''];
+          const blocked = isBlocked(unit.suspension_status);
           return (
-            <div key={unit.unit_id} className="rounded-2xl border border-border bg-card overflow-hidden">
+            <div key={unit.unit_id} className={`rounded-2xl border bg-card overflow-hidden ${blocked ? 'border-destructive/20' : 'border-border'}`}>
               {/* Unit header */}
               <div className="px-4 py-3 border-b border-border bg-secondary/30 flex items-center gap-3">
                 {resolveImageUrl(unit.image) ? (
-                  <img src={resolveImageUrl(unit.image)!} alt="" className="w-9 h-9 rounded-xl object-cover shrink-0" />
+                  <img src={resolveImageUrl(unit.image)!} alt="" className={`w-9 h-9 rounded-xl object-cover shrink-0 ${blocked ? 'grayscale opacity-70' : ''}`} />
                 ) : (
                   <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
                     <Store className="w-4 h-4 text-primary" />
                   </div>
                 )}
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-foreground truncate">{unit.name}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-semibold text-foreground truncate">{unit.name}</p>
+                    {tone && (
+                      <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${tone.cls}`}>
+                        {tone.label}
+                      </span>
+                    )}
+                  </div>
                   {unit.receiver_city && (
                     <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <MapPin className="w-3 h-3" /> {unit.receiver_city}
@@ -162,6 +186,16 @@ const CaretakerTab = ({ businessUnits, initialUnitId, onBack }: CaretakerTabProp
                   )}
                 </div>
               </div>
+
+              {/* Blocked notice — sits above caretaker info so seller sees status reason first */}
+              {blocked && (
+                <div className="px-4 py-2.5 bg-destructive/5 border-b border-destructive/10 flex items-start gap-2">
+                  <ShieldAlert className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                  <p className="text-xs text-destructive/90">
+                    {t('caretaker.blockedHint', { status: tone?.label || unit.suspension_status })}
+                  </p>
+                </div>
+              )}
 
               {/* Caretaker body */}
               <div className="p-4">

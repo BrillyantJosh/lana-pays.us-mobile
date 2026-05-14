@@ -420,5 +420,6 @@
   "caretaker.chat.encryptedNote": "End-to-end encrypted via Nostr NIP-04",
   "caretaker.chat.loadFailed": "Failed to load messages.",
   "caretaker.chat.sendFailed": "Message couldn’t be sent. Try again.",
-  "menu.home": "Home"
+  "menu.home": "Home",
+  "caretaker.blockedHint": "This shop is not active right now ({{status}}). You can still reach the caretaker below to ask about it."
 }

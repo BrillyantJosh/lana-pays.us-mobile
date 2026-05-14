@@ -90,10 +90,16 @@ export function CaretakerChat({ recipientHex, recipientName, recipientPicture, o
     }
   }, [session, decryptEvents, t]);
 
-  // Initial load
+  // Initial load — server default is 30 days; we explicitly ask further
+  // back so old caretaker threads show up immediately on first open.
   useEffect(() => {
     setIsLoading(true);
-    fetchMessages().finally(() => setIsLoading(false));
+    const ninetyDaysAgo = Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60;
+    // Seed the polling cursor so the interval starts firing even when the
+    // initial load returns zero messages (previously the poll was gated on
+    // latestTimestampRef > 0 and would never fire for a brand-new thread).
+    latestTimestampRef.current = ninetyDaysAgo;
+    fetchMessages(ninetyDaysAgo).finally(() => setIsLoading(false));
   }, [fetchMessages]);
 
   // Scroll to bottom on new messages
@@ -101,7 +107,7 @@ export function CaretakerChat({ recipientHex, recipientName, recipientPicture, o
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Poll for new messages every 10 s, asking for events ≥ latest - 5 s
+  // Poll every 10 s for new messages — since cursor is always set
   useEffect(() => {
     pollRef.current = setInterval(() => {
       if (latestTimestampRef.current > 0) fetchMessages(latestTimestampRef.current - 5);

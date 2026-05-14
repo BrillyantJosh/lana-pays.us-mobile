@@ -894,7 +894,7 @@ const Index = () => {
             )}
             {activeView === "caretaker" && (
               <CaretakerTab
-                businessUnits={businessUnits.filter(u => !isUnitBlocked(u))}
+                businessUnits={businessUnits}
                 initialUnitId={caretakerInitialUnit}
                 onBack={goHome}
               />

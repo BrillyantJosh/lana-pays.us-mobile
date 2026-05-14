@@ -699,14 +699,20 @@ app.post('/api/dm/fetch', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Valid userPubkey required', events: [] });
     }
 
+    // Strict: only the relays advertised in the latest KIND 38888 are queried.
+    // LANA_RELAYS is the seed used solely on a fresh DB before the first heartbeat.
     const relayRow = db.prepare('SELECT relays FROM kind_38888 ORDER BY id DESC LIMIT 1').get() as any;
     const relays: string[] = relayRow?.relays ? JSON.parse(relayRow.relays) : LANA_RELAYS;
+    if (!relays.length) {
+      return res.status(503).json({ success: false, error: 'No relays known yet (KIND 38888 not seeded)', events: [] });
+    }
+
     const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
     const sinceTs = typeof since === 'number' && since > 0 ? since : thirtyDaysAgo;
     const isPolling = typeof since === 'number' && since > Math.floor(Date.now() / 1000) - 300;
 
     const events = await fetchDmEvents(relays, userPubkey, sinceTs, isPolling);
-    res.json({ success: true, events });
+    res.json({ success: true, events, relayCount: relays.length });
   } catch (error: any) {
     console.error('DM fetch error:', error.message);
     res.status(500).json({ success: false, error: error.message, events: [] });
@@ -724,12 +730,18 @@ app.post('/api/dm/publish', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Signed KIND 4 event required' });
     }
 
+    // Strict: publish only to relays advertised in the latest KIND 38888.
+    // No third-party fallback — if the system is configured, we use the
+    // configured set; otherwise we refuse rather than leak to unknown relays.
     const relayRow = db.prepare('SELECT relays FROM kind_38888 ORDER BY id DESC LIMIT 1').get() as any;
-    const relays: string[] = relayRow?.relays ? JSON.parse(relayRow.relays) : LANA_RELAYS;
+    const relays: string[] = relayRow?.relays ? JSON.parse(relayRow.relays) : [];
+    if (!relays.length) {
+      return res.status(503).json({ success: false, error: 'No relays configured (KIND 38888 not seeded yet)' });
+    }
 
     const okCount = await publishDmToRelays(relays, event);
-    console.log(`DM: published to ${okCount}/${relays.length} relays`);
-    res.json({ success: okCount > 0, publishedTo: okCount });
+    console.log(`DM: published KIND 4 to ${okCount}/${relays.length} KIND-38888 relays`);
+    res.json({ success: okCount > 0, publishedTo: okCount, totalRelays: relays.length });
   } catch (error: any) {
     console.error('DM publish error:', error.message);
     res.status(500).json({ success: false, error: error.message });
