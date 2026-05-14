@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  ArrowLeft, MessageCircle, Phone, Mail, Globe, MapPin, Store, ShieldCheck,
+  MessageCircle, Phone, Mail, Globe, MapPin, Store, ShieldCheck,
   Loader2, UserCog, Copy, Check, AlertCircle, ShieldAlert,
 } from 'lucide-react';
 import { CaretakerChat } from '@/components/CaretakerChat';
@@ -58,7 +58,6 @@ interface CaretakerInfo {
 interface CaretakerTabProps {
   businessUnits: BusinessUnit[];
   initialUnitId?: string | null;
-  onBack: () => void;
 }
 
 function resolveImageUrl(url: string | null | undefined): string | null {
@@ -68,7 +67,7 @@ function resolveImageUrl(url: string | null | undefined): string | null {
   return url;
 }
 
-const CaretakerTab = ({ businessUnits, initialUnitId, onBack }: CaretakerTabProps) => {
+const CaretakerTab = ({ businessUnits, initialUnitId }: CaretakerTabProps) => {
   const { t } = useTranslation();
   const [data, setData]   = useState<Record<string, CaretakerInfo | 'missing' | 'loading'>>({});
   const [chatFor, setChatFor] = useState<{ hex: string; name: string; picture?: string | null } | null>(null);
@@ -133,12 +132,7 @@ const CaretakerTab = ({ businessUnits, initialUnitId, onBack }: CaretakerTabProp
 
   return (
     <div className="flex flex-col gap-4 px-6 py-4">
-      {/* Back */}
-      <button onClick={onBack} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-fit">
-        <ArrowLeft className="w-4 h-4" /> {t('common.back')}
-      </button>
-
-      {/* Header */}
+      {/* Header (the outer page wrapper already renders a Back button) */}
       <div className="flex items-center gap-3">
         <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
           <UserCog className="w-6 h-6 text-primary" />

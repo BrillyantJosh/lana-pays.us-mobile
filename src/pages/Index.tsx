@@ -896,7 +896,6 @@ const Index = () => {
               <CaretakerTab
                 businessUnits={businessUnits}
                 initialUnitId={caretakerInitialUnit}
-                onBack={goHome}
               />
             )}
           </div>
