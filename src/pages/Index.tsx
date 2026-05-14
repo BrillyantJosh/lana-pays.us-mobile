@@ -384,6 +384,7 @@ const Index = () => {
       <MenuDrawer
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
+        onHome={goHome}
         onEditProfile={handleEditProfile}
         onRegularCustomers={handleRegularCustomers}
         onRegisterCustomer={handleRegisterCustomer}
@@ -893,7 +894,7 @@ const Index = () => {
             )}
             {activeView === "caretaker" && (
               <CaretakerTab
-                businessUnits={businessUnits}
+                businessUnits={businessUnits.filter(u => !isUnitBlocked(u))}
                 initialUnitId={caretakerInitialUnit}
                 onBack={goHome}
               />

@@ -419,5 +419,6 @@
   "caretaker.chat.empty": "Še ni sporočil. Začni pogovor.",
   "caretaker.chat.encryptedNote": "Konec-do-konca šifrirano prek Nostr NIP-04",
   "caretaker.chat.loadFailed": "Sporočil ni bilo mogoče naložiti.",
-  "caretaker.chat.sendFailed": "Sporočila ni bilo mogoče poslati. Poskusi znova."
+  "caretaker.chat.sendFailed": "Sporočila ni bilo mogoče poslati. Poskusi znova.",
+  "menu.home": "Domov"
 }

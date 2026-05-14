@@ -419,5 +419,6 @@
   "caretaker.chat.empty": "No messages yet. Start the conversation.",
   "caretaker.chat.encryptedNote": "End-to-end encrypted via Nostr NIP-04",
   "caretaker.chat.loadFailed": "Failed to load messages.",
-  "caretaker.chat.sendFailed": "Message couldn’t be sent. Try again."
+  "caretaker.chat.sendFailed": "Message couldn’t be sent. Try again.",
+  "menu.home": "Home"
 }
