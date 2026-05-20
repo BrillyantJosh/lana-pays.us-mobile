@@ -312,6 +312,9 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
               payment_type: 'cash',
               customer_hex: resolvedHexId || '',
               customer_wallet: resolvedWalletId,
+              // Snapshot the customer name so brain admin can show it even
+              // if the KIND 0 event later disappears from relays.
+              customer_name: userLookup?.user?.display_name || '',
               amount: parsedAmount,
               currency: pd.currency,
               invoice_number: pd.invoiceNumber.trim(),
@@ -352,7 +355,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   };
 
   // Select a regular customer — skip scanner, submit purchase directly
-  const handleSelectRegularCustomer = async (customer: { customer_hex_id: string; customer_wallet: string }) => {
+  const handleSelectRegularCustomer = async (customer: { customer_hex_id: string; customer_wallet: string; display_name?: string }) => {
     // Snapshot purchase data
     purchaseDataRef.current = {
       unitId: unitId || '',
@@ -383,6 +386,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           payment_type: 'cash',
           customer_hex: customer.customer_hex_id,
           customer_wallet: customer.customer_wallet,
+          customer_name: customer.display_name || '',
           amount: parsedAmount,
           currency: pd.currency,
           invoice_number: pd.invoiceNumber.trim(),
@@ -490,6 +494,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
               payment_type: 'cash',
               customer_hex: nostrHexId,
               customer_wallet: walletId,
+              customer_name: fullName.trim() || '',
               amount: parsedAmount,
               currency: pd.currency,
               invoice_number: pd.invoiceNumber.trim(),

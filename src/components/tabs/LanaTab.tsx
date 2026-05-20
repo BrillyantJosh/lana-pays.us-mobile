@@ -206,6 +206,18 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         return;
       }
 
+      // Best-effort customer name lookup so brain can snapshot it on the
+      // transaction (survives relay event loss). Non-blocking — empty string
+      // is fine, brain falls back to live KIND 0 cache.
+      let customerName = '';
+      try {
+        const lookup = await fetch(`/api/users/by-wallet/${encodeURIComponent(ids.walletId)}`);
+        if (lookup.ok) {
+          const j = await lookup.json();
+          customerName = j?.user?.display_name || '';
+        }
+      } catch { /* ignore — purchase proceeds without name */ }
+
       // Purchase body — ALWAYS uses signed_tx_hex (client-side signing).
       // The customer's WIF never leaves the device. There is NO fallback to
       // server-side WIF signing: if local signing fails, the purchase fails
@@ -216,6 +228,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         payment_type: 'lana' as const,
         customer_hex: ids.nostrHexId,
         customer_wallet: ids.walletId,
+        customer_name: customerName,
         amount: parsedAmount,
         currency,
         invoice_number: invoiceNumber.trim(),
