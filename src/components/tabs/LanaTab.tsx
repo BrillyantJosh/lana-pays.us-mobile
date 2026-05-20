@@ -365,6 +365,14 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         if (analysis.amount) setAmount(String(analysis.amount));
         if (analysis.invoiceNumber) setInvoiceNumber(analysis.invoiceNumber);
         if (analysis.items) setAnalysisDescription(analysis.items);
+      } else if (analysis.analysisError) {
+        // Anthropic overloaded / failed — let the user know they can still continue manually
+        setReceiptType('photo');
+        setAnalysisDescription(
+          analysis.analysisError === 'overloaded'
+            ? t('cash.aiOverloaded')
+            : t('cash.aiFailed')
+        );
       } else {
         setReceiptType('photo');
         setAnalysisDescription(analysis.description || t('cash.photoCaptured'));

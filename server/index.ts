@@ -1099,26 +1099,19 @@ app.post('/api/receipt/analyze', receiptUpload.single('receipt'), async (req, re
 
     const base64Image = imageBuffer.toString('base64');
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 500,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: mediaType, data: base64Image },
-            },
-            {
-              type: 'text',
-              text: `Analyze this image. Respond ONLY with valid JSON (no markdown, no code blocks).
+    const requestBody = JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: mediaType, data: base64Image },
+          },
+          {
+            type: 'text',
+            text: `Analyze this image. Respond ONLY with valid JSON (no markdown, no code blocks).
 
 If this is a receipt/invoice/bill:
 {"isReceipt":true,"amount":NUMBER_OR_NULL,"currency":"${currency}","invoiceNumber":"STRING_OR_NULL","items":"brief description of purchased items"}
@@ -1130,16 +1123,55 @@ Rules:
 - amount must be a number (no currency symbols), or null if unreadable
 - invoiceNumber: receipt/invoice number if visible, null otherwise
 - For non-receipts, describe what you see objectively`
-            }
-          ]
-        }],
-      }),
+          }
+        ]
+      }],
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('[mobile] Claude Vision error:', response.status, errText);
-      return res.json({ isReceipt: false, description: 'Analysis failed', amount: null, invoiceNumber: null });
+    // Retry on transient Anthropic errors: 429 (rate-limited), 5xx, 529 (overloaded).
+    // Backoff: 500 ms → 1500 ms → 3500 ms (max 3 attempts, total <6 s).
+    const RETRY_DELAYS_MS = [500, 1500, 3500];
+    let response: Response | null = null;
+    let lastErrText = '';
+    let lastStatus = 0;
+
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: requestBody,
+      });
+
+      if (r.ok) { response = r; break; }
+
+      lastStatus = r.status;
+      lastErrText = await r.text();
+      const transient = r.status === 429 || r.status === 529 || (r.status >= 500 && r.status < 600);
+
+      if (!transient || attempt === RETRY_DELAYS_MS.length) {
+        // Non-retryable, or out of retries
+        console.error(`[mobile] Claude Vision error (attempt ${attempt + 1}):`, r.status, lastErrText);
+        break;
+      }
+
+      console.warn(`[mobile] Claude Vision transient ${r.status}, retrying in ${RETRY_DELAYS_MS[attempt]}ms (attempt ${attempt + 1}/${RETRY_DELAYS_MS.length + 1})`);
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+    }
+
+    if (!response) {
+      // All attempts failed — signal the reason so the client can show a sensible message.
+      const overloaded = lastStatus === 429 || lastStatus === 529 || (lastStatus >= 500 && lastStatus < 600);
+      return res.json({
+        isReceipt: false,
+        description: '',
+        amount: null,
+        invoiceNumber: null,
+        analysisError: overloaded ? 'overloaded' : 'failed',
+      });
     }
 
     const result = await response.json();
@@ -1158,7 +1190,7 @@ Rules:
     res.json(analysis);
   } catch (err: any) {
     console.error('[mobile] Receipt analysis error:', err.message);
-    res.json({ isReceipt: false, description: 'Analysis error', amount: null, invoiceNumber: null });
+    res.json({ isReceipt: false, description: '', amount: null, invoiceNumber: null, analysisError: 'failed' });
   }
 });
 

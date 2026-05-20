@@ -421,5 +421,7 @@
   "caretaker.chat.loadFailed": "Sporočil ni bilo mogoče naložiti.",
   "caretaker.chat.sendFailed": "Sporočila ni bilo mogoče poslati. Poskusi znova.",
   "menu.home": "Domov",
-  "caretaker.blockedHint": "Ta trgovina trenutno ni aktivna ({{status}}). Skrbnika spodaj lahko še vedno kontaktiraš za pojasnilo."
+  "caretaker.blockedHint": "Ta trgovina trenutno ni aktivna ({{status}}). Skrbnika spodaj lahko še vedno kontaktiraš za pojasnilo.",
+  "cash.aiOverloaded": "AI analiza je trenutno preobremenjena. Lahko nadaljujete in podatke vnesete ročno.",
+  "cash.aiFailed": "AI analiza trenutno ne deluje. Lahko nadaljujete in podatke vnesete ročno."
 }
