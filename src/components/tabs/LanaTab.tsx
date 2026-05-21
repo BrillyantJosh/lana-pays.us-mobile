@@ -23,6 +23,31 @@ function formatLana(amount: number): string {
   return parseFloat(amount.toFixed(8)).toLocaleString(undefined, { maximumFractionDigits: 8 });
 }
 
+/** Phrases that ONLY appear in LanaPays' own dedup error pages — if Claude
+ *  transcribes any of them from the photo, the seller uploaded a screenshot
+ *  of a prior error, not a fresh receipt. */
+const OWN_DEDUP_PHRASES = [
+  'each invoice can only be funded',
+  'invoice number already used',
+  'invoice already used for this shop',
+  'this description was already used',
+  'every purchase is a new moment',
+  'the same photo cannot be used twice',
+  'this receipt photo has already been uploaded',
+  'vsak račun je mogoče financirati',
+  'številka računa je za to trgovino že uporabljena',
+  'ta opis je bil že uporabljen',
+  'vsak nakup je nov trenutek',
+  'ta slika računa je bila že naložena',
+  'iste slike ni mogoče uporabiti',
+  'bodi prisoten',
+];
+function looksLikePriorDedupError(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const lowered = text.toLowerCase();
+  return OWN_DEDUP_PHRASES.some(p => lowered.includes(p));
+}
+
 interface LanaTabProps {
   paymentRequest?: { walletAddress: string; invoiceNumber?: string; amount?: number } | null;
   onClearRequest?: () => void;
@@ -414,6 +439,9 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           localInvoiceNumber = String(analysis.invoiceNumber);
         }
         if (analysis.items) setAnalysisDescription(analysis.items);
+        if (looksLikePriorDedupError(analysis.items)) {
+          setDedupHit({ by: 'receipt_image', date: '' });
+        }
       } else if (analysis.analysisError) {
         // Anthropic overloaded / failed — let the user know they can still continue manually
         setReceiptType('photo');
@@ -425,6 +453,9 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       } else {
         setReceiptType('photo');
         setAnalysisDescription(analysis.description || t('cash.photoCaptured'));
+        if (looksLikePriorDedupError(analysis.description)) {
+          setDedupHit({ by: 'receipt_image', date: '' });
+        }
       }
     } catch {}
     finally { setIsAnalyzing(false); }

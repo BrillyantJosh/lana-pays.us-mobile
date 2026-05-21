@@ -58,6 +58,31 @@ type Step = "receipt" | "invoice" | "scan" | "register" | "confirmed";
 
 const UPLOAD_URL = '/api/receipt/upload';
 
+/** Phrases that ONLY appear in LanaPays' own dedup error pages. If Claude
+ *  transcribes any of them from the photo, the seller uploaded a screenshot
+ *  of a prior error — not a fresh receipt. */
+const OWN_DEDUP_PHRASES = [
+  'each invoice can only be funded',
+  'invoice number already used',
+  'invoice already used for this shop',
+  'this description was already used',
+  'every purchase is a new moment',
+  'the same photo cannot be used twice',
+  'this receipt photo has already been uploaded',
+  'vsak račun je mogoče financirati',
+  'številka računa je za to trgovino že uporabljena',
+  'ta opis je bil že uporabljen',
+  'vsak nakup je nov trenutek',
+  'ta slika računa je bila že naložena',
+  'iste slike ni mogoče uporabiti',
+  'bodi prisoten',
+];
+function looksLikePriorDedupError(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const lowered = text.toLowerCase();
+  return OWN_DEDUP_PHRASES.some(p => lowered.includes(p));
+}
+
 const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTabProps) => {
   const { t } = useTranslation();
   const { session } = useAuth();
@@ -225,6 +250,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           localInvoiceNumber = String(analysis.invoiceNumber);
         }
         if (analysis.items) setAnalysisDescription(analysis.items);
+        // Tiny heuristic: if Claude transcribed our OWN dedup error text
+        // from the photo, the seller has uploaded a screenshot of a prior
+        // error page (not a fresh receipt). Reuse the same dedupHit state
+        // — banner + Continue-hidden behaviour are already wired below.
+        if (looksLikePriorDedupError(analysis.items)) {
+          setDedupHit({ by: 'receipt_image', date: '' });
+        }
       } else if (analysis.analysisError) {
         // Anthropic was overloaded / failed — tell the seller they can still continue manually
         setReceiptType('photo');
@@ -236,6 +268,9 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       } else {
         setReceiptType('photo');
         setAnalysisDescription(analysis.description || t('cash.photoCaptured'));
+        if (looksLikePriorDedupError(analysis.description)) {
+          setDedupHit({ by: 'receipt_image', date: '' });
+        }
       }
     } catch {
       // Analysis failed silently — user can still enter details manually
