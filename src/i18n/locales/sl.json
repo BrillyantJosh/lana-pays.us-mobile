@@ -423,5 +423,7 @@
   "menu.home": "Domov",
   "caretaker.blockedHint": "Ta trgovina trenutno ni aktivna ({{status}}). Skrbnika spodaj lahko še vedno kontaktiraš za pojasnilo.",
   "cash.aiOverloaded": "AI analiza je trenutno preobremenjena. Lahko nadaljujete in podatke vnesete ročno.",
-  "cash.aiFailed": "AI analiza trenutno ne deluje. Lahko nadaljujete in podatke vnesete ročno."
+  "cash.aiFailed": "AI analiza trenutno ne deluje. Lahko nadaljujete in podatke vnesete ročno.",
+  "cash.duplicateReceiptImage": "Ta slika računa je bila že naložena in financirana {{date}}. Iste slike ni mogoče uporabiti dvakrat.",
+  "cash.duplicateInvoice": "Številka računa je za to trgovino že uporabljena {{date}}. Vsak račun je mogoče financirati le enkrat."
 }

@@ -1028,6 +1028,12 @@ app.post('/api/receipt/upload', receiptUpload.single('receipt'), async (req, res
     return res.status(400).json({ error: 'No file uploaded' });
   }
 
+  // SHA-256 of the uploaded bytes — travels back to the client and is later
+  // sent in the purchase body so Brain can dedup against double-funding.
+  // Computed server-side (not client-side) so a malicious client can't lie
+  // about the hash; this is the hash of bytes we actually received.
+  const hash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+
   try {
     // Forward to file server
     const formData = new FormData();
@@ -1049,11 +1055,11 @@ app.post('/api/receipt/upload', receiptUpload.single('receipt'), async (req, res
       fs.writeFileSync(filePath, req.file.buffer);
 
       const baseUrl = `${req.protocol}://${req.get('host')}`;
-      return res.json({ success: true, url: `${baseUrl}/uploads/${filename}`, fallback: true });
+      return res.json({ success: true, url: `${baseUrl}/uploads/${filename}`, hash, fallback: true });
     }
 
     const data = await uploadRes.json();
-    res.json(data);
+    res.json({ ...data, hash });
   } catch (err: any) {
     // Fallback: save locally if file server unreachable
     const id = crypto.randomBytes(16).toString('hex');
@@ -1063,7 +1069,7 @@ app.post('/api/receipt/upload', receiptUpload.single('receipt'), async (req, res
     fs.writeFileSync(filePath, req.file.buffer);
 
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    res.json({ success: true, url: `${baseUrl}/uploads/${filename}`, fallback: true });
+    res.json({ success: true, url: `${baseUrl}/uploads/${filename}`, hash, fallback: true });
   }
 });
 

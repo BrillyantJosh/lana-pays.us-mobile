@@ -49,6 +49,7 @@ interface PurchaseSnapshot {
   amount: string;
   currency: string;
   receiptUrl: string | null;
+  receiptHash: string | null;          // SHA-256 of receipt bytes — used by Brain to dedup
   receiptType: 'receipt' | 'photo';
   receiptDescription: string | null;
 }
@@ -75,6 +76,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [receiptHash, setReceiptHash] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -134,6 +136,24 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       .catch(() => {});
   }, [unitId, session?.nostrHexId]);
 
+  // Translate Brain's 409 dedup responses into a localized seller-facing
+  // message. Falls through to the generic error path for anything else.
+  const formatPurchaseError = (status: number, data: any): string => {
+    if (status === 409 && data?.error === 'DUPLICATE_RECEIPT_IMAGE') {
+      const date = data?.original_created_at
+        ? new Date(data.original_created_at + 'Z').toLocaleString()
+        : '';
+      return t('cash.duplicateReceiptImage', { date });
+    }
+    if (status === 409 && data?.error === 'DUPLICATE_INVOICE') {
+      const date = data?.original_created_at
+        ? new Date(data.original_created_at + 'Z').toLocaleString()
+        : '';
+      return t('cash.duplicateInvoice', { date });
+    }
+    return data?.error || t('cash.purchaseFailed');
+  };
+
   // Handle receipt photo
   const handleReceiptFile = async (rawFile: File) => {
     if (rawFile.size > 30 * 1024 * 1024) {
@@ -158,8 +178,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       formData.append('receipt', file, file.name);
       const res = await fetch(UPLOAD_URL, { method: 'POST', body: formData });
       const data = await res.json();
-      if (data.success && data.url) setReceiptUrl(data.url);
-      else setUploadError(t('cash.uploadFailed'));
+      if (data.success && data.url) {
+        setReceiptUrl(data.url);
+        if (typeof data.hash === 'string') setReceiptHash(data.hash);
+      } else {
+        setUploadError(t('cash.uploadFailed'));
+      }
     } catch {
       setUploadError(t('cash.networkErrorRetry'));
     } finally {
@@ -319,6 +343,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
               currency: pd.currency,
               invoice_number: pd.invoiceNumber.trim(),
               receipt_url: pd.receiptUrl || undefined,
+              receipt_hash: pd.receiptHash || undefined,
               receipt_type: pd.receiptType || 'receipt',
               receipt_description: pd.receiptDescription || undefined,
             }),
@@ -327,7 +352,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           setIsSubmitting(false);
 
           if (!res.ok || !purchaseData.success) {
-            setSubmitError(purchaseData.error || t('cash.purchaseFailed'));
+            setSubmitError(formatPurchaseError(res.status, purchaseData));
             return;
           }
 
@@ -363,6 +388,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       amount,
       currency,
       receiptUrl,
+      receiptHash,
       receiptType,
       receiptDescription: analysisDescription,
     };
@@ -391,6 +417,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           currency: pd.currency,
           invoice_number: pd.invoiceNumber.trim(),
           receipt_url: pd.receiptUrl || undefined,
+          receipt_hash: pd.receiptHash || undefined,
           receipt_type: pd.receiptType || 'receipt',
           receipt_description: pd.receiptDescription || undefined,
         }),
@@ -398,7 +425,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        setSubmitError(data.error || t('cash.purchaseFailed'));
+        setSubmitError(formatPurchaseError(res.status, data));
         return;
       }
 
@@ -499,6 +526,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
               currency: pd.currency,
               invoice_number: pd.invoiceNumber.trim(),
               receipt_url: pd.receiptUrl || undefined,
+              receipt_hash: pd.receiptHash || undefined,
               receipt_type: pd.receiptType || 'receipt',
               receipt_description: pd.receiptDescription || undefined,
             }),
@@ -506,7 +534,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           const purchaseData = await purchaseRes.json();
 
           if (!purchaseRes.ok || !purchaseData.success) {
-            setSubmitError(purchaseData.error || t('cash.purchaseFailed'));
+            setSubmitError(formatPurchaseError(purchaseRes.status, purchaseData));
             return;
           }
 

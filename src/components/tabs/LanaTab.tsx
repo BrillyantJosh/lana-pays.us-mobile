@@ -45,6 +45,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
   const [step, setStep] = useState<Step>("receipt");
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [receiptHash, setReceiptHash] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -233,6 +234,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         currency,
         invoice_number: invoiceNumber.trim(),
         receipt_url: receiptUrl || undefined,
+        receipt_hash: receiptHash || undefined,
         receipt_type: receiptType || 'receipt',
         receipt_description: analysisDescription || undefined,
       };
@@ -299,7 +301,20 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         const brainData = await purchaseRes.json();
 
         if (!purchaseRes.ok || !brainData.success) {
-          setPurchaseError(brainData.error || t('lana.purchaseFailed'));
+          // Brain returns 409 with a structured body when this receipt was
+          // already used for a prior purchase. Surface a clear localized
+          // message naming the date of the original transaction.
+          if (purchaseRes.status === 409 && (brainData?.error === 'DUPLICATE_RECEIPT_IMAGE' || brainData?.error === 'DUPLICATE_INVOICE')) {
+            const date = brainData?.original_created_at
+              ? new Date(brainData.original_created_at + 'Z').toLocaleString()
+              : '';
+            const key = brainData.error === 'DUPLICATE_RECEIPT_IMAGE'
+              ? 'cash.duplicateReceiptImage'
+              : 'cash.duplicateInvoice';
+            setPurchaseError(t(key, { date }));
+          } else {
+            setPurchaseError(brainData.error || t('lana.purchaseFailed'));
+          }
           setStep("display");
           return;
         }
@@ -357,7 +372,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       formData.append('receipt', file, file.name);
       const res = await fetch('/api/receipt/upload', { method: 'POST', body: formData });
       const data = await res.json();
-      if (data.success && data.url) setReceiptUrl(data.url);
+      if (data.success && data.url) {
+        setReceiptUrl(data.url);
+        if (typeof data.hash === 'string') setReceiptHash(data.hash);
+      }
       else setUploadError(t('cash.uploadFailed'));
     } catch {
       setUploadError(t('cash.networkErrorRetry'));

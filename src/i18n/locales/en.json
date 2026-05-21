@@ -423,5 +423,7 @@
   "menu.home": "Home",
   "caretaker.blockedHint": "This shop is not active right now ({{status}}). You can still reach the caretaker below to ask about it.",
   "cash.aiOverloaded": "AI analysis is temporarily overloaded. You can still continue and enter the details manually.",
-  "cash.aiFailed": "AI analysis is unavailable right now. You can still continue and enter the details manually."
+  "cash.aiFailed": "AI analysis is unavailable right now. You can still continue and enter the details manually.",
+  "cash.duplicateReceiptImage": "This receipt photo has already been uploaded and funded on {{date}}. The same photo cannot be used twice.",
+  "cash.duplicateInvoice": "Invoice number already used for this shop on {{date}}. Each invoice can only be funded once."
 }
