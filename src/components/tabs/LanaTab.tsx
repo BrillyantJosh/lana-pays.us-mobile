@@ -51,6 +51,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [receiptType, setReceiptType] = useState<'receipt' | 'photo'>('receipt');
   const [analysisDescription, setAnalysisDescription] = useState<string | null>(null);
+  // Pre-flight dedup result — populated after upload+analyse if Brain already
+  // has a persisted purchase with this receipt hash or invoice number. Hides
+  // the "Continue" button until the seller retakes the photo.
+  const [dedupHit, setDedupHit] = useState<{ by: 'receipt_image' | 'invoice'; date: string } | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [amount, setAmount] = useState("");
   const [lanaAmount, setLanaAmount] = useState<number>(0);
@@ -357,6 +361,8 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
     }
 
     setUploadError(null);
+    setDedupHit(null);
+    setReceiptHash(null);
 
     // Show preview from the ORIGINAL so the seller sees what they captured
     const reader = new FileReader();
@@ -367,6 +373,12 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
 
     // Silently compress on-device — typical 8 MB phone photo → ~400 KB
     const { file } = await compressImage(rawFile);
+
+    // Local mirrors so the dedup pre-flight at the end can read the values
+    // we just computed without waiting for React state to flush.
+    let localHash: string | null = null;
+    let localInvoiceNumber: string | null = null;
+
     try {
       const formData = new FormData();
       formData.append('receipt', file, file.name);
@@ -374,7 +386,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       const data = await res.json();
       if (data.success && data.url) {
         setReceiptUrl(data.url);
-        if (typeof data.hash === 'string') setReceiptHash(data.hash);
+        if (typeof data.hash === 'string') {
+          setReceiptHash(data.hash);
+          localHash = data.hash;
+        }
       }
       else setUploadError(t('cash.uploadFailed'));
     } catch {
@@ -394,7 +409,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       if (analysis.isReceipt) {
         setReceiptType('receipt');
         if (analysis.amount) setAmount(String(analysis.amount));
-        if (analysis.invoiceNumber) setInvoiceNumber(analysis.invoiceNumber);
+        if (analysis.invoiceNumber) {
+          setInvoiceNumber(analysis.invoiceNumber);
+          localInvoiceNumber = String(analysis.invoiceNumber);
+        }
         if (analysis.items) setAnalysisDescription(analysis.items);
       } else if (analysis.analysisError) {
         // Anthropic overloaded / failed — let the user know they can still continue manually
@@ -410,6 +428,35 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       }
     } catch {}
     finally { setIsAnalyzing(false); }
+
+    // ── Pre-flight dedup check ─────────────────────────────────────────
+    // Ask Brain if this receipt was already used (by image hash or by the
+    // invoice number Claude just extracted). On hit, dedupHit hides the
+    // "Continue" button until the seller retakes a fresh photo. Brain
+    // still enforces dedup at submit, so a soft fail here is acceptable.
+    const unit = unitIdRef.current;
+    if (unit && (localHash || localInvoiceNumber)) {
+      try {
+        const dedupRes = await fetch('/api/brain/purchase/check-dedup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            unit_id: unit,
+            receipt_hash: localHash || undefined,
+            invoice_number: localInvoiceNumber || undefined,
+          }),
+        });
+        const dedupData = await dedupRes.json();
+        if (dedupData?.duplicate && (dedupData.by === 'receipt_image' || dedupData.by === 'invoice')) {
+          const date = dedupData.original_created_at
+            ? new Date(dedupData.original_created_at + 'Z').toLocaleString()
+            : '';
+          setDedupHit({ by: dedupData.by, date });
+        }
+      } catch {
+        // Soft-fail: Brain re-enforces on submit anyway.
+      }
+    }
   };
 
   // ─── STEP: Receipt ─────────────────────────────
@@ -450,6 +497,14 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             <p className="text-sm text-foreground/85 mt-1.5 leading-relaxed whitespace-pre-wrap break-words">{analysisDescription}</p>
           </div>
         )}
+        {/* Pre-flight dedup banner — hides Continue while shown */}
+        {dedupHit && (
+          <div className="rounded-2xl p-4 border bg-destructive/10 border-destructive/20">
+            <p className="text-sm text-destructive text-center leading-relaxed">
+              {t(dedupHit.by === 'receipt_image' ? 'cash.duplicateReceiptImage' : 'cash.duplicateInvoice', { date: dedupHit.date })}
+            </p>
+          </div>
+        )}
         {!receiptPreview ? (
           <div className="grid grid-cols-2 gap-2">
             <label className="cursor-pointer">
@@ -463,7 +518,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           </div>
         ) : (
           <>
-            {!isAnalyzing && (
+            {!isAnalyzing && !dedupHit && (
               <Button onClick={() => setStep("entry")} className="w-full h-14 rounded-2xl text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20" disabled={isUploading}>{t('cash.continueToInvoice')}</Button>
             )}
             <div className="grid grid-cols-2 gap-2">
@@ -478,7 +533,9 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             </div>
           </>
         )}
-        <button onClick={() => setStep("entry")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">{t('cash.skipNoReceipt')}</button>
+        {!dedupHit && (
+          <button onClick={() => setStep("entry")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">{t('cash.skipNoReceipt')}</button>
+        )}
       </div>
     );
   }

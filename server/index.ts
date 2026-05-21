@@ -871,6 +871,35 @@ app.post('/api/brain/purchase/preview', purchaseLimiter, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/brain/purchase/check-dedup
+ * Pre-flight: ask Brain whether this (unit_id, receipt_hash) or
+ * (unit_id, invoice_number) is already used. Lets the mobile UI hide the
+ * "Continue" button at the receipt step rather than blocking only at submit.
+ */
+app.post('/api/brain/purchase/check-dedup', purchaseLimiter, async (req, res) => {
+  if (!BRAIN_API_URL) {
+    return res.status(503).json({ success: false, error: 'Brain service not configured' });
+  }
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (BRAIN_PURCHASE_KEY) headers['Authorization'] = `Bearer ${BRAIN_PURCHASE_KEY}`;
+
+    const response = await fetch(`${BRAIN_API_URL}/api/purchase/check-dedup`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req.body),
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error: any) {
+    console.error('[mobile] Brain dedup proxy error:', error.message);
+    // Don't fail the user flow if the check itself errors — Brain will still
+    // enforce dedup at submit time. Return a permissive response.
+    res.status(200).json({ duplicate: false });
+  }
+});
+
 app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
   if (!BRAIN_API_URL) {
     return res.status(503).json({ success: false, error: 'Brain service not configured' });

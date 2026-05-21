@@ -115,6 +115,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   const [receiptType, setReceiptType] = useState<'receipt' | 'photo'>('receipt');
   const [analysisDescription, setAnalysisDescription] = useState<string | null>(null);
 
+  // Pre-flight dedup result — set when Brain reports the receipt or invoice
+  // was already used for a prior persisted purchase on this unit. While
+  // populated, the "Continue to Invoice" button is hidden so the seller can't
+  // waste time filling in customer details for a purchase that will be rejected.
+  const [dedupHit, setDedupHit] = useState<{ by: 'receipt_image' | 'invoice'; date: string } | null>(null);
+
   // Cross-tab entry: wallet already verified from WalletsTab
   const initializedRef = useRef(false);
   useEffect(() => {
@@ -163,6 +169,8 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     }
 
     setUploadError(null);
+    setDedupHit(null);            // wipe any prior duplicate flag — fresh upload, fresh check
+    setReceiptHash(null);
 
     // Show preview from the ORIGINAL so the seller sees what they captured
     const reader = new FileReader();
@@ -173,6 +181,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
 
     // Silently compress on-device — typical 8 MB phone photo → ~400 KB
     const { file } = await compressImage(rawFile);
+
+    // Local mirrors of the values we'll need for the dedup pre-flight at the
+    // end. React state setters are async, so we can't read them back inside
+    // the same function call — we keep our own variables.
+    let localHash: string | null = null;
+    let localInvoiceNumber: string | null = null;
+
     try {
       const formData = new FormData();
       formData.append('receipt', file, file.name);
@@ -180,7 +195,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       const data = await res.json();
       if (data.success && data.url) {
         setReceiptUrl(data.url);
-        if (typeof data.hash === 'string') setReceiptHash(data.hash);
+        if (typeof data.hash === 'string') {
+          setReceiptHash(data.hash);
+          localHash = data.hash;
+        }
       } else {
         setUploadError(t('cash.uploadFailed'));
       }
@@ -202,7 +220,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       if (analysis.isReceipt) {
         setReceiptType('receipt');
         if (analysis.amount) setAmount(String(analysis.amount));
-        if (analysis.invoiceNumber) setInvoiceNumber(analysis.invoiceNumber);
+        if (analysis.invoiceNumber) {
+          setInvoiceNumber(analysis.invoiceNumber);
+          localInvoiceNumber = String(analysis.invoiceNumber);
+        }
         if (analysis.items) setAnalysisDescription(analysis.items);
       } else if (analysis.analysisError) {
         // Anthropic was overloaded / failed — tell the seller they can still continue manually
@@ -221,6 +242,35 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     } finally {
       setIsAnalyzing(false);
     }
+
+    // ── Pre-flight dedup check ─────────────────────────────────────────
+    // If Brain already has a persisted purchase with this receipt_hash or
+    // (when Claude extracted one) invoice_number for the same shop, set
+    // dedupHit so the Continue button hides and a friendly message shows.
+    // This is purely UX — Brain still enforces dedup at submit, so the
+    // worst case if this check fails or is bypassed is a 409 then.
+    if (unitId && (localHash || localInvoiceNumber)) {
+      try {
+        const dedupRes = await fetch('/api/brain/purchase/check-dedup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            unit_id: unitId,
+            receipt_hash: localHash || undefined,
+            invoice_number: localInvoiceNumber || undefined,
+          }),
+        });
+        const dedupData = await dedupRes.json();
+        if (dedupData?.duplicate && (dedupData.by === 'receipt_image' || dedupData.by === 'invoice')) {
+          const date = dedupData.original_created_at
+            ? new Date(dedupData.original_created_at + 'Z').toLocaleString()
+            : '';
+          setDedupHit({ by: dedupData.by, date });
+        }
+      } catch {
+        // Soft-fail: Brain will still catch it at submit time.
+      }
+    }
   };
 
   const fetchBalance = async (address: string) => {
@@ -235,6 +285,8 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     setStep("receipt");
     setReceiptPreview(null);
     setReceiptUrl(null);
+    setReceiptHash(null);
+    setDedupHit(null);
     setUploadError(null);
     setWalletId(null);
     setNostrHexId(null);
@@ -615,6 +667,14 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             <p className="text-sm text-foreground/85 mt-1.5 leading-relaxed whitespace-pre-wrap break-words">{analysisDescription}</p>
           </div>
         )}
+        {/* Pre-flight dedup banner — hides Continue while shown */}
+        {dedupHit && (
+          <div className="rounded-2xl p-4 border bg-destructive/10 border-destructive/20">
+            <p className="text-sm text-destructive text-center leading-relaxed">
+              {t(dedupHit.by === 'receipt_image' ? 'cash.duplicateReceiptImage' : 'cash.duplicateInvoice', { date: dedupHit.date })}
+            </p>
+          </div>
+        )}
         <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptFile(f); }} className="hidden" />
         <input ref={galleryInputRef} type="file" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptFile(f); }} className="hidden" />
         <div className="flex flex-col gap-3">
@@ -629,7 +689,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             </div>
           ) : (
             <>
-              {!isAnalyzing && (
+              {!isAnalyzing && !dedupHit && (
                 <Button onClick={() => setStep("invoice")} disabled={isUploading} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">{t('cash.continueToInvoice')}</Button>
               )}
               <div className="grid grid-cols-2 gap-2">
@@ -642,7 +702,9 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
               </div>
             </>
           )}
-          <button onClick={() => setStep("invoice")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">{t('cash.skipNoReceipt')}</button>
+          {!dedupHit && (
+            <button onClick={() => setStep("invoice")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">{t('cash.skipNoReceipt')}</button>
+          )}
         </div>
       </div>
     );
