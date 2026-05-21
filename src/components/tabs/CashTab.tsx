@@ -116,10 +116,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   const [analysisDescription, setAnalysisDescription] = useState<string | null>(null);
 
   // Pre-flight dedup result — set when Brain reports the receipt or invoice
-  // was already used for a prior persisted purchase on this unit. While
-  // populated, the "Continue to Invoice" button is hidden so the seller can't
-  // waste time filling in customer details for a purchase that will be rejected.
-  const [dedupHit, setDedupHit] = useState<{ by: 'receipt_image' | 'invoice'; date: string } | null>(null);
+  // was already used for a prior persisted purchase on this unit, OR when
+  // Claude's analysis text reveals the photo is a screenshot of one of our
+  // own dedup error pages (a clear signal it's not a fresh receipt). While
+  // populated, the "Continue to Invoice" button is hidden so the seller
+  // can't waste time filling in customer details for a purchase that will
+  // be rejected at submit anyway.
+  const [dedupHit, setDedupHit] = useState<{ by: 'receipt_image' | 'invoice' | 'image_content'; date: string } | null>(null);
 
   // Cross-tab entry: wallet already verified from WalletsTab
   const initializedRef = useRef(false);
@@ -141,6 +144,32 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       .then(d => setRegularCustomers(d.customers || []))
       .catch(() => {});
   }, [unitId, session?.nostrHexId]);
+
+  // Phrases that only ever appear in LanaPays' own dedup error pages.
+  // If Claude transcribes any of them from the photo, the seller has
+  // uploaded a screenshot of a prior error — not a fresh receipt.
+  const containsOwnDedupError = (text: string | null | undefined): boolean => {
+    if (!text) return false;
+    const t = text.toLowerCase();
+    return [
+      // English variants (old + current)
+      'each invoice can only be funded',
+      'invoice number already used',
+      'invoice already used for this shop',
+      'this description was already used',
+      'every purchase is a new moment',
+      'the same photo cannot be used twice',
+      'this receipt photo has already been uploaded',
+      // Slovenian variants (current strings)
+      'vsak račun je mogoče financirati',
+      'številka računa je za to trgovino že uporabljena',
+      'ta opis je bil že uporabljen',
+      'vsak nakup je nov trenutek',
+      'ta slika računa je bila že naložena',
+      'iste slike ni mogoče uporabiti',
+      'bodi prisoten',
+    ].some(p => t.includes(p));
+  };
 
   // Translate Brain's 409 dedup responses into a localized seller-facing
   // message. Falls through to the generic error path for anything else.
@@ -225,6 +254,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           localInvoiceNumber = String(analysis.invoiceNumber);
         }
         if (analysis.items) setAnalysisDescription(analysis.items);
+        // If Claude transcribed text that's clearly from one of our own
+        // dedup error pages, treat the upload as invalid up-front — no
+        // point continuing to the invoice step.
+        if (containsOwnDedupError(analysis.items)) {
+          setDedupHit({ by: 'image_content', date: '' });
+        }
       } else if (analysis.analysisError) {
         // Anthropic was overloaded / failed — tell the seller they can still continue manually
         setReceiptType('photo');
@@ -236,6 +271,9 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       } else {
         setReceiptType('photo');
         setAnalysisDescription(analysis.description || t('cash.photoCaptured'));
+        if (containsOwnDedupError(analysis.description)) {
+          setDedupHit({ by: 'image_content', date: '' });
+        }
       }
     } catch {
       // Analysis failed silently — user can still enter details manually
@@ -671,7 +709,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         {dedupHit && (
           <div className="rounded-2xl p-4 border bg-destructive/10 border-destructive/20">
             <p className="text-sm text-destructive text-center leading-relaxed">
-              {t(dedupHit.by === 'receipt_image' ? 'cash.duplicateReceiptImage' : 'cash.duplicateInvoice', { date: dedupHit.date })}
+              {t(
+                dedupHit.by === 'receipt_image' ? 'cash.duplicateReceiptImage'
+                  : dedupHit.by === 'invoice'  ? 'cash.duplicateInvoice'
+                  :                              'cash.duplicateInImageContent',
+                { date: dedupHit.date }
+              )}
             </p>
           </div>
         )}
