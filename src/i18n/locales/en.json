@@ -389,6 +389,7 @@
   "registerCustomer.alreadyRegisteredTitle": "Already Registered",
   "registerCustomer.alreadyRegisteredSubtitle": "This wallet is already in the system",
   "registerCustomer.alreadyRegisteredMessage": "This wallet is already registered. Registration is only for fresh wallets that have never been used.",
+  "registerCustomer.alreadyLinkedDifferentIdentity": "This wallet is already linked to a different customer identity. Use that customer's primary WIF to log in instead — registering with this one would overwrite the existing profile.",
   "registerCustomer.tryAnotherWallet": "Try Another Wallet",
   "registerCustomer.formTitle": "Customer Details",
   "registerCustomer.formSubtitle": "Enter the customer's full name",

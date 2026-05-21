@@ -391,17 +391,33 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           : Promise.resolve(null),
       ]);
 
-      if (!hasNostrKeys) {
-        // Try user lookup first, then fall back to registration data
-        if (userLookup?.user?.hex_id) {
-          resolvedHexId = userLookup.user.hex_id;
-          setNostrHexId(userLookup.user.hex_id);
-          setNostrNpubId(userLookup.user.npub);
-        } else if (regRes?.wallet?.nostr_hex_id) {
-          resolvedHexId = regRes.wallet.nostr_hex_id;
-          setNostrHexId(regRes.wallet.nostr_hex_id);
+      // Single source of truth for customer identity:
+      // If LANA Registrar knows this wallet, take whatever nostr_hex_id it
+      // stored at registration time — that is the customer's primary
+      // identity. The WIF-derived hex from convertWifToIds() is wallet-
+      // specific, so it is only the right answer for brand-new wallets
+      // (registered === false), where the customer has no prior identity
+      // in the system. Without this override, a customer with multiple
+      // wallets shows up as a different person per wallet.
+      if (regRes?.registered && regRes?.wallet?.nostr_hex_id) {
+        const registrarHex = regRes.wallet.nostr_hex_id;
+        if (hasNostrKeys && resolvedHexId && resolvedHexId !== registrarHex) {
+          console.log('[CashTab] using registrar primary hex instead of WIF-derived', {
+            wif_derived: resolvedHexId,
+            registrar: registrarHex,
+          });
         }
+        resolvedHexId = registrarHex;
+        setNostrHexId(registrarHex);
+      } else if (!hasNostrKeys && userLookup?.user?.hex_id) {
+        // Wallet not in registrar but we know the user locally
+        resolvedHexId = userLookup.user.hex_id;
+        setNostrHexId(userLookup.user.hex_id);
+        setNostrNpubId(userLookup.user.npub);
       }
+      // else: hasNostrKeys === true, registered === false → keep the WIF-
+      // derived hex already set above (first-time scan; this WIF becomes
+      // the customer's primary identity upon registration).
 
       if (balanceRes?.ok) setBalance(balanceRes.json);
 

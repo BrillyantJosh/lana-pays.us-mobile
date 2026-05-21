@@ -281,6 +281,7 @@
   "registerCustomer.alreadyRegisteredTitle": "Ya registrada",
   "registerCustomer.alreadyRegisteredSubtitle": "Esta billetera ya está en el sistema",
   "registerCustomer.alreadyRegisteredMessage": "Esta billetera ya está registrada. El registro es solo para billeteras nuevas que nunca se han usado.",
+  "registerCustomer.alreadyLinkedDifferentIdentity": "Esta billetera ya está vinculada a otra identidad de cliente. Usa el WIF principal de ese cliente para iniciar sesión — registrar con esta sobrescribiría el perfil existente.",
   "registerCustomer.tryAnotherWallet": "Probar otra billetera",
   "registerCustomer.formTitle": "Datos del cliente",
   "registerCustomer.formSubtitle": "Ingresa el nombre completo del cliente",

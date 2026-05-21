@@ -60,6 +60,15 @@ const RegisterCustomerTab = ({ unitCurrency }: RegisterCustomerTabProps) => {
       const data = await res.json();
 
       if (data.success && data.registered) {
+        // If the registrar reports this wallet linked to a DIFFERENT primary
+        // identity than this WIF derives, surface the differentiated message
+        // — that hints to the seller that this is a secondary wallet of an
+        // existing customer and they should use the customer's primary WIF
+        // instead. If it matches (same identity re-scanning), the generic
+        // "already registered" message is enough.
+        if (data.wallet?.nostr_hex_id && data.wallet.nostr_hex_id !== ids.nostrHexId) {
+          setError(t('registerCustomer.alreadyLinkedDifferentIdentity'));
+        }
         setStep('already_registered');
       } else {
         setStep('form');
@@ -77,6 +86,35 @@ const RegisterCustomerTab = ({ unitCurrency }: RegisterCustomerTabProps) => {
     setStep('submitting');
 
     try {
+      // Defensive re-check: between scan-time and submit the wallet could
+      // have been registered (race window or user backing through tabs).
+      // If the registrar now reports it registered under a DIFFERENT
+      // primary nostr_hex_id than this WIF derives, we must NOT publish a
+      // new KIND 0 — that would silently overwrite an existing customer
+      // identity with the seller-supplied name. Bail out instead and tell
+      // the seller to use the customer's primary WIF.
+      try {
+        const recheck = await fetch('/api/check-wallet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet_id: derived.walletId }),
+        });
+        const recheckData = await recheck.json();
+        if (
+          recheckData?.success &&
+          recheckData?.registered &&
+          recheckData?.wallet?.nostr_hex_id &&
+          recheckData.wallet.nostr_hex_id !== derived.nostrHexId
+        ) {
+          setError(t('registerCustomer.alreadyLinkedDifferentIdentity'));
+          setStep('already_registered');
+          return;
+        }
+      } catch {
+        // If the recheck itself fails, fall through — original scan-time
+        // check already confirmed the wallet was not registered.
+      }
+
       // 1. Build + sign + broadcast KIND 0 with the customer's private key.
       //    Only the name is user-supplied; everything else is auto from the
       //    seller context — same approach as Cash payment registration.
@@ -250,7 +288,7 @@ const RegisterCustomerTab = ({ unitCurrency }: RegisterCustomerTabProps) => {
 
         <div className="rounded-2xl bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/20 p-4">
           <p className="text-sm text-amber-700 dark:text-amber-400 leading-relaxed">
-            {t('registerCustomer.alreadyRegisteredMessage')}
+            {error || t('registerCustomer.alreadyRegisteredMessage')}
           </p>
         </div>
 

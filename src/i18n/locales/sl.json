@@ -389,6 +389,7 @@
   "registerCustomer.alreadyRegisteredTitle": "Že registrirana",
   "registerCustomer.alreadyRegisteredSubtitle": "Ta denarnica je že v sistemu",
   "registerCustomer.alreadyRegisteredMessage": "Ta denarnica je že registrirana. Registracija je možna samo za nove denarnice, ki še niso bile uporabljene.",
+  "registerCustomer.alreadyLinkedDifferentIdentity": "Ta denarnica je že vezana na drugo identiteto stranke. Za prijavo uporabi primarni WIF te stranke — registracija s to denarnico bi prepisala obstoječi profil.",
   "registerCustomer.tryAnotherWallet": "Poskusi drugo denarnico",
   "registerCustomer.formTitle": "Podatki stranke",
   "registerCustomer.formSubtitle": "Vnesi polno ime stranke",

@@ -281,6 +281,7 @@
   "registerCustomer.alreadyRegisteredTitle": "已注册",
   "registerCustomer.alreadyRegisteredSubtitle": "该钱包已在系统中",
   "registerCustomer.alreadyRegisteredMessage": "此钱包已注册。注册仅适用于从未使用过的新钱包。",
+  "registerCustomer.alreadyLinkedDifferentIdentity": "此钱包已链接到另一个客户身份。请使用该客户的主 WIF 登录 — 用此钱包注册将覆盖现有的个人资料。",
   "registerCustomer.tryAnotherWallet": "尝试其他钱包",
   "registerCustomer.formTitle": "客户信息",
   "registerCustomer.formSubtitle": "输入客户全名",

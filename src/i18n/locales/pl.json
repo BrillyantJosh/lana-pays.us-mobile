@@ -281,6 +281,7 @@
   "registerCustomer.alreadyRegisteredTitle": "Już zarejestrowany",
   "registerCustomer.alreadyRegisteredSubtitle": "Ten portfel jest już w systemie",
   "registerCustomer.alreadyRegisteredMessage": "Ten portfel jest już zarejestrowany. Rejestracja dotyczy tylko nowych, nigdy nieużywanych portfeli.",
+  "registerCustomer.alreadyLinkedDifferentIdentity": "Ten portfel jest już powiązany z innym identyfikatorem klienta. Użyj głównego WIF tego klienta do zalogowania — rejestracja zastąpiłaby istniejący profil.",
   "registerCustomer.tryAnotherWallet": "Spróbuj inny portfel",
   "registerCustomer.formTitle": "Dane klienta",
   "registerCustomer.formSubtitle": "Wprowadź pełne imię i nazwisko klienta",

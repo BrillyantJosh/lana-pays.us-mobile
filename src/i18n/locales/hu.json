@@ -281,6 +281,7 @@
   "registerCustomer.alreadyRegisteredTitle": "Már regisztrálva",
   "registerCustomer.alreadyRegisteredSubtitle": "Ez a tárca már a rendszerben van",
   "registerCustomer.alreadyRegisteredMessage": "Ez a tárca már regisztrálva van. A regisztráció csak új, soha nem használt tárcákhoz lehetséges.",
+  "registerCustomer.alreadyLinkedDifferentIdentity": "Ez a tárca már egy másik ügyfél-identitáshoz van rendelve. Használd annak az ügyfélnek az elsődleges WIF-jét a bejelentkezéshez — a regisztráció felülírná a meglévő profilt.",
   "registerCustomer.tryAnotherWallet": "Másik tárca próbálása",
   "registerCustomer.formTitle": "Ügyféladatok",
   "registerCustomer.formSubtitle": "Add meg az ügyfél teljes nevét",

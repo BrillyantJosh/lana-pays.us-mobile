@@ -281,6 +281,7 @@
   "registerCustomer.alreadyRegisteredTitle": "Уже зарегистрирован",
   "registerCustomer.alreadyRegisteredSubtitle": "Этот кошелёк уже в системе",
   "registerCustomer.alreadyRegisteredMessage": "Этот кошелёк уже зарегистрирован. Регистрация доступна только для новых, ещё не использованных кошельков.",
+  "registerCustomer.alreadyLinkedDifferentIdentity": "Этот кошелёк уже привязан к другой личности клиента. Используйте основной WIF этого клиента для входа — регистрация перезапишет существующий профиль.",
   "registerCustomer.tryAnotherWallet": "Попробовать другой кошелёк",
   "registerCustomer.formTitle": "Данные клиента",
   "registerCustomer.formSubtitle": "Введите полное имя клиента",

@@ -281,6 +281,7 @@
   "registerCustomer.alreadyRegisteredTitle": "Već registriran",
   "registerCustomer.alreadyRegisteredSubtitle": "Ovaj novčanik je već u sustavu",
   "registerCustomer.alreadyRegisteredMessage": "Ovaj novčanik je već registriran. Registracija je samo za nove novčanike koji nisu nikad korišteni.",
+  "registerCustomer.alreadyLinkedDifferentIdentity": "Ovaj je novčanik već povezan s drugim identitetom kupca. Koristi primarni WIF tog kupca za prijavu — registracija bi prepisala postojeći profil.",
   "registerCustomer.tryAnotherWallet": "Pokušaj drugi novčanik",
   "registerCustomer.formTitle": "Podaci kupca",
   "registerCustomer.formSubtitle": "Unesi puno ime kupca",

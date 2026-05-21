@@ -166,6 +166,13 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       const ids = await convertWifToIds(trimmed);
       setCustomerWalletId(ids.walletId);
 
+      // Authoritative customer identity. Defaults to the WIF-derived hex
+      // (right answer for brand-new wallets), but gets overridden below if
+      // LANA Registrar returns a primary nostr_hex_id for this wallet — so
+      // a customer's secondary wallet correctly nests under their primary
+      // identity instead of looking like a separate person.
+      let customerHex = ids.nostrHexId;
+
       // Check if wallet is frozen or not registered
       try {
         const checkRes = await fetch('/api/check-wallet', {
@@ -174,6 +181,18 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           body: JSON.stringify({ wallet_id: ids.walletId }),
         });
         const checkJson = await checkRes.json();
+        // Single source of truth: if the registrar knows this wallet, take
+        // whatever nostr_hex_id IT has on file. Only fall back to the WIF-
+        // derived hex when this is a virgin wallet (registered === false).
+        if (checkJson.success && checkJson.registered && checkJson.wallet?.nostr_hex_id) {
+          if (checkJson.wallet.nostr_hex_id !== ids.nostrHexId) {
+            console.log('[LanaTab] using registrar primary hex instead of WIF-derived', {
+              wif_derived: ids.nostrHexId,
+              registrar: checkJson.wallet.nostr_hex_id,
+            });
+          }
+          customerHex = checkJson.wallet.nostr_hex_id;
+        }
         if (checkJson.success && checkJson.wallet?.frozen) {
           setIsFrozen(true);
           setIsCheckingBalance(false);
@@ -256,7 +275,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       const basePurchaseBody = {
         unit_id: unitIdRef.current || '',
         payment_type: 'lana' as const,
-        customer_hex: ids.nostrHexId,
+        customer_hex: customerHex,
         customer_wallet: ids.walletId,
         customer_name: customerName,
         amount: parsedAmount,

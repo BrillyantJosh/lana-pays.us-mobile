@@ -281,6 +281,7 @@
   "registerCustomer.alreadyRegisteredTitle": "Già registrato",
   "registerCustomer.alreadyRegisteredSubtitle": "Questo portafoglio è già nel sistema",
   "registerCustomer.alreadyRegisteredMessage": "Questo portafoglio è già registrato. La registrazione è solo per portafogli nuovi non ancora utilizzati.",
+  "registerCustomer.alreadyLinkedDifferentIdentity": "Questo portafoglio è già collegato a un'altra identità cliente. Usa il WIF principale di quel cliente per accedere — registrare questo portafoglio sovrascriverebbe il profilo esistente.",
   "registerCustomer.tryAnotherWallet": "Prova un altro portafoglio",
   "registerCustomer.formTitle": "Dati del cliente",
   "registerCustomer.formSubtitle": "Inserisci il nome completo del cliente",

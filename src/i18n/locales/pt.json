@@ -281,6 +281,7 @@
   "registerCustomer.alreadyRegisteredTitle": "Já registada",
   "registerCustomer.alreadyRegisteredSubtitle": "Esta carteira já está no sistema",
   "registerCustomer.alreadyRegisteredMessage": "Esta carteira já está registada. O registo é apenas para carteiras novas que nunca foram utilizadas.",
+  "registerCustomer.alreadyLinkedDifferentIdentity": "Esta carteira já está vinculada a outra identidade de cliente. Usa o WIF principal desse cliente para entrar — registar esta carteira sobrescreveria o perfil existente.",
   "registerCustomer.tryAnotherWallet": "Tentar outra carteira",
   "registerCustomer.formTitle": "Dados do cliente",
   "registerCustomer.formSubtitle": "Introduz o nome completo do cliente",
