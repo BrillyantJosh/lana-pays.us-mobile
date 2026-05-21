@@ -425,6 +425,5 @@
   "cash.aiOverloaded": "AI analiza je trenutno preobremenjena. Lahko nadaljujete in podatke vnesete ročno.",
   "cash.aiFailed": "AI analiza trenutno ne deluje. Lahko nadaljujete in podatke vnesete ročno.",
   "cash.duplicateReceiptImage": "Ta slika računa je bila že naložena in financirana {{date}}. Iste slike ni mogoče uporabiti dvakrat.",
-  "cash.duplicateInvoice": "Ta opis je bil že uporabljen dne {{date}}. Vsak nakup je nov trenutek in s tem tudi nov opis dogodka. Bodi prisoten.",
-  "cash.duplicateInImageContent": "Ta slika je bila že uporabljena pri prejšnjem nakupu. Prosim, slikaj dejanski račun še enkrat."
+  "cash.duplicateInvoice": "Ta opis je bil že uporabljen dne {{date}}. Vsak nakup je nov trenutek in s tem tudi nov opis dogodka. Bodi prisoten."
 }
