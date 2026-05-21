@@ -949,6 +949,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             amount,
             currency,
             receiptUrl,
+            receiptHash,           // ← MUST snapshot, otherwise the purchase body sends undefined and Brain can't dedup by image
             receiptType,
             receiptDescription: analysisDescription,
           };
