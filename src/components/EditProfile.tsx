@@ -29,6 +29,39 @@ const COUNTRIES = [
 
 const CURRENCIES = ['EUR','USD','GBP','CHF','CAD','AUD','JPY','CNY','INR','BRL','MXN','KRW','SEK','NOK','DKK','PLN','CZK','HUF','RON','BGN','HRK','RSD','BAM','TRY','RUB','UAH'];
 
+// ─── Module-level helper components ─────────────────────────────────
+// CRITICAL: these MUST live at module level, not inside EditProfile.
+// React's reconciler sees a new function reference on every parent
+// re-render if a component is declared inside another component's
+// body, and unmounts/remounts the whole subtree — which strips focus
+// off any input the user is typing into. Symptom: hitting Backspace
+// kicks the cursor out of the field and the user has to click back.
+const Field = ({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) => (
+  <div className="space-y-1.5">
+    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+      {label} {required && <span className="text-destructive">*</span>}
+    </label>
+    {children}
+  </div>
+);
+
+const SectionHeader = ({
+  id, icon: Icon, title, expanded, onToggle,
+}: {
+  id: string; icon: any; title: string; expanded: boolean; onToggle: (id: string) => void;
+}) => (
+  <button
+    onClick={() => onToggle(id)}
+    className="flex items-center justify-between w-full px-4 py-3 bg-card rounded-xl border border-border"
+  >
+    <div className="flex items-center gap-2">
+      <Icon className="w-4 h-4 text-primary" />
+      <span className="text-sm font-semibold text-foreground">{title}</span>
+    </div>
+    {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+  </button>
+);
+
 const EditProfile = () => {
   const { t } = useTranslation();
   const { session } = useAuth();
@@ -289,27 +322,8 @@ const EditProfile = () => {
     );
   }
 
-  const SectionHeader = ({ id, icon: Icon, title }: { id: string; icon: any; title: string }) => (
-    <button
-      onClick={() => toggleSection(id)}
-      className="flex items-center justify-between w-full px-4 py-3 bg-card rounded-xl border border-border"
-    >
-      <div className="flex items-center gap-2">
-        <Icon className="w-4 h-4 text-primary" />
-        <span className="text-sm font-semibold text-foreground">{title}</span>
-      </div>
-      {expandedSections[id] ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-    </button>
-  );
-
-  const Field = ({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) => (
-    <div className="space-y-1.5">
-      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-        {label} {required && <span className="text-destructive">*</span>}
-      </label>
-      {children}
-    </div>
-  );
+  // Field + SectionHeader are now module-level (see top of file) so the
+  // React reconciler doesn't re-mount inputs on every keystroke.
 
   const inputClass = "w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary";
   const selectClass = "w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary";
@@ -317,7 +331,7 @@ const EditProfile = () => {
   return (
     <div className="px-4 pb-8 space-y-3">
       {/* ─── Basic Info ─── */}
-      <SectionHeader id="basic" icon={User} title={t('profile.basicInfo')} />
+      <SectionHeader id="basic" icon={User} title={t('profile.basicInfo')} expanded={expandedSections.basic} onToggle={toggleSection} />
       {expandedSections.basic && (
         <div className="space-y-4 px-1">
           <Field label={t('profile.language')} required>
@@ -355,7 +369,7 @@ const EditProfile = () => {
       )}
 
       {/* ─── Location & Currency ─── */}
-      <SectionHeader id="location" icon={MapPin} title={t('profile.locationCurrency')} />
+      <SectionHeader id="location" icon={MapPin} title={t('profile.locationCurrency')} expanded={expandedSections.location} onToggle={toggleSection} />
       {expandedSections.location && (
         <div className="space-y-4 px-1">
           <Field label={t('profile.location')} required>
@@ -385,7 +399,7 @@ const EditProfile = () => {
       )}
 
       {/* ─── Contact Info ─── */}
-      <SectionHeader id="contact" icon={Phone} title={t('profile.contactInfo')} />
+      <SectionHeader id="contact" icon={Phone} title={t('profile.contactInfo')} expanded={expandedSections.contact} onToggle={toggleSection} />
       {expandedSections.contact && (
         <div className="space-y-4 px-1">
           <Field label={t('profile.email')}>
@@ -405,7 +419,7 @@ const EditProfile = () => {
       )}
 
       {/* ─── Lana Fields ─── */}
-      <SectionHeader id="lana" icon={Wallet} title={t('profile.lanaSettings')} />
+      <SectionHeader id="lana" icon={Wallet} title={t('profile.lanaSettings')} expanded={expandedSections.lana} onToggle={toggleSection} />
       {expandedSections.lana && (
         <div className="space-y-4 px-1">
           <Field label={t('profile.whoAreYou')} required>
@@ -427,7 +441,7 @@ const EditProfile = () => {
       )}
 
       {/* ─── Tags ─── */}
-      <SectionHeader id="tags" icon={Heart} title={t('profile.interestsTags')} />
+      <SectionHeader id="tags" icon={Heart} title={t('profile.interestsTags')} expanded={expandedSections.tags} onToggle={toggleSection} />
       {expandedSections.tags && (
         <div className="space-y-4 px-1">
           <Field label={t('profile.interests')}>
@@ -470,7 +484,7 @@ const EditProfile = () => {
       )}
 
       {/* ─── Statement of Responsibility ─── */}
-      <SectionHeader id="responsibility" icon={FileText} title={t('profile.statementOfResponsibility')} />
+      <SectionHeader id="responsibility" icon={FileText} title={t('profile.statementOfResponsibility')} expanded={expandedSections.responsibility} onToggle={toggleSection} />
       {expandedSections.responsibility && (
         <div className="space-y-4 px-1">
           <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3">
