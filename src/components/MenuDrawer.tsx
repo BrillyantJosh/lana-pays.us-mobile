@@ -91,11 +91,11 @@ const MenuDrawer = ({ open, onClose, onHome, onEditProfile, onRegularCustomers, 
       />
       {/* Drawer */}
       <div
-        className={`fixed top-0 right-0 h-full w-72 bg-card border-l border-border z-[70] transition-transform duration-300 ${
+        className={`fixed top-0 right-0 h-full w-72 bg-card border-l border-border z-[70] transition-transform duration-300 flex flex-col ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
-        <div className="flex items-center justify-between p-4 border-b border-border">
+        <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
           <span className="font-display font-semibold text-foreground">{t('menu.title')}</span>
           <button
             onClick={onClose}
@@ -107,7 +107,7 @@ const MenuDrawer = ({ open, onClose, onHome, onEditProfile, onRegularCustomers, 
 
         {/* User info */}
         {session && (
-          <div className="px-4 py-3 border-b border-border">
+          <div className="px-4 py-3 border-b border-border shrink-0">
             <p className="text-sm font-medium text-foreground truncate">
               {session.profileDisplayName || session.profileName || t('menu.defaultUser')}
             </p>
@@ -133,7 +133,7 @@ const MenuDrawer = ({ open, onClose, onHome, onEditProfile, onRegularCustomers, 
           </div>
         )}
 
-        <div className="p-3 flex flex-col gap-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 11rem)' }}>
+        <div className="p-3 flex flex-col gap-1 overflow-y-auto flex-1 min-h-0">
           {/* Home shortcut — top of menu, no section header */}
           <button
             onClick={() => { onClose(); onHome?.(); }}
@@ -209,11 +209,14 @@ const MenuDrawer = ({ open, onClose, onHome, onEditProfile, onRegularCustomers, 
             </div>
           )}
 
-          <div className="border-t border-border my-2" />
+        </div>
 
+        {/* Sign Out — anchored to the bottom of the drawer so it's always
+            visible even on small screens with long menus. */}
+        <div className="border-t border-border p-3 shrink-0">
           <button
             onClick={handleSignOut}
-            className="flex items-center gap-3 px-4 py-3 rounded-xl text-destructive hover:bg-destructive/10 transition-colors text-sm font-medium"
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-destructive hover:bg-destructive/10 transition-colors text-sm font-medium"
           >
             <LogOut className="w-5 h-5" />
             {t('menu.signOut')}
