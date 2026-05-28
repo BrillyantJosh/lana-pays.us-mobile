@@ -295,5 +295,6 @@
   "registerCustomer.registrationFailed": "Error al registrar la billetera",
   "registerCustomer.doneTitle": "¡Registrada!",
   "registerCustomer.doneSubtitle": "La billetera de {{name}} ahora está activa y lista para usar.",
-  "registerCustomer.registerAnother": "Registrar otra billetera"
+  "registerCustomer.registerAnother": "Registrar otra billetera",
+  "purchase.cannotSellToYourself": "No puede comprar en su propia unidad de negocio. Use una billetera de cliente diferente."
 }

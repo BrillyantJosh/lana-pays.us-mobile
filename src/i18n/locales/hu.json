@@ -295,5 +295,6 @@
   "registerCustomer.registrationFailed": "Tárca regisztrációja sikertelen",
   "registerCustomer.doneTitle": "Regisztrálva!",
   "registerCustomer.doneSubtitle": "{{name}} tárcája most aktív és használatra kész.",
-  "registerCustomer.registerAnother": "Másik tárca regisztrálása"
+  "registerCustomer.registerAnother": "Másik tárca regisztrálása",
+  "purchase.cannotSellToYourself": "Nem vásárolhat a saját üzleti egységében. Használjon másik vásárlói tárcát."
 }

@@ -295,5 +295,6 @@
   "registerCustomer.registrationFailed": "Registracija novčanika nije uspela",
   "registerCustomer.doneTitle": "Registrovano!",
   "registerCustomer.doneSubtitle": "{{name}} sada ima aktivan novčanik spreman za korišćenje.",
-  "registerCustomer.registerAnother": "Registruj još jedan novčanik"
+  "registerCustomer.registerAnother": "Registruj još jedan novčanik",
+  "purchase.cannotSellToYourself": "Не можете куповати у својој пословној јединици. Користите други новчаник купца."
 }

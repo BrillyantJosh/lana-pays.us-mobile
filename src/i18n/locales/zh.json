@@ -295,5 +295,6 @@
   "registerCustomer.registrationFailed": "钱包注册失败",
   "registerCustomer.doneTitle": "已注册！",
   "registerCustomer.doneSubtitle": "{{name}} 的钱包现已激活,可以使用。",
-  "registerCustomer.registerAnother": "注册另一个钱包"
+  "registerCustomer.registerAnother": "注册另一个钱包",
+  "purchase.cannotSellToYourself": "您不能在自己的业务单位购物。请使用其他客户钱包。"
 }

@@ -295,5 +295,6 @@
   "registerCustomer.registrationFailed": "Registo da carteira falhou",
   "registerCustomer.doneTitle": "Registado!",
   "registerCustomer.doneSubtitle": "A carteira de {{name}} está agora ativa e pronta a usar.",
-  "registerCustomer.registerAnother": "Registar outra carteira"
+  "registerCustomer.registerAnother": "Registar outra carteira",
+  "purchase.cannotSellToYourself": "Não pode comprar na sua própria unidade de negócio. Use uma carteira de cliente diferente."
 }

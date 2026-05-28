@@ -295,5 +295,6 @@
   "registerCustomer.registrationFailed": "Rejestracja portfela nie powiodła się",
   "registerCustomer.doneTitle": "Zarejestrowano!",
   "registerCustomer.doneSubtitle": "Portfel {{name}} jest teraz aktywny i gotowy do użycia.",
-  "registerCustomer.registerAnother": "Zarejestruj kolejny portfel"
+  "registerCustomer.registerAnother": "Zarejestruj kolejny portfel",
+  "purchase.cannotSellToYourself": "Nie możesz kupować we własnej jednostce biznesowej. Użyj innego portfela klienta."
 }

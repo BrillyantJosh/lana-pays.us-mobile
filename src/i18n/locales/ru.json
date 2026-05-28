@@ -295,5 +295,6 @@
   "registerCustomer.registrationFailed": "Регистрация кошелька не удалась",
   "registerCustomer.doneTitle": "Зарегистрировано!",
   "registerCustomer.doneSubtitle": "Кошелёк {{name}} теперь активен и готов к использованию.",
-  "registerCustomer.registerAnother": "Зарегистрировать ещё один кошелёк"
+  "registerCustomer.registerAnother": "Зарегистрировать ещё один кошелёк",
+  "purchase.cannotSellToYourself": "Вы не можете покупать в собственном бизнес-подразделении. Используйте другой кошелёк клиента."
 }

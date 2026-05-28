@@ -295,5 +295,6 @@
   "registerCustomer.registrationFailed": "Registrazione del portafoglio fallita",
   "registerCustomer.doneTitle": "Registrato!",
   "registerCustomer.doneSubtitle": "Il portafoglio di {{name}} è ora attivo e pronto all'uso.",
-  "registerCustomer.registerAnother": "Registra un altro portafoglio"
+  "registerCustomer.registerAnother": "Registra un altro portafoglio",
+  "purchase.cannotSellToYourself": "Non puoi acquistare dalla tua stessa unità commerciale. Usa un portafoglio cliente diverso."
 }

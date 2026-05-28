@@ -426,5 +426,6 @@
   "cash.aiOverloaded": "AI analysis is temporarily overloaded. You can still continue and enter the details manually.",
   "cash.aiFailed": "AI analysis is unavailable right now. You can still continue and enter the details manually.",
   "cash.duplicateReceiptImage": "This receipt photo has already been uploaded and funded on {{date}}. The same photo cannot be used twice.",
-  "cash.duplicateInvoice": "This description was already used on {{date}}. Every purchase is a new moment, and so is its description. Be present."
+  "cash.duplicateInvoice": "This description was already used on {{date}}. Every purchase is a new moment, and so is its description. Be present.",
+  "purchase.cannotSellToYourself": "You cannot purchase from your own business unit. Please use a different customer wallet."
 }

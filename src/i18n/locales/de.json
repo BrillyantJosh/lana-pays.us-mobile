@@ -295,5 +295,6 @@
   "registerCustomer.registrationFailed": "Wallet-Registrierung fehlgeschlagen",
   "registerCustomer.doneTitle": "Registriert!",
   "registerCustomer.doneSubtitle": "Die Wallet von {{name}} ist jetzt aktiv und einsatzbereit.",
-  "registerCustomer.registerAnother": "Weitere Wallet registrieren"
+  "registerCustomer.registerAnother": "Weitere Wallet registrieren",
+  "purchase.cannotSellToYourself": "Sie können nicht in Ihrer eigenen Geschäftseinheit einkaufen. Bitte verwenden Sie eine andere Kunden-Wallet."
 }

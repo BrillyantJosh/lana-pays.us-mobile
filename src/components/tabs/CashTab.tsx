@@ -430,6 +430,17 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             return;
           }
 
+          // Self-purchase guard: a merchant cannot buy from their own unit.
+          // Brain enforces this authoritatively; this is just for fast UX so we
+          // don't fire a doomed network request. Uses the resolved primary hex
+          // (post Phase-1 registrar resolution) — works for any registered wallet.
+          const ownerHex = ((window as any).__selectedUnit?.owner_hex || '').toLowerCase();
+          const buyerHex = (resolvedHexId || '').toLowerCase();
+          if (ownerHex && buyerHex && ownerHex === buyerHex) {
+            setSubmitError(t('purchase.cannotSellToYourself'));
+            return;
+          }
+
           setIsSubmitting(true);
           const res = await fetch('/api/brain/purchase', {
             method: 'POST',
@@ -500,6 +511,14 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     const parsedAmount = parseFloat(pd.amount.replace(',', '.'));
     if (!pd.invoiceNumber.trim() || isNaN(parsedAmount) || parsedAmount <= 0) {
       setSubmitError(t('cash.invalidAmount'));
+      return;
+    }
+
+    // Self-purchase guard — see comment at the scanned-WIF site above.
+    const ownerHex = ((window as any).__selectedUnit?.owner_hex || '').toLowerCase();
+    const buyerHex = (customer.customer_hex_id || '').toLowerCase();
+    if (ownerHex && buyerHex && ownerHex === buyerHex) {
+      setSubmitError(t('purchase.cannotSellToYourself'));
       return;
     }
 
@@ -615,6 +634,17 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       if (pd && pd.invoiceNumber.trim() && pd.amount.trim()) {
         const parsedAmount = parseFloat(pd.amount.replace(',', '.'));
         if (!isNaN(parsedAmount) && parsedAmount > 0) {
+          // Self-purchase guard — same as the other sites. Even though the
+          // customer just registered (so they're presumably new), they could
+          // still have used the merchant's own WIF, which would now share the
+          // owner_hex identity.
+          const ownerHex = ((window as any).__selectedUnit?.owner_hex || '').toLowerCase();
+          const buyerHex = (nostrHexId || '').toLowerCase();
+          if (ownerHex && buyerHex && ownerHex === buyerHex) {
+            setSubmitError(t('purchase.cannotSellToYourself'));
+            return;
+          }
+
           console.log('[CashTab] Auto-submitting purchase after registration...');
           const purchaseRes = await fetch('/api/brain/purchase', {
             method: 'POST',

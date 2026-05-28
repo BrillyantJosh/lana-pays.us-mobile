@@ -255,6 +255,19 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         return;
       }
 
+      // Self-purchase guard: a merchant cannot buy from their own unit.
+      // Placed BEFORE the expensive name lookup, preview, and client-side
+      // signing — fail fast so the customer doesn't sit through a doomed flow.
+      // Brain enforces this authoritatively too; this is just for UX.
+      // `customerHex` was already resolved via registrar above (Phase 1 fix).
+      const ownerHex = ((window as any).__selectedUnit?.owner_hex || '').toLowerCase();
+      const buyerHex = (customerHex || '').toLowerCase();
+      if (ownerHex && buyerHex && ownerHex === buyerHex) {
+        setPurchaseError(t('purchase.cannotSellToYourself'));
+        setStep("display");
+        return;
+      }
+
       // Best-effort customer name lookup so brain can snapshot it on the
       // transaction (survives relay event loss). Non-blocking — empty string
       // is fine, brain falls back to live KIND 0 cache.
