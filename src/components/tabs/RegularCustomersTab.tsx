@@ -89,10 +89,13 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
   const [balances, setBalances] = useState<Record<string, CustomerBalance>>({});
   const [wonderStatus, setWonderStatus] = useState<Record<string, boolean>>({});
   const [freezeStatus, setFreezeStatus] = useState<Record<string, string>>({}); // hex -> 'active' | 'frozen'
-  // True when at least one of the customer's wallets has walletType === 'Retail'.
-  // Retail accounts are exempt from the 1500 LANA freeze rule, so we suppress
-  // the "approaching limit" warning for them.
-  const [isRetail, setIsRetail] = useState<Record<string, boolean>>({});
+  // hex → list of wallets from /api/wallets. Lets us resolve walletType for
+  // the SPECIFIC wallet stored on each regular_customers row (same hex can
+  // appear with different wallets across units). Retail wallets are exempt
+  // from the 1500 LANA freeze rule — we use this map at render time so the
+  // warning hides only for the row whose scanned wallet IS Retail, while
+  // other rows for the same customer with a Main/etc wallet keep the warning.
+  const [walletsByHex, setWalletsByHex] = useState<Record<string, any[]>>({});
 
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -142,19 +145,16 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
         .catch(() => {});
 
       // Check freeze status via wallet list — account-level OR any wallet frozen.
-      // Same call also tells us whether the customer is a Retail wallet holder
-      // (which exempts them from the 1500 LANA freeze rule).
+      // We also cache the full wallets list so each row can look up the
+      // walletType of its own customer_wallet at render time.
       fetch(`/api/wallets/${c.customer_hex_id}`)
         .then(r => r.json())
         .then(data => {
           const wallets: any[] = data.wallets || [];
           const accountFrozen = data.accountStatus === 'frozen';
           const anyWalletFrozen = wallets.some(w => w.frozen === true);
-          const hasRetail = wallets.some(w =>
-            typeof w.walletType === 'string' && w.walletType.toLowerCase() === 'retail'
-          );
           setFreezeStatus(prev => ({ ...prev, [c.customer_hex_id]: (accountFrozen || anyWalletFrozen) ? 'frozen' : 'active' }));
-          setIsRetail(prev => ({ ...prev, [c.customer_hex_id]: hasRetail }));
+          setWalletsByHex(prev => ({ ...prev, [c.customer_hex_id]: wallets }));
         })
         .catch(() => {});
     });
@@ -533,9 +533,16 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
               : null;
             const delKey = customer.customer_hex_id + customer.unit_id;
             const isFrozen = freezeStatus[customer.customer_hex_id] === 'frozen';
-            const retail = isRetail[customer.customer_hex_id] === true;
-            // Retail wallets are exempt from the 1500 LANA freeze rule.
-            const isNearMaxCap = bal && bal.lana > MAX_CAP_LANA && !isFrozen && !retail;
+            // Resolve the type of the WALLET that was actually scanned/saved
+            // on this regular_customers row (not just any wallet on the hex).
+            // Only when that specific wallet is Retail do we suppress the cap
+            // warning — Main / standard wallets keep the warning as before.
+            const scannedWallet = (walletsByHex[customer.customer_hex_id] || [])
+              .find((w: any) => w.walletId === customer.customer_wallet);
+            const isScannedRetail =
+              !!scannedWallet && typeof scannedWallet.walletType === 'string'
+                && scannedWallet.walletType.toLowerCase() === 'retail';
+            const isNearMaxCap = bal && bal.lana > MAX_CAP_LANA && !isFrozen && !isScannedRetail;
 
             return (
               <div key={delKey} className={`rounded-2xl p-4 space-y-3 ${
