@@ -427,5 +427,7 @@
   "cash.aiFailed": "AI analiza trenutno ne deluje. Lahko nadaljujete in podatke vnesete ročno.",
   "cash.duplicateReceiptImage": "Ta slika računa je bila že naložena in financirana {{date}}. Iste slike ni mogoče uporabiti dvakrat.",
   "cash.duplicateInvoice": "Ta opis je bil že uporabljen dne {{date}}. Vsak nakup je nov trenutek in s tem tudi nov opis dogodka. Bodi prisoten.",
-  "purchase.cannotSellToYourself": "Nakup pri lastni poslovni enoti ni mogoč. Uporabite drugo strankino denarnico."
+  "purchase.cannotSellToYourself": "Nakup pri lastni poslovni enoti ni mogoč. Uporabite drugo strankino denarnico.",
+  "purchase.invalidCustomerWallet": "Strankina denarnica ni veljavna. Ponovno skenirajte denarnico in poskusite znova.",
+  "purchase.invalidMerchantWallet": "Ta poslovna enota ima nastavljeno neveljavno denarnico. Obrnite se na podporo."
 }

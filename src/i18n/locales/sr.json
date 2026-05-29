@@ -296,5 +296,7 @@
   "registerCustomer.doneTitle": "Registrovano!",
   "registerCustomer.doneSubtitle": "{{name}} sada ima aktivan novčanik spreman za korišćenje.",
   "registerCustomer.registerAnother": "Registruj još jedan novčanik",
-  "purchase.cannotSellToYourself": "Не можете куповати у својој пословној јединици. Користите други новчаник купца."
+  "purchase.cannotSellToYourself": "Не можете куповати у својој пословној јединици. Користите други новчаник купца.",
+  "purchase.invalidCustomerWallet": "Адреса новчаника купца није важећа. Поново скенирајте новчаник и покушајте поново.",
+  "purchase.invalidMerchantWallet": "Ова пословна јединица има подешен неважећи новчаник. Обратите се подршци."
 }

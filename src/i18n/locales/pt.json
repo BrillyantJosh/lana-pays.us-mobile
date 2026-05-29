@@ -296,5 +296,7 @@
   "registerCustomer.doneTitle": "Registado!",
   "registerCustomer.doneSubtitle": "A carteira de {{name}} está agora ativa e pronta a usar.",
   "registerCustomer.registerAnother": "Registar outra carteira",
-  "purchase.cannotSellToYourself": "Não pode comprar na sua própria unidade de negócio. Use uma carteira de cliente diferente."
+  "purchase.cannotSellToYourself": "Não pode comprar na sua própria unidade de negócio. Use uma carteira de cliente diferente.",
+  "purchase.invalidCustomerWallet": "O endereço da carteira do cliente é inválido. Faça novamente a leitura da carteira e tente outra vez.",
+  "purchase.invalidMerchantWallet": "Esta unidade de negócio tem uma carteira inválida configurada. Entre em contacto com o suporte."
 }

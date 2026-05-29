@@ -427,5 +427,7 @@
   "cash.aiFailed": "AI analysis is unavailable right now. You can still continue and enter the details manually.",
   "cash.duplicateReceiptImage": "This receipt photo has already been uploaded and funded on {{date}}. The same photo cannot be used twice.",
   "cash.duplicateInvoice": "This description was already used on {{date}}. Every purchase is a new moment, and so is its description. Be present.",
-  "purchase.cannotSellToYourself": "You cannot purchase from your own business unit. Please use a different customer wallet."
+  "purchase.cannotSellToYourself": "You cannot purchase from your own business unit. Please use a different customer wallet.",
+  "purchase.invalidCustomerWallet": "The customer's wallet address is invalid. Please re-scan the wallet and try again.",
+  "purchase.invalidMerchantWallet": "This business unit has an invalid wallet configured. Please contact support."
 }

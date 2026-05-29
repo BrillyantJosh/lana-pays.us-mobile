@@ -182,6 +182,20 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         : '';
       return t('cash.duplicateInvoice', { date });
     }
+    // Brain layer-2 self-purchase rejection (multi-wallet history) — mobile's
+    // own pre-flight only catches the trivial hex-equality case, so the brain
+    // can still return SELF_PURCHASE here. Localize it the same way.
+    if (status === 409 && data?.error === 'SELF_PURCHASE') {
+      return t('purchase.cannotSellToYourself');
+    }
+    // Brain rejected a malformed wallet (422). `field` tells us whose wallet
+    // was bad: customer_wallet → seller should re-scan; anything else (e.g.
+    // policy.caretaker_wallet) is a merchant-side misconfiguration.
+    if (status === 422 && data?.error === 'INVALID_WALLET') {
+      return data?.field === 'customer_wallet'
+        ? t('purchase.invalidCustomerWallet')
+        : t('purchase.invalidMerchantWallet');
+    }
     return data?.error || t('cash.purchaseFailed');
   };
 

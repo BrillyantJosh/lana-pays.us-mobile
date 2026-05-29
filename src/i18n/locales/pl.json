@@ -296,5 +296,7 @@
   "registerCustomer.doneTitle": "Zarejestrowano!",
   "registerCustomer.doneSubtitle": "Portfel {{name}} jest teraz aktywny i gotowy do użycia.",
   "registerCustomer.registerAnother": "Zarejestruj kolejny portfel",
-  "purchase.cannotSellToYourself": "Nie możesz kupować we własnej jednostce biznesowej. Użyj innego portfela klienta."
+  "purchase.cannotSellToYourself": "Nie możesz kupować we własnej jednostce biznesowej. Użyj innego portfela klienta.",
+  "purchase.invalidCustomerWallet": "Adres portfela klienta jest nieprawidłowy. Zeskanuj portfel ponownie i spróbuj jeszcze raz.",
+  "purchase.invalidMerchantWallet": "Ta jednostka biznesowa ma skonfigurowany nieprawidłowy portfel. Skontaktuj się z pomocą techniczną."
 }

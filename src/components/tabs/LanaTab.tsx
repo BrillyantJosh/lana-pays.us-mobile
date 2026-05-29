@@ -373,6 +373,16 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
               ? 'cash.duplicateReceiptImage'
               : 'cash.duplicateInvoice';
             setPurchaseError(t(key, { date }));
+          } else if (purchaseRes.status === 409 && brainData?.error === 'SELF_PURCHASE') {
+            // Brain layer-2 self-purchase rejection (multi-wallet history).
+            setPurchaseError(t('purchase.cannotSellToYourself'));
+          } else if (purchaseRes.status === 422 && brainData?.error === 'INVALID_WALLET') {
+            // Malformed wallet: customer_wallet → re-scan; else merchant config.
+            setPurchaseError(
+              brainData?.field === 'customer_wallet'
+                ? t('purchase.invalidCustomerWallet')
+                : t('purchase.invalidMerchantWallet')
+            );
           } else {
             setPurchaseError(brainData.error || t('lana.purchaseFailed'));
           }

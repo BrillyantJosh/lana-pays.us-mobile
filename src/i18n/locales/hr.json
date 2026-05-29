@@ -296,5 +296,7 @@
   "registerCustomer.doneTitle": "Registrirano!",
   "registerCustomer.doneSubtitle": "{{name}} sada ima aktivan novčanik spreman za korištenje.",
   "registerCustomer.registerAnother": "Registriraj još jedan novčanik",
-  "purchase.cannotSellToYourself": "Ne možete kupovati u vlastitoj poslovnoj jedinici. Koristite drugi novčanik kupca."
+  "purchase.cannotSellToYourself": "Ne možete kupovati u vlastitoj poslovnoj jedinici. Koristite drugi novčanik kupca.",
+  "purchase.invalidCustomerWallet": "Adresa novčanika kupca nije valjana. Ponovno skenirajte novčanik i pokušajte ponovno.",
+  "purchase.invalidMerchantWallet": "Ova poslovna jedinica ima postavljen nevažeći novčanik. Obratite se podršci."
 }

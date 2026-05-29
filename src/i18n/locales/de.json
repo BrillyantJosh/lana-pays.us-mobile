@@ -296,5 +296,7 @@
   "registerCustomer.doneTitle": "Registriert!",
   "registerCustomer.doneSubtitle": "Die Wallet von {{name}} ist jetzt aktiv und einsatzbereit.",
   "registerCustomer.registerAnother": "Weitere Wallet registrieren",
-  "purchase.cannotSellToYourself": "Sie können nicht in Ihrer eigenen Geschäftseinheit einkaufen. Bitte verwenden Sie eine andere Kunden-Wallet."
+  "purchase.cannotSellToYourself": "Sie können nicht in Ihrer eigenen Geschäftseinheit einkaufen. Bitte verwenden Sie eine andere Kunden-Wallet.",
+  "purchase.invalidCustomerWallet": "Die Wallet-Adresse des Kunden ist ungültig. Bitte scannen Sie die Wallet erneut und versuchen Sie es noch einmal.",
+  "purchase.invalidMerchantWallet": "Für diese Geschäftseinheit ist eine ungültige Wallet konfiguriert. Bitte wenden Sie sich an den Support."
 }

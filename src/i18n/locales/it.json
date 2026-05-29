@@ -296,5 +296,7 @@
   "registerCustomer.doneTitle": "Registrato!",
   "registerCustomer.doneSubtitle": "Il portafoglio di {{name}} è ora attivo e pronto all'uso.",
   "registerCustomer.registerAnother": "Registra un altro portafoglio",
-  "purchase.cannotSellToYourself": "Non puoi acquistare dalla tua stessa unità commerciale. Usa un portafoglio cliente diverso."
+  "purchase.cannotSellToYourself": "Non puoi acquistare dalla tua stessa unità commerciale. Usa un portafoglio cliente diverso.",
+  "purchase.invalidCustomerWallet": "L'indirizzo del portafoglio del cliente non è valido. Esegui di nuovo la scansione del portafoglio e riprova.",
+  "purchase.invalidMerchantWallet": "Questa unità commerciale ha un portafoglio non valido configurato. Contatta l'assistenza."
 }

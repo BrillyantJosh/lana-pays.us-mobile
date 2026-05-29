@@ -296,5 +296,7 @@
   "registerCustomer.doneTitle": "Regisztrálva!",
   "registerCustomer.doneSubtitle": "{{name}} tárcája most aktív és használatra kész.",
   "registerCustomer.registerAnother": "Másik tárca regisztrálása",
-  "purchase.cannotSellToYourself": "Nem vásárolhat a saját üzleti egységében. Használjon másik vásárlói tárcát."
+  "purchase.cannotSellToYourself": "Nem vásárolhat a saját üzleti egységében. Használjon másik vásárlói tárcát.",
+  "purchase.invalidCustomerWallet": "Az ügyfél tárcacíme érvénytelen. Olvassa be újra a tárcát, és próbálja meg ismét.",
+  "purchase.invalidMerchantWallet": "Ehhez az üzleti egységhez érvénytelen tárca van beállítva. Forduljon az ügyfélszolgálathoz."
 }
