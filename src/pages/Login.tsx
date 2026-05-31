@@ -94,12 +94,17 @@ const Login = () => {
           </button>
         ) : (
           <div className="w-full space-y-3">
-            <textarea
+            <input
+              type="password"
               value={manualWif}
               onChange={e => setManualWif(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { const w = manualWif.trim(); if (w && !isLoggingIn) handleScan(w); } }}
               placeholder={t('login.wifPlaceholder')}
-              rows={3}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none shadow-sm"
+              autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary shadow-sm"
               autoFocus
             />
             <button
