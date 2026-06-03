@@ -58,7 +58,7 @@ interface LanaTabProps {
 type Step = "receipt" | "entry" | "display" | "processing" | "paid";
 
 const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaTabProps) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { session } = useAuth();
   const currency = unitCurrency || session?.currency || 'GBP';
   const currencySymbol = CURRENCY_SYMBOL[currency] || '£';
@@ -471,6 +471,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       const analyzeForm = new FormData();
       analyzeForm.append('receipt', file, file.name);
       analyzeForm.append('currency', currency);
+      analyzeForm.append('lang', i18n.language || 'en');
       const analyzeRes = await fetch('/api/receipt/analyze', { method: 'POST', body: analyzeForm });
       const analysis = await analyzeRes.json();
       if (analysis.isReceipt) {

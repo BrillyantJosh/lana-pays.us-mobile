@@ -84,7 +84,7 @@ function looksLikePriorDedupError(text: string | null | undefined): boolean {
 }
 
 const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTabProps) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { session } = useAuth();
   const currency = unitCurrency || session?.currency || 'GBP';
   const CurrencyIcon = currencyIcons[currency] || PoundSterling;
@@ -253,6 +253,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       const analyzeForm = new FormData();
       analyzeForm.append('receipt', file, file.name);
       analyzeForm.append('currency', currency);
+      analyzeForm.append('lang', i18n.language || 'en');
       const analyzeRes = await fetch('/api/receipt/analyze', { method: 'POST', body: analyzeForm });
       const analysis = await analyzeRes.json();
 

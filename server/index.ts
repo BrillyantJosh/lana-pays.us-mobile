@@ -1121,6 +1121,18 @@ app.post('/api/receipt/analyze', receiptUpload.single('receipt'), async (req, re
     let mediaType: 'image/jpeg' | 'image/png' | 'image/webp' = req.file.mimetype as any;
     const currency = (req.body.currency as string) || 'EUR';
 
+    // The seller's UI language — Claude writes the human-readable
+    // items/description in this language so the receipt summary matches
+    // the rest of the app. Map our short codes to full language names so
+    // the model is unambiguous. Falls back to English.
+    const LANG_NAMES: Record<string, string> = {
+      en: 'English', sl: 'Slovenian', de: 'German', it: 'Italian', es: 'Spanish',
+      pt: 'Portuguese', hr: 'Croatian', sr: 'Serbian', pl: 'Polish',
+      hu: 'Hungarian', ru: 'Russian', zh: 'Chinese',
+    };
+    const langCode = ((req.body.lang as string) || 'en').slice(0, 2).toLowerCase();
+    const langName = LANG_NAMES[langCode] || 'English';
+
     // Resize if image exceeds Claude's 5 MB base64 limit
     if (imageBuffer.length > MAX_IMAGE_BYTES) {
       console.log(`[mobile] Receipt image too large (${(imageBuffer.length / 1024 / 1024).toFixed(1)} MB), resizing...`);
@@ -1157,7 +1169,8 @@ If this is NOT a receipt (photo of people, items, scene, etc.):
 Rules:
 - amount must be a number (no currency symbols), or null if unreadable
 - invoiceNumber: receipt/invoice number if visible, null otherwise
-- For non-receipts, describe what you see objectively`
+- For non-receipts, describe what you see objectively
+- IMPORTANT: write the "items" and "description" text in ${langName}. All other JSON keys and values stay exactly as specified.`
           }
         ]
       }],
