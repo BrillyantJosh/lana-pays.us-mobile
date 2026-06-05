@@ -298,5 +298,7 @@
   "registerCustomer.registerAnother": "Registra un altro portafoglio",
   "purchase.cannotSellToYourself": "Non puoi acquistare dalla tua stessa unità commerciale. Usa un portafoglio cliente diverso.",
   "purchase.invalidCustomerWallet": "L'indirizzo del portafoglio del cliente non è valido. Esegui di nuovo la scansione del portafoglio e riprova.",
-  "purchase.invalidMerchantWallet": "Questa unità commerciale ha un portafoglio non valido configurato. Contatta l'assistenza."
+  "purchase.invalidMerchantWallet": "Questa unità commerciale ha un portafoglio non valido configurato. Contatta l'assistenza.",
+  "purchase.paymentFailedTitle": "Pagamento non ricevuto",
+  "purchase.customerLanaFailed": "Il pagamento in LANA del cliente non è andato a buon fine, quindi nessun importo è stato ricevuto. NON consegnare la merce. Chiedi al cliente di riprovare il pagamento."
 }

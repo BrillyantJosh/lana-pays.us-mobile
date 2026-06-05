@@ -298,5 +298,7 @@
   "registerCustomer.registerAnother": "Zarejestruj kolejny portfel",
   "purchase.cannotSellToYourself": "Nie możesz kupować we własnej jednostce biznesowej. Użyj innego portfela klienta.",
   "purchase.invalidCustomerWallet": "Adres portfela klienta jest nieprawidłowy. Zeskanuj portfel ponownie i spróbuj jeszcze raz.",
-  "purchase.invalidMerchantWallet": "Ta jednostka biznesowa ma skonfigurowany nieprawidłowy portfel. Skontaktuj się z pomocą techniczną."
+  "purchase.invalidMerchantWallet": "Ta jednostka biznesowa ma skonfigurowany nieprawidłowy portfel. Skontaktuj się z pomocą techniczną.",
+  "purchase.paymentFailedTitle": "Płatność nieotrzymana",
+  "purchase.customerLanaFailed": "Płatność klienta w LANA nie powiodła się, więc nie otrzymano środków. NIE wydawaj towaru. Poproś klienta o ponowienie płatności."
 }

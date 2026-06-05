@@ -383,6 +383,11 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
                 ? t('purchase.invalidCustomerWallet')
                 : t('purchase.invalidMerchantWallet')
             );
+          } else if (purchaseRes.status === 402 && brainData?.error === 'CUSTOMER_LANA_FAILED') {
+            // The customer's LANA funding TX was rejected by the network — NO
+            // payment was received and NO payout was released. The seller must
+            // NOT hand over goods. Loud, clear, localized message.
+            setPurchaseError(t('purchase.customerLanaFailed'));
           } else {
             setPurchaseError(brainData.error || t('lana.purchaseFailed'));
           }
@@ -787,13 +792,17 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           </div>
         )}
 
-        {/* Purchase error from Brain */}
+        {/* Purchase error from Brain — large + unmissable: a failed LANA payment
+            means NO money was received, so the seller must not overlook it. */}
         {purchaseError && !isCheckingBalance && !isFrozen && !scanError && (
           <div className="space-y-4">
-            <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-destructive">{purchaseError}</p>
+            <div className="rounded-2xl bg-destructive/10 border-2 border-destructive/50 p-6">
+              <div className="flex flex-col items-center text-center gap-3">
+                <AlertCircle className="w-14 h-14 text-destructive flex-shrink-0" />
+                <p className="text-lg font-bold text-destructive uppercase tracking-wide">
+                  {t('purchase.paymentFailedTitle')}
+                </p>
+                <p className="text-base font-semibold text-destructive leading-snug">{purchaseError}</p>
               </div>
             </div>
             <Button

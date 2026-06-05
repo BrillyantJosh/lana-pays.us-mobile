@@ -298,5 +298,7 @@
   "registerCustomer.registerAnother": "注册另一个钱包",
   "purchase.cannotSellToYourself": "您不能在自己的业务单位购物。请使用其他客户钱包。",
   "purchase.invalidCustomerWallet": "客户的钱包地址无效。请重新扫描钱包后再试。",
-  "purchase.invalidMerchantWallet": "此业务单位配置了无效的钱包。请联系客服。"
+  "purchase.invalidMerchantWallet": "此业务单位配置了无效的钱包。请联系客服。",
+  "purchase.paymentFailedTitle": "未收到付款",
+  "purchase.customerLanaFailed": "客户的 LANA 付款未成功，未收到任何款项。请勿交付商品。请让客户重新付款。"
 }

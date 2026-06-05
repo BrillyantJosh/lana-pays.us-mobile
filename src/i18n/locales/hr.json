@@ -298,5 +298,7 @@
   "registerCustomer.registerAnother": "Registriraj još jedan novčanik",
   "purchase.cannotSellToYourself": "Ne možete kupovati u vlastitoj poslovnoj jedinici. Koristite drugi novčanik kupca.",
   "purchase.invalidCustomerWallet": "Adresa novčanika kupca nije valjana. Ponovno skenirajte novčanik i pokušajte ponovno.",
-  "purchase.invalidMerchantWallet": "Ova poslovna jedinica ima postavljen nevažeći novčanik. Obratite se podršci."
+  "purchase.invalidMerchantWallet": "Ova poslovna jedinica ima postavljen nevažeći novčanik. Obratite se podršci.",
+  "purchase.paymentFailedTitle": "Plaćanje nije primljeno",
+  "purchase.customerLanaFailed": "Kupčevo plaćanje u LANA nije uspjelo, pa sredstva nisu primljena. NE predajte robu. Zamolite kupca da ponovi plaćanje."
 }

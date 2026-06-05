@@ -298,5 +298,7 @@
   "registerCustomer.registerAnother": "Registrar otra billetera",
   "purchase.cannotSellToYourself": "No puede comprar en su propia unidad de negocio. Use una billetera de cliente diferente.",
   "purchase.invalidCustomerWallet": "La dirección de la billetera del cliente no es válida. Vuelva a escanear la billetera e inténtelo de nuevo.",
-  "purchase.invalidMerchantWallet": "Esta unidad de negocio tiene configurada una billetera no válida. Póngase en contacto con el soporte."
+  "purchase.invalidMerchantWallet": "Esta unidad de negocio tiene configurada una billetera no válida. Póngase en contacto con el soporte.",
+  "purchase.paymentFailedTitle": "Pago no recibido",
+  "purchase.customerLanaFailed": "El pago en LANA del cliente no se realizó, por lo que no se recibió ningún fondo. NO entregue la mercancía. Pida al cliente que intente el pago de nuevo."
 }

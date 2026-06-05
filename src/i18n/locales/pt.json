@@ -298,5 +298,7 @@
   "registerCustomer.registerAnother": "Registar outra carteira",
   "purchase.cannotSellToYourself": "Não pode comprar na sua própria unidade de negócio. Use uma carteira de cliente diferente.",
   "purchase.invalidCustomerWallet": "O endereço da carteira do cliente é inválido. Faça novamente a leitura da carteira e tente outra vez.",
-  "purchase.invalidMerchantWallet": "Esta unidade de negócio tem uma carteira inválida configurada. Entre em contacto com o suporte."
+  "purchase.invalidMerchantWallet": "Esta unidade de negócio tem uma carteira inválida configurada. Entre em contacto com o suporte.",
+  "purchase.paymentFailedTitle": "Pagamento não recebido",
+  "purchase.customerLanaFailed": "O pagamento em LANA do cliente não foi concluído, por isso não foram recebidos fundos. NÃO entregue a mercadoria. Peça ao cliente para tentar o pagamento novamente."
 }

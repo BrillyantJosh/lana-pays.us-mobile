@@ -298,5 +298,7 @@
   "registerCustomer.registerAnother": "Weitere Wallet registrieren",
   "purchase.cannotSellToYourself": "Sie können nicht in Ihrer eigenen Geschäftseinheit einkaufen. Bitte verwenden Sie eine andere Kunden-Wallet.",
   "purchase.invalidCustomerWallet": "Die Wallet-Adresse des Kunden ist ungültig. Bitte scannen Sie die Wallet erneut und versuchen Sie es noch einmal.",
-  "purchase.invalidMerchantWallet": "Für diese Geschäftseinheit ist eine ungültige Wallet konfiguriert. Bitte wenden Sie sich an den Support."
+  "purchase.invalidMerchantWallet": "Für diese Geschäftseinheit ist eine ungültige Wallet konfiguriert. Bitte wenden Sie sich an den Support.",
+  "purchase.paymentFailedTitle": "Zahlung nicht erhalten",
+  "purchase.customerLanaFailed": "Die LANA-Zahlung des Kunden ist fehlgeschlagen, es wurde kein Geld empfangen. Geben Sie die Ware NICHT heraus. Bitten Sie den Kunden, die Zahlung erneut zu versuchen."
 }

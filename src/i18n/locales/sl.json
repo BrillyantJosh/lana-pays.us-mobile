@@ -429,5 +429,7 @@
   "cash.duplicateInvoice": "Ta opis je bil že uporabljen dne {{date}}. Vsak nakup je nov trenutek in s tem tudi nov opis dogodka. Bodi prisoten.",
   "purchase.cannotSellToYourself": "Nakup pri lastni poslovni enoti ni mogoč. Uporabite drugo strankino denarnico.",
   "purchase.invalidCustomerWallet": "Strankina denarnica ni veljavna. Ponovno skenirajte denarnico in poskusite znova.",
-  "purchase.invalidMerchantWallet": "Ta poslovna enota ima nastavljeno neveljavno denarnico. Obrnite se na podporo."
+  "purchase.invalidMerchantWallet": "Ta poslovna enota ima nastavljeno neveljavno denarnico. Obrnite se na podporo.",
+  "purchase.paymentFailedTitle": "Plačilo ni prejeto",
+  "purchase.customerLanaFailed": "Strankino plačilo v LANA ni uspelo, zato sredstva niso bila prejeta. Blaga NE izročite. Prosite stranko, naj plačilo ponovi."
 }
