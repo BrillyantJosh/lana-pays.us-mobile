@@ -324,6 +324,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           return;
         }
         const recipients = previewData.data.recipients || [];
+        // Echo the preview's investor allocation back to /api/purchase so Brain
+        // pays & charges the SAME investor this signed TX actually pays on-chain
+        // (no re-allocation → fixes recorded-investor vs on-chain-recipient mismatch).
+        const allocations = previewData.data.allocations || [];
         if (!Array.isArray(recipients) || recipients.length === 0) {
           setPurchaseError(t('lana.purchaseFailed'));
           setStep("display");
@@ -351,7 +355,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           return;
         }
 
-        const purchaseBody = { ...basePurchaseBody, signed_tx_hex: signedTxHex };
+        const purchaseBody = { ...basePurchaseBody, signed_tx_hex: signedTxHex, allocations };
 
         const purchaseRes = await fetch('/api/brain/purchase', {
           method: 'POST',
