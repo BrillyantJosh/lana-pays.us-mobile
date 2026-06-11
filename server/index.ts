@@ -864,6 +864,14 @@ app.post('/api/brain/purchase/preview', purchaseLimiter, async (req, res) => {
       body: JSON.stringify(req.body),
     });
     const data = await response.json();
+    // DIAGNOSTIC: pinpoint which required field is empty when Brain rejects a
+    // preview with "Missing required fields" (the field names + safe prefixes,
+    // never full secrets). Lets us tell the seller exactly what didn't resolve.
+    if (response.status === 400 && data?.error === 'Missing required fields') {
+      const b = req.body || {};
+      const missing = ['unit_id', 'customer_hex', 'customer_wallet', 'amount', 'currency'].filter(f => !b[f]);
+      console.warn(`[mobile] PREVIEW 400 Missing required fields → EMPTY: [${missing.join(', ') || 'none?'}] | unit_id=${b.unit_id || '∅'} hex=${(b.customer_hex || '∅').slice(0, 12)} wallet=${(b.customer_wallet || '∅').slice(0, 16)} amount=${b.amount ?? '∅'} currency=${b.currency || '∅'}`);
+    }
     res.status(response.status).json(data);
   } catch (error: any) {
     console.error('[mobile] Brain preview proxy error:', error.message);
@@ -961,6 +969,7 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
   console.log('[mobile] Purchase request body:', JSON.stringify({
     unit_id: req.body?.unit_id || 'EMPTY',
     payment_type: req.body?.payment_type || 'EMPTY',
+    customer_hex: req.body?.customer_hex ? req.body.customer_hex.slice(0, 12) + '...' : 'EMPTY',
     customer_wallet: req.body?.customer_wallet ? req.body.customer_wallet.slice(0, 10) + '...' : 'EMPTY',
     amount: req.body?.amount,
     currency: req.body?.currency || 'EMPTY',
