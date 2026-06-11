@@ -729,7 +729,13 @@ const Index = () => {
 
             {/* ─── Payment buttons OR blocked-status panel ─── */}
             {(() => {
-              const noShopSelected = (businessUnits.length > 1 && !selectedUnit);
+              // Disable the pay buttons whenever there is no usable unit:
+              //   • 0 units  → a staff seller not (yet) assigned to any shop
+              //   • 2+ units → none explicitly selected
+              // (Previously this only covered the 2+ case, so a seller with NO
+              // shops could still tap Cash/LANA → purchase failed at Brain with
+              // a cryptic "Missing required fields" because unit_id was empty.)
+              const noShopSelected = !effectiveUnit;
               const isBlocked = (selectedUnit ? isUnitBlocked(selectedUnit) : false) || (businessUnits.length === 1 && isUnitBlocked(businessUnits[0]));
               const noFunds = selectedMaxTx !== null && selectedMaxTx !== undefined && (selectedMaxTx.max_amount === null || selectedMaxTx.max_amount === undefined || selectedMaxTx.max_amount <= 0);
 
