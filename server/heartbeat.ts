@@ -48,23 +48,34 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
       throw new Error('Failed to fetch KIND 38888 system parameters');
     }
 
-    // Store KIND 38888
-    db.prepare(`
-      INSERT INTO kind_38888 (event_id, split, exchange_rates, electrum_servers, relays, version, valid_from, split_target_lana, split_started_at, split_ends_at, raw_event, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    `).run(
-      systemParams.event_id,
-      systemParams.split,
-      JSON.stringify(systemParams.exchange_rates),
-      JSON.stringify(systemParams.electrum_servers),
-      JSON.stringify(systemParams.relays),
-      systemParams.version,
-      systemParams.valid_from,
-      systemParams.split_target_lana || 0,
-      systemParams.split_started_at || 0,
-      systemParams.split_ends_at || 0,
-      systemParams.raw_event
-    );
+    // Store KIND 38888 — only insert a new row when the event actually changed.
+    // Otherwise we'd append a ~92KB raw_event blob every tick and bloat the DB.
+    const latest38888 = db.prepare(
+      'SELECT id, event_id FROM kind_38888 ORDER BY id DESC LIMIT 1'
+    ).get() as { id: number; event_id: string } | undefined;
+
+    if (latest38888 && latest38888.event_id === systemParams.event_id) {
+      db.prepare("UPDATE kind_38888 SET updated_at = datetime('now') WHERE id = ?").run(latest38888.id);
+      console.log(`[sync] KIND 38888 unchanged (${systemParams.event_id.slice(0, 12)}…), touched updated_at`);
+    } else {
+      db.prepare(`
+        INSERT INTO kind_38888 (event_id, split, exchange_rates, electrum_servers, relays, version, valid_from, split_target_lana, split_started_at, split_ends_at, raw_event, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).run(
+        systemParams.event_id,
+        systemParams.split,
+        JSON.stringify(systemParams.exchange_rates),
+        JSON.stringify(systemParams.electrum_servers),
+        JSON.stringify(systemParams.relays),
+        systemParams.version,
+        systemParams.valid_from,
+        systemParams.split_target_lana || 0,
+        systemParams.split_started_at || 0,
+        systemParams.split_ends_at || 0,
+        systemParams.raw_event
+      );
+      console.log(`[sync] KIND 38888 changed → inserted new row (${systemParams.event_id.slice(0, 12)}…)`);
+    }
 
     console.log(`KIND 38888: split=${systemParams.split}, EUR=${systemParams.exchange_rates.EUR}, USD=${systemParams.exchange_rates.USD}, GBP=${systemParams.exchange_rates.GBP}`);
 
