@@ -42,6 +42,8 @@
   "home.payWithLana": "Plaćanje u $Lana",
   "home.lanaPayment": "Registrirane Lana",
   "home.noFunds": "Nema dostupnih investicijskih sredstava — nije moguće kreirati račune",
+  "home.lanaPayoutNotConfigured": "Plaćanje u LANA nije moguće",
+  "home.lanaPayoutNotConfiguredDetail": "Ovaj trgovac još nije unio podatke za isplatu (IBAN i podatke tvrtke). Dok to ne učini, plaćanje u LANA nije moguće — dostupno je samo plaćanje gotovinom.",
   "qrScanner.defaultTitle": "Skeniraj QR kod",
   "qrScanner.defaultDescription": "Postavite QR kod unutar okvira",
   "qrScanner.noCamera": "Kamera nije pronađena na ovom uređaju.",

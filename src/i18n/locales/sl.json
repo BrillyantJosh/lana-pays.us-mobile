@@ -53,6 +53,8 @@
   "home.payWithLana": "Plačilo z $Lana",
   "home.lanaPayment": "Registrirane Lane",
   "home.noFunds": "Ni razpoložljivih investitorskih sredstev — ni mogoče ustvariti računov",
+  "home.lanaPayoutNotConfigured": "Plačilo v LANA ni možno",
+  "home.lanaPayoutNotConfiguredDetail": "Trgovec še ni vnesel izplačilnih podatkov (IBAN in podatki podjetja). Dokler tega ne uredi, plačilo v LANA ni mogoče — na voljo je le plačilo z gotovino.",
   "qrScanner.defaultTitle": "Skeniraj QR kodo",
   "qrScanner.defaultDescription": "Postavite QR kodo znotraj okvirja",
   "qrScanner.noCamera": "Na tej napravi ni kamere.",

@@ -403,7 +403,8 @@ app.get('/api/business-units/:hexId', (req, res) => {
            lanapays_payout_method, suspension_status, suspension_reason,
            suspension_until, suspension_content,
            quota_volume_used, quota_volume_limit, quota_tx_used, quota_tx_limit,
-           quota_currency, quota_period, updated_at
+           quota_currency, quota_period, updated_at,
+           bank_account, raw_event
     FROM business_units
     WHERE status = 'active'
       AND (owner_hex = ? OR authorized_hex LIKE ?)
@@ -421,7 +422,34 @@ app.get('/api/business-units/:hexId', (req, res) => {
     }
   });
 
-  res.json({ units: filtered });
+  // Whether the merchant has entered payout data (IBAN/account). A LANA purchase
+  // wires the merchant invoice to their bank (brain orchestrator merchant_payment
+  // destination_type='bank'); with no IBAN it cannot be paid out — so the mobile
+  // greys out "Pay with LANA". Cash needs no bank, so it stays enabled.
+  // The IBAN lives in the KIND 30901 `payment_scheme_fields` tag (modern), with the
+  // legacy `bank_account` column as a fallback. Read it from raw_event so no schema
+  // change / re-ingestion is needed; the raw IBAN is never returned to the client.
+  const hasPayout = (u: any): boolean => {
+    try {
+      const ev = JSON.parse(u.raw_event || '{}');
+      const tag = (ev.tags || []).find((t: any[]) => t[0] === 'payment_scheme_fields');
+      if (tag && tag[1]) {
+        const f = JSON.parse(tag[1]);
+        if (f && typeof f === 'object' && Object.values(f).some(v => String(v ?? '').trim() !== '')) {
+          return true;
+        }
+      }
+    } catch { /* fall through to legacy / false */ }
+    return !!(u.bank_account && String(u.bank_account).trim() !== '');
+  };
+
+  const result = filtered.map((u) => {
+    // Strip the raw payout fields; expose only the computed boolean.
+    const { raw_event, bank_account, ...rest } = u;
+    return { ...rest, payout_configured: hasPayout({ raw_event, bank_account }) };
+  });
+
+  res.json({ units: result });
 });
 
 // ─── Authorization Helper ─────────────────────────────

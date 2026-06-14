@@ -42,6 +42,8 @@
   "home.payWithLana": "Zahlung in $Lana",
   "home.lanaPayment": "Registrierte Lana",
   "home.noFunds": "Keine Investorenmittel verfügbar — Rechnungen können nicht erstellt werden",
+  "home.lanaPayoutNotConfigured": "LANA-Zahlung nicht verfügbar",
+  "home.lanaPayoutNotConfiguredDetail": "Dieser Händler hat noch keine Auszahlungsdaten (IBAN und Firmenangaben) eingegeben. Bis dahin ist eine LANA-Zahlung nicht möglich — nur Barzahlung ist verfügbar.",
   "qrScanner.defaultTitle": "QR-Code scannen",
   "qrScanner.defaultDescription": "Positionieren Sie den QR-Code innerhalb des Rahmens",
   "qrScanner.noCamera": "Keine Kamera auf diesem Gerät gefunden.",

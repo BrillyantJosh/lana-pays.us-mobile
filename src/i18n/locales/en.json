@@ -53,6 +53,8 @@
   "home.payWithLana": "Payment with $Lana",
   "home.lanaPayment": "Registered Lana",
   "home.noFunds": "No investor funds available — cannot create invoices",
+  "home.lanaPayoutNotConfigured": "LANA payment unavailable",
+  "home.lanaPayoutNotConfiguredDetail": "This merchant hasn't entered payout details (IBAN and company info) yet. Until they do, LANA payment isn't possible — only cash payment is available.",
   "qrScanner.defaultTitle": "Scan QR Code",
   "qrScanner.defaultDescription": "Position the QR code within the frame",
   "qrScanner.noCamera": "No camera found on this device.",

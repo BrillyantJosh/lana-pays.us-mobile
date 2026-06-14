@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from 'react-i18next';
-import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog } from "lucide-react";
+import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import MenuDrawer from "@/components/MenuDrawer";
 import CashTab from "@/components/tabs/CashTab";
@@ -28,6 +28,9 @@ interface BusinessUnit {
   status: string;
   receiver_city: string;
   lanapays_payout_method: string;
+  // Server-computed: merchant has entered payout data (IBAN/account). Required for
+  // LANA purchases (invoice wires to the merchant's bank); not needed for cash.
+  payout_configured?: boolean;
   // suspension_status now carries the Merchant Registration Gateway status:
   //   'pending' | 'active' | 'quota_warning_80' | 'quota_blocked' | 'suspended' | 'rejected'
   suspension_status: string;
@@ -747,6 +750,13 @@ const Index = () => {
               }
 
               const payDisabled = noShopSelected || noFunds;
+
+              // A LANA purchase wires the merchant invoice to their bank, so it
+              // needs payout data (IBAN). Cash does not. When the merchant hasn't
+              // entered payout data, disable ONLY the LANA button and show a clear
+              // notice. Strict `=== false` is fail-open: if the server field is ever
+              // absent (old build / rollout lag) we never wrongly block LANA.
+              const lanaPayoutMissing = !!effectiveUnit && effectiveUnit.payout_configured === false;
               return (
                 <>
                   <button
@@ -771,7 +781,7 @@ const Index = () => {
 
                   <button
                     onClick={() => setActiveView("lana")}
-                    disabled={payDisabled}
+                    disabled={payDisabled || lanaPayoutMissing}
                     className="relative overflow-hidden flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {/* Mandala background mesh */}
@@ -792,6 +802,18 @@ const Index = () => {
                   {noFunds && !noShopSelected && (
                     <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
                       <p className="text-sm text-destructive text-center font-medium">{t('home.noFunds')}</p>
+                    </div>
+                  )}
+
+                  {/* Merchant has no payout data (IBAN) → LANA is greyed above; explain why,
+                      large + clear. Cash stays available. */}
+                  {lanaPayoutMissing && !payDisabled && (
+                    <div className="rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
+                      <div className="w-14 h-14 mx-auto rounded-full bg-amber-500/15 flex items-center justify-center">
+                        <Landmark className="w-7 h-7 text-amber-600 dark:text-amber-400" />
+                      </div>
+                      <h3 className="text-xl font-bold text-amber-700 dark:text-amber-400">{t('home.lanaPayoutNotConfigured')}</h3>
+                      <p className="text-base font-medium text-amber-700/90 dark:text-amber-300/90 leading-relaxed">{t('home.lanaPayoutNotConfiguredDetail')}</p>
                     </div>
                   )}
                 </>

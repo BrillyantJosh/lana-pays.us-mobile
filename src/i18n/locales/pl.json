@@ -42,6 +42,8 @@
   "home.payWithLana": "Płatność w $Lana",
   "home.lanaPayment": "Zarejestrowane Lana",
   "home.noFunds": "Brak dostępnych funduszy inwestycyjnych — nie można tworzyć faktur",
+  "home.lanaPayoutNotConfigured": "Płatność w LANA niedostępna",
+  "home.lanaPayoutNotConfiguredDetail": "Ten sprzedawca nie wprowadził jeszcze danych do wypłaty (IBAN i dane firmy). Do tego czasu płatność w LANA nie jest możliwa — dostępna jest tylko płatność gotówką.",
   "qrScanner.defaultTitle": "Skanuj kod QR",
   "qrScanner.defaultDescription": "Ustaw kod QR w ramce",
   "qrScanner.noCamera": "Nie znaleziono kamery na tym urządzeniu.",
