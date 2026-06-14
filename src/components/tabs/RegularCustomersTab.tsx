@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Users, UserPlus, Loader2, Trash2, Search, Store, Sparkles, TrendingUp, Snowflake, AlertTriangle, ExternalLink, ScanLine, X } from 'lucide-react';
 import { QRScanner } from '@/components/QRScanner';
@@ -33,6 +33,7 @@ interface BusinessUnitOption {
   name: string;
   image?: string;
   currency?: string;
+  owner_hex?: string;
 }
 
 interface CustomerBalance {
@@ -63,6 +64,29 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
 
   // For "Add Customer" — which unit to add to
   const [addToUnitId, setAddToUnitId] = useState<string>(businessUnits[0]?.unit_id || '');
+
+  // Regulars are owner-scoped, so the "add to" picker only needs to choose the
+  // MERCHANT (owner). Collapse the per-shop list to one option per owner (a
+  // representative shop); the picker is hidden entirely when there is one owner.
+  const ownerOptions = useMemo(() => {
+    const byOwner = new Map<string, BusinessUnitOption[]>();
+    for (const u of businessUnits) {
+      const key = u.owner_hex || u.unit_id;
+      const arr = byOwner.get(key);
+      if (arr) arr.push(u); else byOwner.set(key, [u]);
+    }
+    return [...byOwner.values()].map(shops => ({
+      unitId: shops[0].unit_id,
+      label: shops.length > 1 ? `${shops[0].name} (+${shops.length - 1})` : shops[0].name,
+    }));
+  }, [businessUnits]);
+
+  // Keep the selected "add to" unit valid (a representative of one owner option).
+  useEffect(() => {
+    if (ownerOptions.length && !ownerOptions.some(o => o.unitId === addToUnitId)) {
+      setAddToUnitId(ownerOptions[0].unitId);
+    }
+  }, [ownerOptions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Scan result state
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -333,7 +357,9 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
     setDeletingId(customerHexId + unitId);
     try {
       await fetch(`/api/regular-customers/${unitId}/${customerHexId}?staff_hex=${staffHexId}`, { method: 'DELETE' });
-      setCustomers(prev => prev.filter(c => !(c.customer_hex_id === customerHexId && c.unit_id === unitId)));
+      // The list is deduped per person and the server clears them across the
+      // operator's merchants, so drop every row for this customer.
+      setCustomers(prev => prev.filter(c => c.customer_hex_id !== customerHexId));
     } catch {} finally {
       setDeletingId(null);
     }
@@ -392,8 +418,10 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
             </div>
           </div>
 
-          {/* Select which unit to add to */}
-          {businessUnits.length > 1 && (
+          {/* Choose which MERCHANT (owner) to add to — only when the operator has
+              shops of more than one owner. With a single owner there's nothing to
+              choose (regulars are shared across all that owner's shops). */}
+          {ownerOptions.length > 1 && (
             <div className="space-y-1.5">
               <p className="text-xs text-muted-foreground">{t('regulars.addToShop')}</p>
               <select
@@ -401,8 +429,8 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
                 onChange={e => setAddToUnitId(e.target.value)}
                 className="w-full h-11 rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
               >
-                {businessUnits.map(u => (
-                  <option key={u.unit_id} value={u.unit_id}>{u.name}</option>
+                {ownerOptions.map(o => (
+                  <option key={o.unitId} value={o.unitId}>{o.label}</option>
                 ))}
               </select>
             </div>

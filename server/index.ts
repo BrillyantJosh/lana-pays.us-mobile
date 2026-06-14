@@ -470,6 +470,19 @@ function ownerForUnit(db: any, unitId: string): string {
   return unit?.owner_hex || '';
 }
 
+// Distinct OWNERS (merchants) this operator can manage — owner of, or staff on, any
+// active unit. Used to scope the unified regular-customers list + cross-merchant delete.
+function authorizedOwners(db: any, staffHex: string): string[] {
+  const units = db.prepare(`SELECT owner_hex, authorized_hex FROM business_units WHERE status = 'active'`).all() as any[];
+  const owners = new Set<string>();
+  for (const u of units) {
+    const authed = u.owner_hex === staffHex
+      || (() => { try { return JSON.parse(u.authorized_hex || '[]').includes(staffHex); } catch { return false; } })();
+    if (authed && u.owner_hex) owners.add(u.owner_hex);
+  }
+  return [...owners];
+}
+
 // ─── Regular Customers API ────────────────────────────
 
 /**
@@ -551,9 +564,14 @@ app.delete('/api/regular-customers/:unitId/:customerHexId', (req, res) => {
     return res.status(403).json({ error: 'Not authorized for this unit' });
   }
 
-  // Owner-wide: removing a regular removes them from ALL of this merchant's shops.
-  const ownerHex = ownerForUnit(db, unitId);
-  db.prepare('DELETE FROM regular_customers WHERE owner_hex = ? AND customer_hex_id = ?').run(ownerHex, customerHexId);
+  // The management list is deduped per PERSON across all the operator's merchants,
+  // so one delete must clear them everywhere this operator manages (else the row
+  // would reappear from another merchant's pool after refresh).
+  const owners = authorizedOwners(db, staffHex);
+  if (owners.length) {
+    const ph = owners.map(() => '?').join(',');
+    db.prepare(`DELETE FROM regular_customers WHERE customer_hex_id = ? AND owner_hex IN (${ph})`).run(customerHexId, ...owners);
+  }
   res.json({ success: true });
 });
 
@@ -584,17 +602,21 @@ app.get('/api/regular-customers-all', (req, res) => {
 
   const owners = [...ownerSet];
   const placeholders = owners.map(() => '?').join(',');
-  // One row per (owner, customer) — the unique index guarantees no per-unit dupes.
-  const customers = db.prepare(`
+  // Newest first so we can keep ONE row per PERSON: a customer who is a regular at
+  // two of the operator's merchants must appear only once in this unified list.
+  const rows = db.prepare(`
     SELECT id, unit_id, owner_hex, customer_hex_id, customer_wallet, customer_npub,
            display_name, picture, added_by_hex, note, created_at
     FROM regular_customers
     WHERE owner_hex IN (${placeholders})
-    ORDER BY display_name ASC, created_at ASC
+    ORDER BY id DESC
   `).all(...owners) as any[];
 
-  // Add unit_name to each customer (the shop where first added).
-  const enriched = customers.map(c => ({ ...c, unit_name: unitMap[c.unit_id] || c.unit_id }));
+  const seenHex = new Set<string>();
+  const enriched = rows
+    .filter(c => (seenHex.has(c.customer_hex_id) ? false : (seenHex.add(c.customer_hex_id), true)))
+    .map(c => ({ ...c, unit_name: unitMap[c.unit_id] || c.unit_id }))
+    .sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
 
   res.json({ customers: enriched });
 });
