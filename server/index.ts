@@ -463,6 +463,13 @@ function isAuthorizedForUnit(db: any, hexId: string, unitId: string): boolean {
   } catch { return false; }
 }
 
+// Resolve the OWNER (merchant) of a unit. Regular customers are shared per owner,
+// so all of a merchant's shops draw from one pool. Returns '' if unknown.
+function ownerForUnit(db: any, unitId: string): string {
+  const unit = db.prepare('SELECT owner_hex FROM business_units WHERE unit_id = ?').get(unitId) as any;
+  return unit?.owner_hex || '';
+}
+
 // ─── Regular Customers API ────────────────────────────
 
 /**
@@ -480,13 +487,15 @@ app.get('/api/regular-customers/:unitId', (req, res) => {
     return res.status(403).json({ error: 'Not authorized for this unit' });
   }
 
+  // Owner-wide: every shop of this merchant shares one regular-customers pool.
+  const ownerHex = ownerForUnit(db, unitId);
   const customers = db.prepare(`
     SELECT id, unit_id, customer_hex_id, customer_wallet, customer_npub,
            display_name, picture, added_by_hex, note, created_at
     FROM regular_customers
-    WHERE unit_id = ?
+    WHERE owner_hex = ?
     ORDER BY display_name ASC, created_at ASC
-  `).all(unitId);
+  `).all(ownerHex);
 
   res.json({ customers });
 });
@@ -505,18 +514,25 @@ app.post('/api/regular-customers', (req, res) => {
     return res.status(403).json({ error: 'Not authorized for this unit' });
   }
 
+  // Add to the OWNER's shared pool. unit_id is kept as "added-at" provenance and
+  // is NOT overwritten on conflict (preserve where the customer was first added).
+  const ownerHex = ownerForUnit(db, unit_id);
+  if (!ownerHex) {
+    return res.status(400).json({ error: 'Unknown unit owner — not yet synced' });
+  }
+
   db.prepare(`
-    INSERT INTO regular_customers (unit_id, customer_hex_id, customer_wallet, customer_npub, display_name, picture, added_by_hex, note)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(unit_id, customer_hex_id) DO UPDATE SET
+    INSERT INTO regular_customers (unit_id, owner_hex, customer_hex_id, customer_wallet, customer_npub, display_name, picture, added_by_hex, note)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(owner_hex, customer_hex_id) DO UPDATE SET
       customer_wallet = excluded.customer_wallet,
       customer_npub = excluded.customer_npub,
       display_name = COALESCE(excluded.display_name, regular_customers.display_name),
       picture = COALESCE(excluded.picture, regular_customers.picture),
       note = COALESCE(excluded.note, regular_customers.note)
-  `).run(unit_id, customer_hex_id, customer_wallet, customer_npub || null, display_name || null, picture || null, staff_hex, note || null);
+  `).run(unit_id, ownerHex, customer_hex_id, customer_wallet, customer_npub || null, display_name || null, picture || null, staff_hex, note || null);
 
-  const customer = db.prepare('SELECT * FROM regular_customers WHERE unit_id = ? AND customer_hex_id = ?').get(unit_id, customer_hex_id);
+  const customer = db.prepare('SELECT * FROM regular_customers WHERE owner_hex = ? AND customer_hex_id = ?').get(ownerHex, customer_hex_id);
   res.json({ success: true, customer });
 });
 
@@ -535,7 +551,9 @@ app.delete('/api/regular-customers/:unitId/:customerHexId', (req, res) => {
     return res.status(403).json({ error: 'Not authorized for this unit' });
   }
 
-  db.prepare('DELETE FROM regular_customers WHERE unit_id = ? AND customer_hex_id = ?').run(unitId, customerHexId);
+  // Owner-wide: removing a regular removes them from ALL of this merchant's shops.
+  const ownerHex = ownerForUnit(db, unitId);
+  db.prepare('DELETE FROM regular_customers WHERE owner_hex = ? AND customer_hex_id = ?').run(ownerHex, customerHexId);
   res.json({ success: true });
 });
 
@@ -551,26 +569,31 @@ app.get('/api/regular-customers-all', (req, res) => {
     SELECT unit_id, name, owner_hex, authorized_hex FROM business_units WHERE status = 'active'
   `).all() as any[];
 
-  const authorizedUnits = units.filter(u => {
-    if (u.owner_hex === staffHex) return true;
-    try { return JSON.parse(u.authorized_hex || '[]').includes(staffHex); } catch { return false; }
-  });
+  // Distinct OWNERS whose shops this staff can operate (regulars are per-owner).
+  const ownerSet = new Set<string>();
+  for (const u of units) {
+    const authed = u.owner_hex === staffHex
+      || (() => { try { return JSON.parse(u.authorized_hex || '[]').includes(staffHex); } catch { return false; } })();
+    if (authed && u.owner_hex) ownerSet.add(u.owner_hex);
+  }
+  if (ownerSet.size === 0) return res.json({ customers: [] });
 
+  // unit_id → name, for the "added-at" provenance shown on each row.
   const unitMap: Record<string, string> = {};
-  authorizedUnits.forEach(u => { unitMap[u.unit_id] = u.name; });
+  units.forEach(u => { unitMap[u.unit_id] = u.name; });
 
-  if (authorizedUnits.length === 0) return res.json({ customers: [] });
-
-  const placeholders = authorizedUnits.map(() => '?').join(',');
+  const owners = [...ownerSet];
+  const placeholders = owners.map(() => '?').join(',');
+  // One row per (owner, customer) — the unique index guarantees no per-unit dupes.
   const customers = db.prepare(`
-    SELECT id, unit_id, customer_hex_id, customer_wallet, customer_npub,
+    SELECT id, unit_id, owner_hex, customer_hex_id, customer_wallet, customer_npub,
            display_name, picture, added_by_hex, note, created_at
     FROM regular_customers
-    WHERE unit_id IN (${placeholders})
+    WHERE owner_hex IN (${placeholders})
     ORDER BY display_name ASC, created_at ASC
-  `).all(...authorizedUnits.map(u => u.unit_id)) as any[];
+  `).all(...owners) as any[];
 
-  // Add unit_name to each customer
+  // Add unit_name to each customer (the shop where first added).
   const enriched = customers.map(c => ({ ...c, unit_name: unitMap[c.unit_id] || c.unit_id }));
 
   res.json({ customers: enriched });

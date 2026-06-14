@@ -329,6 +329,7 @@
   "principles.closing": "Thank you for being part of a living economy built on responsibility and mutual respect.",
   "regulars.title": "Regular Customers",
   "regulars.subtitle": "Manage your regular customers",
+  "regulars.sharedHint": "Shared across all your shops",
   "regulars.noShopSelected": "Please select a shop first",
   "regulars.empty": "No regular customers yet",
   "regulars.emptyHint": "Add customers by scanning their wallet or searching their profile",

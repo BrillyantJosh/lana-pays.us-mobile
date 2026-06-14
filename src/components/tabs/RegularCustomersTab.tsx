@@ -467,6 +467,10 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
         <div className="flex-1">
           <h2 className="font-display text-xl font-bold text-foreground">{t('regulars.title')}</h2>
           <p className="text-muted-foreground text-sm">{t('regulars.subtitle')}</p>
+          <p className="text-xs text-primary/80 mt-1 flex items-center gap-1">
+            <Store className="w-3 h-3 shrink-0" />
+            {t('regulars.sharedHint')}
+          </p>
         </div>
       </div>
 

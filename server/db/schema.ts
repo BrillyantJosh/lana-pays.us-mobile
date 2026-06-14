@@ -110,7 +110,9 @@ export function initializeSchema(db: Database.Database): void {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
-    -- Regular customers (per business unit)
+    -- Regular customers — shared per OWNER (merchant) across all their shops.
+    -- (Legacy UNIQUE(unit_id, customer_hex_id) kept; owner scope enforced by the
+    --  idx_regcust_owner_customer unique index added in the migration below.)
     CREATE TABLE IF NOT EXISTS regular_customers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       unit_id TEXT NOT NULL,
@@ -132,6 +134,28 @@ export function initializeSchema(db: Database.Database): void {
       updated_at TEXT DEFAULT (datetime('now')),
       updated_by TEXT
     );
+  `);
+
+  // ── Migration: regular customers are shared per OWNER (merchant), not per unit ──
+  // Add owner_hex, backfill from business_units, dedupe to one row per
+  // (owner_hex, customer_hex_id), and enforce it with a unique index. Fully
+  // idempotent — safe to run on every boot (late-synced units fill in then).
+  try { db.exec(`ALTER TABLE regular_customers ADD COLUMN owner_hex TEXT`); } catch { /* column exists */ }
+  db.exec(`
+    UPDATE regular_customers
+       SET owner_hex = (SELECT bu.owner_hex FROM business_units bu WHERE bu.unit_id = regular_customers.unit_id)
+     WHERE owner_hex IS NULL;
+
+    DELETE FROM regular_customers
+     WHERE owner_hex IS NOT NULL
+       AND id NOT IN (
+         SELECT MAX(id) FROM regular_customers
+          WHERE owner_hex IS NOT NULL
+          GROUP BY owner_hex, customer_hex_id
+       );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_regcust_owner_customer
+      ON regular_customers(owner_hex, customer_hex_id);
   `);
 
   // Seed admin user if table is empty
