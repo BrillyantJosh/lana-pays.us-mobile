@@ -822,7 +822,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         {isChecking && <div className="flex flex-col items-center gap-3 py-12"><Loader2 className="w-10 h-10 animate-spin text-primary" /><p className="text-sm text-muted-foreground">{t('cash.checkingWallet')}</p></div>}
         {(checkError || submitError) && !isChecking && (
           <div className="space-y-4">
-            <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4"><p className="text-sm text-destructive text-center">{checkError || submitError}</p></div>
+            <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4"><p className="text-xl text-destructive text-center leading-relaxed">{checkError || submitError}</p></div>
             <Button onClick={() => { setCheckError(null); setSubmitError(null); setScannerOpen(true); }} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90"><Camera className="w-5 h-5" />{t('common.scanAgain')}</Button>
           </div>
         )}
@@ -847,7 +847,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           <div><h2 className="font-display text-xl font-bold text-foreground">{t('cash.registerTitle')}</h2><p className="text-muted-foreground text-sm">{t('cash.registerSubtitle')}</p></div>
         </div>
         <BalanceCard compact />
-        {submitError && <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4"><p className="text-sm text-destructive text-center">{submitError}</p></div>}
+        {submitError && <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4"><p className="text-xl text-destructive text-center leading-relaxed">{submitError}</p></div>}
         <div className="space-y-3">
           <div className="space-y-1.5"><Label className="text-xs font-medium text-muted-foreground">{t('cash.fullName')} <span className="text-destructive">*</span></Label><Input placeholder={t('cash.fullNamePlaceholder')} value={fullName} onChange={(e) => setFullName(e.target.value)} className="h-11 rounded-xl" /></div>
         </div>
@@ -998,7 +998,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           })()}
         </div>
       </div>
-      {submitError && <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4"><p className="text-sm text-destructive text-center">{submitError}</p></div>}
+      {submitError && <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4"><p className="text-xl text-destructive text-center leading-relaxed">{submitError}</p></div>}
 
       {/* ══════ KEY FIX: Snapshot purchase data BEFORE opening scanner ══════ */}
       <Button
