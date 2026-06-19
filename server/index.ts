@@ -60,6 +60,46 @@ app.use(globalLimiter);
 // Initialize database
 const db = getDb();
 
+// ─── Request logging + 24h retention ──────────────────────
+// Breadcrumb trail of every request path, to debug stuck flows. Stores
+// method/path/status/duration/ip ONLY — never bodies (may hold WIF/secrets).
+// Skips static assets; auto-purges rows older than 24h; viewable by root admin.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS request_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL DEFAULT (datetime('now')),
+    method TEXT, path TEXT, status INTEGER, duration_ms INTEGER, ip TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_request_logs_ts ON request_logs(ts);
+`);
+const _reqLogStmt = db.prepare('INSERT INTO request_logs (method, path, status, duration_ms, ip) VALUES (?, ?, ?, ?, ?)');
+const _REQ_ASSET_RE = /\.(js|css|map|png|jpe?g|gif|svg|ico|webp|woff2?|ttf|eot)$/i;
+app.use((req, res, next) => {
+  const _t0 = Date.now();
+  res.on('finish', () => {
+    const p = (req.originalUrl || req.url || '').split('?')[0];
+    if (_REQ_ASSET_RE.test(p)) return;
+    try {
+      _reqLogStmt.run(req.method, p.slice(0, 300), res.statusCode, Date.now() - _t0,
+        ((req.headers['x-forwarded-for'] as string) || req.ip || '').toString().split(',')[0].trim().slice(0, 64));
+    } catch { /* logging must never break a request */ }
+  });
+  next();
+});
+const _purgeReqLogs = () => { try { db.prepare(`DELETE FROM request_logs WHERE ts < datetime('now','-24 hours')`).run(); } catch { /* noop */ } };
+_purgeReqLogs();
+setInterval(_purgeReqLogs, 60 * 60 * 1000);
+app.get('/api/request-logs', (req, res) => {
+  const caller = String(req.headers['x-admin-hex'] || req.headers['x-admin-hex-id'] || req.query.admin_hex || '').toLowerCase();
+  if (caller !== '56e8670aa65491f8595dc3a71c94aa7445dcdca755ca5f77c07218498a362061') return res.status(403).json({ error: 'forbidden' });
+  const limit = Math.min(parseInt(String(req.query.limit || '200')) || 200, 2000);
+  const q = String(req.query.q || '').trim();
+  const rows = q
+    ? db.prepare('SELECT * FROM request_logs WHERE path LIKE ? ORDER BY id DESC LIMIT ?').all('%' + q + '%', limit)
+    : db.prepare('SELECT * FROM request_logs ORDER BY id DESC LIMIT ?').all(limit);
+  res.json({ count: rows.length, logs: rows });
+});
+
 // ─── API Routes ────────────────────────────────────────
 
 /**
