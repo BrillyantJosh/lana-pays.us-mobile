@@ -151,6 +151,7 @@ const Login = () => {
         onScan={handleScan}
         title={t('login.scanTitle')}
         description={t('login.scanDescription')}
+        onManualEntry={() => { setScannerOpen(false); setShowManualInput(true); }}
       />
 
       {/* ── Principles modal ──────────────────────────────────────────── */}

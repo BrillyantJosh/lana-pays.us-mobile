@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import jsQR from 'jsqr';
 import { Button } from '@/components/ui/button';
-import { X, QrCode, Loader2 } from 'lucide-react';
+import { X, QrCode, Loader2, KeyRound } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 interface QRScannerProps {
@@ -12,6 +12,13 @@ interface QRScannerProps {
   title?: string;
   description?: string;
   children?: React.ReactNode;
+  /**
+   * Optional escape hatch shown when the camera can't be opened (permission
+   * blocked, no camera, in use by another app, privacy browser / VPN, …).
+   * When provided, a "enter manually" button appears in the error state and
+   * closes the scanner so the user can type/paste instead of being stuck.
+   */
+  onManualEntry?: () => void;
 }
 
 // Process at half resolution — enough pixels for jsQR at any reasonable
@@ -19,7 +26,7 @@ interface QRScannerProps {
 const PW = 640;
 const PH = 360;
 
-export function QRScanner({ isOpen, onClose, onScan, title, description, children }: QRScannerProps) {
+export function QRScanner({ isOpen, onClose, onScan, title, description, children, onManualEntry }: QRScannerProps) {
   const { t } = useTranslation();
   const resolvedTitle = title || t('qrScanner.defaultTitle');
   const resolvedDescription = description || t('qrScanner.defaultDescription');
@@ -157,9 +164,22 @@ export function QRScanner({ isOpen, onClose, onScan, title, description, childre
         setError(null);
         animRef.current = requestAnimationFrame(scanFrame);
       }
-    } catch (err) {
-      console.error('Camera error:', err);
-      setError(t('qrScanner.cameraError'));
+    } catch (err: any) {
+      console.error('Camera error:', err?.name, err?.message || err);
+      // Map the DOMException to a specific, actionable message. Falls back to
+      // the generic key (which exists in every locale) for unknown errors.
+      const name = err?.name || '';
+      let msg = t('qrScanner.cameraError');
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        msg = t('qrScanner.cameraDenied', 'Camera access was blocked. Allow the camera in your browser settings, or enter your key manually below.');
+      } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+        msg = t('qrScanner.cameraNotFound', 'No camera was found. Enter your key manually instead.');
+      } else if (name === 'NotReadableError' || name === 'AbortError') {
+        msg = t('qrScanner.cameraInUse', 'The camera is in use by another app. Close it and try again, or enter your key manually.');
+      } else if (typeof navigator !== 'undefined' && !navigator.mediaDevices?.getUserMedia) {
+        msg = t('qrScanner.cameraUnsupported', 'This browser can\'t open the camera here. Enter your key manually instead.');
+      }
+      setError(msg);
     }
   };
 
@@ -222,7 +242,18 @@ export function QRScanner({ isOpen, onClose, onScan, title, description, childre
           </div>
 
           {error && (
-            <p className="text-sm text-destructive">{error}</p>
+            <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 space-y-3">
+              <p className="text-sm text-destructive text-center">{error}</p>
+              {onManualEntry && (
+                <Button
+                  onClick={() => { handleClose(); onManualEntry(); }}
+                  className="w-full"
+                >
+                  <KeyRound className="w-4 h-4 mr-2" />
+                  {t('qrScanner.enterManually', 'Enter key manually')}
+                </Button>
+              )}
+            </div>
           )}
 
           <Button onClick={handleClose} variant="outline" className="w-full">
