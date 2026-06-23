@@ -432,8 +432,8 @@ const Index = () => {
               >
                 <MitosisIcon className="w-10 h-10 text-destructive shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-lg font-bold text-destructive leading-snug">{t('split.bannerApproaching')}</p>
-                  <p className="text-base font-semibold text-destructive/90 underline mt-1.5">{t('split.moreInfo')}</p>
+                  <p className="text-xl font-bold text-destructive leading-snug">{t('split.bannerApproaching')}</p>
+                  <p className="text-lg font-semibold text-destructive/90 underline mt-2">{t('split.moreInfo')}</p>
                 </div>
               </button>
             ) : (
@@ -929,23 +929,28 @@ const Index = () => {
 
         {/* ─── Split Info Modal (why the Split happens — opened from the red banner) ─── */}
         {splitInfoOpen && (
-          <>
-            <div className="fixed inset-0 bg-foreground/30 backdrop-blur-sm z-[80]" onClick={() => setSplitInfoOpen(false)} />
-            <div className="fixed inset-4 z-[90] bg-card rounded-2xl border border-border shadow-xl flex flex-col overflow-hidden">
+          <div
+            className="fixed inset-0 z-[80] flex items-center justify-center p-3 sm:p-4 bg-foreground/30 backdrop-blur-sm"
+            onClick={() => setSplitInfoOpen(false)}
+          >
+            <div
+              className="w-full max-w-lg max-h-[92vh] bg-card rounded-2xl border border-border shadow-xl flex flex-col overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
-                <h2 className="font-display font-bold text-foreground text-xl flex items-center gap-2.5 min-w-0">
-                  <MitosisIcon className="w-8 h-8 text-destructive shrink-0" />
+                <h2 className="font-display font-bold text-foreground text-2xl flex items-center gap-2.5 min-w-0">
+                  <MitosisIcon className="w-9 h-9 text-destructive shrink-0" />
                   <span className="truncate">{t('split.title')}</span>
                 </h2>
-                <button onClick={() => setSplitInfoOpen(false)} className="w-9 h-9 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0">
-                  <X className="w-5 h-5" />
+                <button onClick={() => setSplitInfoOpen(false)} className="w-10 h-10 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0">
+                  <X className="w-6 h-6" />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-5 text-base text-foreground leading-relaxed whitespace-pre-line">
+              <div className="flex-1 overflow-y-auto px-5 py-5 text-xl text-foreground leading-relaxed whitespace-pre-line">
                 {t('split.body')}
               </div>
             </div>
-          </>
+          </div>
         )}
 
         {/* ─── Back button + Tabs ─── */}
