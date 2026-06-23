@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from 'react-i18next';
-import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark } from "lucide-react";
+import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark, AlertTriangle } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import MenuDrawer from "@/components/MenuDrawer";
 import CashTab from "@/components/tabs/CashTab";
@@ -215,6 +215,8 @@ const Index = () => {
   const [activeView, setActiveView] = useState<View>("home");
   const [menuOpen, setMenuOpen] = useState(false);
   const [principlesOpen, setPrinciplesOpen] = useState(false);
+  const [splitApproaching, setSplitApproaching] = useState(false);
+  const [splitInfoOpen, setSplitInfoOpen] = useState(false);
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
   const [lanaPaymentRequest, setLanaPaymentRequest] = useState<{ walletAddress: string } | null>(null);
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
@@ -297,6 +299,21 @@ const Index = () => {
     const interval = setInterval(fetchUnits, 30_000);
     return () => clearInterval(interval);
   }, [session?.nostrHexId]);
+
+  // Poll KIND 38888 split-approaching status — when a Split is near, the merchant's
+  // top banner switches to the red Split notice (with a "more info" explainer modal).
+  useEffect(() => {
+    const fetchSplitStatus = async () => {
+      try {
+        const res = await fetch('/api/system-params');
+        const json = await res.json();
+        setSplitApproaching(json.data?.splitApproaching === true);
+      } catch { /* keep previous state on error */ }
+    };
+    fetchSplitStatus();
+    const interval = setInterval(fetchSplitStatus, 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Fetch max transaction limits for ALL business units
   useEffect(() => {
@@ -399,14 +416,27 @@ const Index = () => {
         {activeView === "home" && (
           <div className="flex flex-col gap-5 px-6 py-6" style={{ minHeight: 'calc(100vh - 3.5rem)' }}>
 
-            {/* ─── Principles banner (top, prominent) ─── */}
-            <button
-              onClick={() => setPrinciplesOpen(true)}
-              className="w-full rounded-2xl bg-primary/5 border border-primary/20 p-4 flex items-center gap-3 active:scale-[0.98] transition-transform text-left"
-            >
-              <Leaf className="w-6 h-6 text-primary shrink-0" />
-              <p className="text-sm font-medium text-foreground leading-snug">{t('principles.banner')}</p>
-            </button>
+            {/* ─── Top banner: red Split notice when a Split is approaching, else the trust banner ─── */}
+            {splitApproaching ? (
+              <button
+                onClick={() => setSplitInfoOpen(true)}
+                className="w-full rounded-2xl bg-destructive/10 border-2 border-destructive/40 p-4 flex items-center gap-3 active:scale-[0.98] transition-transform text-left"
+              >
+                <AlertTriangle className="w-6 h-6 text-destructive shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-destructive leading-snug">{t('split.bannerApproaching')}</p>
+                  <p className="text-xs font-semibold text-destructive/90 underline mt-1">{t('split.moreInfo')}</p>
+                </div>
+              </button>
+            ) : (
+              <button
+                onClick={() => setPrinciplesOpen(true)}
+                className="w-full rounded-2xl bg-primary/5 border border-primary/20 p-4 flex items-center gap-3 active:scale-[0.98] transition-transform text-left"
+              >
+                <Leaf className="w-6 h-6 text-primary shrink-0" />
+                <p className="text-sm font-medium text-foreground leading-snug">{t('principles.banner')}</p>
+              </button>
+            )}
 
             {/* ─── Shop Selector ─── */}
             {loadingUnits ? (
@@ -884,6 +914,27 @@ const Index = () => {
                   <p className="text-sm font-bold text-primary text-center italic">{t('principles.core')}</p>
                   <p className="text-xs text-muted-foreground text-center mt-2">{t('principles.closing')}</p>
                 </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ─── Split Info Modal (why the Split happens — opened from the red banner) ─── */}
+        {splitInfoOpen && (
+          <>
+            <div className="fixed inset-0 bg-foreground/30 backdrop-blur-sm z-[80]" onClick={() => setSplitInfoOpen(false)} />
+            <div className="fixed inset-4 z-[90] bg-card rounded-2xl border border-border shadow-xl flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
+                <h2 className="font-display font-bold text-foreground text-lg flex items-center gap-2 min-w-0">
+                  <AlertTriangle className="w-5 h-5 text-destructive shrink-0" />
+                  <span className="truncate">{t('split.title')}</span>
+                </h2>
+                <button onClick={() => setSplitInfoOpen(false)} className="w-9 h-9 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 text-sm text-foreground leading-relaxed whitespace-pre-line">
+                {t('split.body')}
               </div>
             </div>
           </>
