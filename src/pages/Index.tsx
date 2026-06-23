@@ -1,6 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from 'react-i18next';
-import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark, AlertTriangle } from "lucide-react";
+import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark } from "lucide-react";
+
+// Mitosis / cell-division glyph (one cell splitting into two) — represents the Split.
+const MitosisIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+    <circle cx="8.5" cy="12" r="5.25" stroke="currentColor" strokeWidth="2" />
+    <circle cx="15.5" cy="12" r="5.25" stroke="currentColor" strokeWidth="2" />
+  </svg>
+);
 import TopBar from "@/components/TopBar";
 import MenuDrawer from "@/components/MenuDrawer";
 import CashTab from "@/components/tabs/CashTab";
@@ -420,12 +428,12 @@ const Index = () => {
             {splitApproaching ? (
               <button
                 onClick={() => setSplitInfoOpen(true)}
-                className="w-full rounded-2xl bg-destructive/10 border-2 border-destructive/40 p-4 flex items-center gap-3 active:scale-[0.98] transition-transform text-left"
+                className="w-full rounded-2xl bg-destructive/10 border-2 border-destructive/40 p-5 flex items-center gap-4 active:scale-[0.98] transition-transform text-left"
               >
-                <AlertTriangle className="w-6 h-6 text-destructive shrink-0" />
+                <MitosisIcon className="w-10 h-10 text-destructive shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-destructive leading-snug">{t('split.bannerApproaching')}</p>
-                  <p className="text-xs font-semibold text-destructive/90 underline mt-1">{t('split.moreInfo')}</p>
+                  <p className="text-lg font-bold text-destructive leading-snug">{t('split.bannerApproaching')}</p>
+                  <p className="text-base font-semibold text-destructive/90 underline mt-1.5">{t('split.moreInfo')}</p>
                 </div>
               </button>
             ) : (
@@ -925,15 +933,15 @@ const Index = () => {
             <div className="fixed inset-0 bg-foreground/30 backdrop-blur-sm z-[80]" onClick={() => setSplitInfoOpen(false)} />
             <div className="fixed inset-4 z-[90] bg-card rounded-2xl border border-border shadow-xl flex flex-col overflow-hidden">
               <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
-                <h2 className="font-display font-bold text-foreground text-lg flex items-center gap-2 min-w-0">
-                  <AlertTriangle className="w-5 h-5 text-destructive shrink-0" />
+                <h2 className="font-display font-bold text-foreground text-xl flex items-center gap-2.5 min-w-0">
+                  <MitosisIcon className="w-8 h-8 text-destructive shrink-0" />
                   <span className="truncate">{t('split.title')}</span>
                 </h2>
                 <button onClick={() => setSplitInfoOpen(false)} className="w-9 h-9 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0">
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-5 text-sm text-foreground leading-relaxed whitespace-pre-line">
+              <div className="flex-1 overflow-y-auto p-5 text-base text-foreground leading-relaxed whitespace-pre-line">
                 {t('split.body')}
               </div>
             </div>
