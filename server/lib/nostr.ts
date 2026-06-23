@@ -35,6 +35,8 @@ export interface Kind38888Data {
   split_ends_at?: number;
   version: string;
   valid_from: number;
+  split_approaching: boolean;                // KIND 38888 v3: a Split round is near
+  freeze_lana_retail_account_above: number;  // KIND 38888 v3: retail wallet freeze threshold (lanoshi/LANA per spec)
   raw_event: string;
 }
 
@@ -144,6 +146,9 @@ function parseKind38888Event(event: NostrEvent): Kind38888Data {
   const split_ends_at = parseInt(tags.find(t => t[0] === 'split_ends_at')?.[1] || content.split_ends_at || '0');
   const version = tags.find(t => t[0] === 'version')?.[1] || content.version || '1';
   const valid_from = parseInt(tags.find(t => t[0] === 'valid_from')?.[1] || content.valid_from || '0');
+  // KIND 38888 v3 additions — tag OR content (spec carries these in content).
+  const split_approaching = String(tags.find(t => t[0] === 'split_approaching')?.[1] || content.split_approaching || 'false').toLowerCase() === 'true';
+  const freeze_lana_retail_account_above = parseInt(tags.find(t => t[0] === 'freeze_lana_retail_account_above')?.[1] || content.freeze_lana_retail_account_above || '0');
 
   return {
     event_id: event.id,
@@ -158,6 +163,8 @@ function parseKind38888Event(event: NostrEvent): Kind38888Data {
     split_ends_at,
     version,
     valid_from,
+    split_approaching,
+    freeze_lana_retail_account_above,
     raw_event: JSON.stringify(event)
   };
 }

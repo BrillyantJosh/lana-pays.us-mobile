@@ -15,6 +15,8 @@ export function initializeSchema(db: Database.Database): void {
       split_target_lana INTEGER,
       split_started_at INTEGER,
       split_ends_at INTEGER,
+      split_approaching INTEGER DEFAULT 0,
+      freeze_lana_retail_account_above INTEGER DEFAULT 0,
       raw_event TEXT,
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -213,6 +215,10 @@ export function initializeSchema(db: Database.Database): void {
     db.exec(`ALTER TABLE business_units ADD COLUMN quota_period TEXT DEFAULT ''`);
     console.log('Migrated: added gateway quota columns to business_units');
   }
+
+  // Migration: KIND 38888 v3 fields (split_approaching + retail wallet freeze threshold)
+  try { db.exec(`ALTER TABLE kind_38888 ADD COLUMN split_approaching INTEGER DEFAULT 0`); } catch {}
+  try { db.exec(`ALTER TABLE kind_38888 ADD COLUMN freeze_lana_retail_account_above INTEGER DEFAULT 0`); } catch {}
 
   console.log('Database schema initialized');
 }

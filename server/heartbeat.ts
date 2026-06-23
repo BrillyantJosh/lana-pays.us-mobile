@@ -55,12 +55,16 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
     ).get() as { id: number; event_id: string } | undefined;
 
     if (latest38888 && latest38888.event_id === systemParams.event_id) {
-      db.prepare("UPDATE kind_38888 SET updated_at = datetime('now') WHERE id = ?").run(latest38888.id);
-      console.log(`[sync] KIND 38888 unchanged (${systemParams.event_id.slice(0, 12)}…), touched updated_at`);
+      // Same event — refresh the structured v3 columns (cheap, same row → no blob bloat)
+      // so newly-parsed fields populate without waiting for the next event change.
+      db.prepare(
+        "UPDATE kind_38888 SET split_approaching = ?, freeze_lana_retail_account_above = ?, updated_at = datetime('now') WHERE id = ?"
+      ).run(systemParams.split_approaching ? 1 : 0, systemParams.freeze_lana_retail_account_above || 0, latest38888.id);
+      console.log(`[sync] KIND 38888 unchanged (${systemParams.event_id.slice(0, 12)}…), refreshed v3 columns`);
     } else {
       db.prepare(`
-        INSERT INTO kind_38888 (event_id, split, exchange_rates, electrum_servers, relays, version, valid_from, split_target_lana, split_started_at, split_ends_at, raw_event, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO kind_38888 (event_id, split, exchange_rates, electrum_servers, relays, version, valid_from, split_target_lana, split_started_at, split_ends_at, split_approaching, freeze_lana_retail_account_above, raw_event, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
         systemParams.event_id,
         systemParams.split,
@@ -72,6 +76,8 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
         systemParams.split_target_lana || 0,
         systemParams.split_started_at || 0,
         systemParams.split_ends_at || 0,
+        systemParams.split_approaching ? 1 : 0,
+        systemParams.freeze_lana_retail_account_above || 0,
         systemParams.raw_event
       );
       console.log(`[sync] KIND 38888 changed → inserted new row (${systemParams.event_id.slice(0, 12)}…)`);

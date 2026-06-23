@@ -117,6 +117,8 @@ app.get('/api/system-params', (req, res) => {
       splitTargetLana: row.split_target_lana,
       splitStartedAt: row.split_started_at,
       splitEndsAt: row.split_ends_at,
+      splitApproaching: row.split_approaching === 1,
+      freezeLanaRetailAccountAbove: row.freeze_lana_retail_account_above,
       updatedAt: row.updated_at,
     },
   });
