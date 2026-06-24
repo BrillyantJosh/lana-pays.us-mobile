@@ -53,11 +53,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rate limiting
-const globalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
-const purchaseLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
-app.use(globalLimiter);
-
 // Initialize database
 const db = getDb();
 
@@ -65,7 +60,14 @@ const db = getDb();
 // Breadcrumb trail of every request path, to debug stuck flows. Stores
 // method/path/status/duration/ip ONLY — never bodies (may hold WIF/secrets).
 // Skips static assets; auto-purges rows older than 24h; viewable by root admin.
+// Registered BEFORE the rate limiter so 429 (Too Many Requests) responses ARE logged.
 installRequestLogging(app, db);
+
+// Rate limiting — 1500/15min per IP (raised from 1000 so an active merchant session
+// polling + purchasing can't exhaust the budget → 429).
+const globalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1500, standardHeaders: true, legacyHeaders: false });
+const purchaseLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
+app.use(globalLimiter);
 
 // ─── API Routes ────────────────────────────────────────
 
