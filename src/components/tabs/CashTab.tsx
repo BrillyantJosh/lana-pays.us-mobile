@@ -196,6 +196,11 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         ? t('purchase.invalidCustomerWallet')
         : t('purchase.invalidMerchantWallet');
     }
+    // Brain CASH-only monthly limit (409). LANA is never gated here, so this
+    // only reaches the cash flow — point the seller to LANA.
+    if (status === 409 && data?.error === 'MERCHANT_QUOTA_EXCEEDED') {
+      return t('cash.monthlyCashLimitReached');
+    }
     return data?.error || t('cash.purchaseFailed');
   };
 
@@ -988,10 +993,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
               const remainingTx = Math.max(0, (u.quota_tx_limit || 0) - (u.quota_tx_used || 0));
               const sameCurrency = (u.quota_currency || 'EUR') === currency;
               if (remainingTx <= 0) {
-                return <p className="text-xs text-destructive mt-1">Monthly transaction limit reached. Resets next month.</p>;
+                return <p className="text-xs text-destructive mt-1">{t('cash.monthlyCashLimitReached')}</p>;
               }
               if (sameCurrency && parsed > remainingVolume) {
-                return <p className="text-xs text-destructive mt-1">This payment would exceed the monthly quota. Available: {remainingVolume.toFixed(2)} {currency}</p>;
+                return <p className="text-xs text-destructive mt-1">{t('cash.monthlyCashLimitReached')}</p>;
               }
             }
             return null;

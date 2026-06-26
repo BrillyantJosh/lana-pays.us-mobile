@@ -54,15 +54,25 @@ interface BusinessUnit {
 }
 
 /**
- * The unit cannot accept new purchases.
+ * The unit cannot accept ANY new purchases (both rails blocked).
  * - 'pending'        → awaiting admin approval
- * - 'quota_blocked'  → monthly limit reached, auto-resets 1st of next month
  * - 'suspended'      → admin suspension
  * - 'rejected'       → terminal rejection
+ * NOTE: 'quota_blocked' is intentionally NOT here — the monthly limit is
+ * CASH-only, so a quota-blocked unit still sells for LANA (uncapped native
+ * rail). See isCashQuotaBlocked().
  */
-const BLOCKING_STATUSES = new Set(['pending', 'quota_blocked', 'suspended', 'rejected']);
+const BLOCKING_STATUSES = new Set(['pending', 'suspended', 'rejected']);
 function isUnitBlocked(u: { suspension_status?: string | null }): boolean {
   return BLOCKING_STATUSES.has(u.suspension_status || 'active');
+}
+
+/**
+ * The unit reached its monthly CASH limit → block CASH only; LANA stays
+ * available (the limit never applies to LANA).
+ */
+function isCashQuotaBlocked(u: { suspension_status?: string | null }): boolean {
+  return (u.suspension_status || 'active') === 'quota_blocked';
 }
 
 function statusLabel(status: string): string {
@@ -795,11 +805,14 @@ const Index = () => {
               // notice. Strict `=== false` is fail-open: if the server field is ever
               // absent (old build / rollout lag) we never wrongly block LANA.
               const lanaPayoutMissing = !!effectiveUnit && effectiveUnit.payout_configured === false;
+              // Monthly cash limit reached → disable ONLY the cash button; LANA
+              // stays available (the limit never applies to LANA).
+              const cashQuotaBlocked = !!effectiveUnit && isCashQuotaBlocked(effectiveUnit);
               return (
                 <>
                   <button
                     onClick={() => setActiveView("cash")}
-                    disabled={payDisabled}
+                    disabled={payDisabled || cashQuotaBlocked}
                     className="relative overflow-hidden flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {/* Mandala background mesh */}
@@ -852,6 +865,18 @@ const Index = () => {
                       </div>
                       <h3 className="text-xl font-bold text-amber-700 dark:text-amber-400">{t('home.lanaPayoutNotConfigured')}</h3>
                       <p className="text-base font-medium text-amber-700/90 dark:text-amber-300/90 leading-relaxed">{t('home.lanaPayoutNotConfiguredDetail')}</p>
+                    </div>
+                  )}
+
+                  {/* Monthly cash limit reached → cash is greyed above; explain why,
+                      and point the seller to LANA (which stays unlimited). */}
+                  {cashQuotaBlocked && !payDisabled && (
+                    <div className="rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
+                      <div className="w-14 h-14 mx-auto rounded-full bg-amber-500/15 flex items-center justify-center">
+                        <Banknote className="w-7 h-7 text-amber-600 dark:text-amber-400" />
+                      </div>
+                      <h3 className="text-xl font-bold text-amber-700 dark:text-amber-400">{t('home.cashLimitReachedTitle')}</h3>
+                      <p className="text-base font-medium text-amber-700/90 dark:text-amber-300/90 leading-relaxed">{t('home.cashLimitReachedDetail')}</p>
                     </div>
                   )}
                 </>

@@ -266,6 +266,7 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
         const data = await usageRes.json();
         const rows = (data.usage || []) as Array<{
           unit_id: string; tx_count: number; volume_native: number;
+          tx_count_cash?: number; volume_native_cash?: number;
         }>;
         const upd = db.prepare(`
           UPDATE business_units SET
@@ -274,8 +275,11 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
             quota_period = ?
           WHERE unit_id = ?
         `);
+        // The monthly limit is CASH-only (LANA is uncapped), so the POS gates on
+        // CASH usage — mirror the *_cash counters into quota_*_used (fall back to
+        // 0 for an older brain that doesn't yet return the cash columns).
         const txn = db.transaction(() => {
-          for (const r of rows) upd.run(r.volume_native, r.tx_count, period, r.unit_id);
+          for (const r of rows) upd.run(r.volume_native_cash ?? 0, r.tx_count_cash ?? 0, period, r.unit_id);
         });
         txn();
         console.log(`merchant_quota_usage: synced ${rows.length} usage rows from brain`);
