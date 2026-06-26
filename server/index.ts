@@ -1011,8 +1011,12 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
     `).get(unitId) as any;
 
     if (u) {
-      const BLOCKED = ['pending', 'quota_blocked', 'suspended', 'rejected'];
-      if (BLOCKED.includes(u.suspension_status)) {
+      const isCash = String(req.body?.payment_type) === 'cash';
+      // Approval/suspension states block BOTH rails. The monthly quota
+      // (quota_blocked + the volume/tx pre-flight) is CASH-only — LANA is the
+      // uncapped native rail and is never gated by it. Mirrors the brain gate.
+      const FULL_BLOCKED = ['pending', 'suspended', 'rejected'];
+      if (FULL_BLOCKED.includes(u.suspension_status)) {
         const errCode = `MERCHANT_${String(u.suspension_status).toUpperCase()}`;
         console.warn(`[mobile] Blocking purchase pre-flight: unit ${unitId.slice(0, 12)} status=${u.suspension_status}`);
         return res.status(403).json({
@@ -1020,31 +1024,40 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
           error: errCode,
           message: u.suspension_status === 'pending'
             ? 'Merchant is awaiting admin approval — payments paused'
-            : u.suspension_status === 'quota_blocked'
-              ? 'Monthly quota reached, resets 1st of next month'
-              : `Cannot process purchase: merchant is ${u.suspension_status}`,
+            : `Cannot process purchase: merchant is ${u.suspension_status}`,
         });
       }
-      // Pre-flight quota — only when currencies match (otherwise let brain do
-      // the conversion via KIND 38888 rates).
-      const reqCurrency = String(req.body?.currency || '').toUpperCase();
-      const quotaCurrency = String(u.quota_currency || u.currency || 'EUR').toUpperCase();
-      if (u.quota_volume_limit > 0 && reqCurrency === quotaCurrency
-          && u.quota_volume_used + amount > u.quota_volume_limit) {
-        console.warn(`[mobile] Blocking purchase pre-flight: unit ${unitId.slice(0, 12)} would exceed volume quota`);
-        return res.status(403).json({
-          success: false,
-          error: 'MERCHANT_QUOTA_EXCEEDED',
-          message: 'This purchase would exceed the monthly volume limit',
-        });
-      }
-      if (u.quota_tx_limit > 0 && u.quota_tx_used + 1 > u.quota_tx_limit) {
-        console.warn(`[mobile] Blocking purchase pre-flight: unit ${unitId.slice(0, 12)} would exceed tx quota`);
-        return res.status(403).json({
-          success: false,
-          error: 'MERCHANT_QUOTA_EXCEEDED',
-          message: 'Monthly transaction limit reached',
-        });
+      if (isCash) {
+        // CASH-only monthly limit. LANA is never gated here.
+        if (u.suspension_status === 'quota_blocked') {
+          console.warn(`[mobile] Blocking CASH pre-flight: unit ${unitId.slice(0, 12)} quota_blocked`);
+          return res.status(403).json({
+            success: false,
+            error: 'MERCHANT_QUOTA_EXCEEDED',
+            message: 'Monthly cash limit reached, resets 1st of next month',
+          });
+        }
+        // Pre-flight quota — only when currencies match (otherwise let brain do
+        // the conversion via KIND 38888 rates).
+        const reqCurrency = String(req.body?.currency || '').toUpperCase();
+        const quotaCurrency = String(u.quota_currency || u.currency || 'EUR').toUpperCase();
+        if (u.quota_volume_limit > 0 && reqCurrency === quotaCurrency
+            && u.quota_volume_used + amount > u.quota_volume_limit) {
+          console.warn(`[mobile] Blocking CASH pre-flight: unit ${unitId.slice(0, 12)} would exceed volume quota`);
+          return res.status(403).json({
+            success: false,
+            error: 'MERCHANT_QUOTA_EXCEEDED',
+            message: 'This cash purchase would exceed the monthly volume limit',
+          });
+        }
+        if (u.quota_tx_limit > 0 && u.quota_tx_used + 1 > u.quota_tx_limit) {
+          console.warn(`[mobile] Blocking CASH pre-flight: unit ${unitId.slice(0, 12)} would exceed tx quota`);
+          return res.status(403).json({
+            success: false,
+            error: 'MERCHANT_QUOTA_EXCEEDED',
+            message: 'Monthly cash transaction limit reached',
+          });
+        }
       }
     }
   }

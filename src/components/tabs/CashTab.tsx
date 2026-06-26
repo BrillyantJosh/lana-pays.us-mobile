@@ -196,9 +196,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         ? t('purchase.invalidCustomerWallet')
         : t('purchase.invalidMerchantWallet');
     }
-    // Brain CASH-only monthly limit (409). LANA is never gated here, so this
-    // only reaches the cash flow — point the seller to LANA.
-    if (status === 409 && data?.error === 'MERCHANT_QUOTA_EXCEEDED') {
+    // CASH-only monthly limit — the brain returns 409, the mobile proxy
+    // pre-flight returns 403. Either way LANA is never gated, so this only
+    // reaches the cash flow — point the seller to LANA.
+    if ((status === 409 || status === 403) && data?.error === 'MERCHANT_QUOTA_EXCEEDED') {
       return t('cash.monthlyCashLimitReached');
     }
     return data?.error || t('cash.purchaseFailed');

@@ -249,7 +249,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         setPurchaseError(t('cash.invalidAmount'));
         return;
       }
-      const maxTx = (window as any).__maxTransactionAmount;
+      const maxTx = (window as any).__maxTransactionAmountLana;
       if (maxTx && parsedAmount > maxTx) {
         setPurchaseError(t('lana.exceedsMaxLimit', { amount: maxTx }));
         return;
@@ -665,7 +665,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
               className="h-12 rounded-xl bg-background border-input"
             />
             {(() => {
-              const maxTx = (window as any).__maxTransactionAmount;
+              const maxTx = (window as any).__maxTransactionAmountLana;
               const parsed = parseFloat(amount.replace(',', '.'));
               if (maxTx !== null && maxTx !== undefined && maxTx <= 0) {
                 return <p className="text-xs text-destructive mt-1">{t('cash.noFunds')}</p>;
@@ -693,7 +693,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         <Button
           onClick={handleContinue}
           disabled={!invoiceNumber.trim() || !amount.trim() || parseFloat(amount.replace(',', '.')) <= 0 || isLoadingRate || (() => {
-            const maxTx = (window as any).__maxTransactionAmount;
+            const maxTx = (window as any).__maxTransactionAmountLana;
             if (maxTx !== null && maxTx !== undefined && maxTx <= 0) return true;
             const parsed = parseFloat(amount.replace(',', '.'));
             if (maxTx !== null && maxTx !== undefined && !isNaN(parsed) && parsed > maxTx) return true;

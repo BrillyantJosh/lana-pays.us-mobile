@@ -257,11 +257,15 @@ const Index = () => {
   useEffect(() => {
     (window as any).__selectedUnitId = effectiveUnit?.unit_id || '';
     (window as any).__selectedUnit = effectiveUnit || null;
-    // Effective max already applies quota — payment tabs can rely on this
-    // single value for both the user-facing limit hint and the disable check.
+    // CASH max applies the monthly quota — the cash tab relies on this single
+    // value for both the limit hint and the disable check.
     (window as any).__maxTransactionAmount = effectiveUnit
       ? effectiveMaxInvoice(effectiveUnit, selectedMaxTx)
       : null;
+    // LANA is never gated by the monthly quota (uncapped rail) — but it still
+    // respects the Direct-Fund investor capacity, so expose the RAW capacity
+    // (no quota cap) for the LANA tab.
+    (window as any).__maxTransactionAmountLana = selectedMaxTx?.max_amount ?? null;
   }, [effectiveUnit, selectedMaxTx]);
 
   // Whenever the polled list refreshes, swap our selected reference for the
