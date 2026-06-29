@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { convertWifToIds } from '@/lib/crypto';
+import i18n from '@/i18n';
 
 declare global {
   interface Document {
@@ -121,31 +122,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let profilePicture: string | undefined;
       let currency = 'GBP';
 
-      // Fetch KIND 0 profile via server (avoids nostr-tools buffer issues in browser)
+      // Verify a registered KIND 0 profile exists before granting access.
+      // Fail-closed: if the profile cannot be CONFIRMED — because none exists
+      // OR because the relays could not be reached (the request itself throws,
+      // or the server returns { profile: null } on timeout) — login is rejected.
+      // (Profile lookup runs server-side to avoid nostr-tools buffer issues in
+      // the browser.)
+      let profileData: { profile: any } | null = null;
       try {
         const profileRes = await fetch('/api/profile-lookup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ hex_id: derivedIds.nostrHexId }),
         });
-        const profileData = await profileRes.json();
-        if (profileData.profile) {
-          profileName = profileData.profile.name;
-          profileDisplayName = profileData.profile.display_name;
-          profilePicture = profileData.profile.picture;
-          if (profileData.profile.currency) {
-            currency = profileData.profile.currency.toUpperCase();
-          }
-          // Set UI language from KIND 0 profile — profile is the source of truth
-          if (profileData.profile.lang) {
-            try {
-              const { changeLanguage } = await import('../i18n/index');
-              changeLanguage(profileData.profile.lang);
-            } catch {}
-          }
-        }
+        profileData = await profileRes.json();
       } catch (e) {
-        console.warn('Profile lookup failed, continuing without profile data:', e);
+        // Could not reach our own server / parse the response → unverifiable.
+        console.warn('Profile lookup failed:', e);
+        throw new Error(i18n.t('login.profileNotFound'));
+      }
+
+      if (!profileData?.profile) {
+        // Relays reachable but no KIND 0 found, OR relay query timed out — both
+        // mean we cannot confirm a profile, so we refuse the login.
+        throw new Error(i18n.t('login.profileNotFound'));
+      }
+
+      profileName = profileData.profile.name;
+      profileDisplayName = profileData.profile.display_name;
+      profilePicture = profileData.profile.picture;
+      if (profileData.profile.currency) {
+        currency = profileData.profile.currency.toUpperCase();
+      }
+      // Set UI language from KIND 0 profile — profile is the source of truth
+      if (profileData.profile.lang) {
+        try {
+          const { changeLanguage } = await import('../i18n/index');
+          changeLanguage(profileData.profile.lang);
+        } catch {}
       }
 
       // Register user on backend

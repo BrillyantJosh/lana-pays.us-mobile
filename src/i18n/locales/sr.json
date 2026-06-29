@@ -309,5 +309,6 @@
   "purchase.invalidCustomerWallet": "Адреса новчаника купца није важећа. Поново скенирајте новчаник и покушајте поново.",
   "purchase.invalidMerchantWallet": "Ова пословна јединица има подешен неважећи новчаник. Обратите се подршци.",
   "purchase.paymentFailedTitle": "Плаћање није примљено",
-  "purchase.customerLanaFailed": "Купчево плаћање у LANA није успело, па средства нису примљена. НЕ предајте робу. Замолите купца да понови плаћање."
+  "purchase.customerLanaFailed": "Купчево плаћање у LANA није успело, па средства нису примљена. НЕ предајте робу. Замолите купца да понови плаћање.",
+  "login.profileNotFound": "Vaš profil (KIND 0) nije moguće proveriti. Proverite vezu i pokušajte ponovo, ili prvo napravite svoj profil."
 }

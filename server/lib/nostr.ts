@@ -198,13 +198,36 @@ export async function fetchKind0Profile(hexId: string): Promise<{ name?: string;
     const timeout = setTimeout(() => resolve(null), 5000);
     let resolved = false;
 
+    // Track how many relays have finished (EOSE received OR socket error) so we
+    // can resolve null as soon as the answer is definitively "no profile",
+    // instead of always waiting the full 5s timeout. Rejection is the common
+    // gated case now (login requires KIND 0), so this matters for UX.
+    let finished = 0;
+    const total = LANA_RELAYS.length;
+    const markFinished = () => {
+      finished++;
+      if (!resolved && finished >= total) {
+        resolved = true;
+        clearTimeout(timeout);
+        resolve(null);
+      }
+    };
+
+    if (total === 0) { clearTimeout(timeout); resolve(null); return; }
+
     for (const relayUrl of LANA_RELAYS) {
       let ws: WebSocket;
       try {
         ws = new WebSocket(relayUrl);
       } catch {
+        markFinished();
         continue;
       }
+
+      // Guard so each relay contributes to `finished` exactly once, even if it
+      // fires both EOSE and a subsequent close/error.
+      let relayDone = false;
+      const finishRelay = () => { if (!relayDone) { relayDone = true; markFinished(); } };
 
       const subId = `kind0_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
@@ -242,11 +265,12 @@ export async function fetchKind0Profile(hexId: string): Promise<{ name?: string;
           }
           if (msg[0] === 'EOSE' && !resolved) {
             ws.close();
+            finishRelay();
           }
         } catch {}
       });
 
-      ws.on('error', () => ws.close());
+      ws.on('error', () => { ws.close(); finishRelay(); });
     }
   });
 }

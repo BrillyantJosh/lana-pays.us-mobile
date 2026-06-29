@@ -309,5 +309,6 @@
   "purchase.invalidCustomerWallet": "Die Wallet-Adresse des Kunden ist ungültig. Bitte scannen Sie die Wallet erneut und versuchen Sie es noch einmal.",
   "purchase.invalidMerchantWallet": "Für diese Geschäftseinheit ist eine ungültige Wallet konfiguriert. Bitte wenden Sie sich an den Support.",
   "purchase.paymentFailedTitle": "Zahlung nicht erhalten",
-  "purchase.customerLanaFailed": "Die LANA-Zahlung des Kunden ist fehlgeschlagen, es wurde kein Geld empfangen. Geben Sie die Ware NICHT heraus. Bitten Sie den Kunden, die Zahlung erneut zu versuchen."
+  "purchase.customerLanaFailed": "Die LANA-Zahlung des Kunden ist fehlgeschlagen, es wurde kein Geld empfangen. Geben Sie die Ware NICHT heraus. Bitten Sie den Kunden, die Zahlung erneut zu versuchen.",
+  "login.profileNotFound": "Ihr Profil (KIND 0) konnte nicht überprüft werden. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut, oder erstellen Sie zuerst Ihr Profil."
 }

@@ -309,5 +309,6 @@
   "purchase.invalidCustomerWallet": "Adresa novčanika kupca nije valjana. Ponovno skenirajte novčanik i pokušajte ponovno.",
   "purchase.invalidMerchantWallet": "Ova poslovna jedinica ima postavljen nevažeći novčanik. Obratite se podršci.",
   "purchase.paymentFailedTitle": "Plaćanje nije primljeno",
-  "purchase.customerLanaFailed": "Kupčevo plaćanje u LANA nije uspjelo, pa sredstva nisu primljena. NE predajte robu. Zamolite kupca da ponovi plaćanje."
+  "purchase.customerLanaFailed": "Kupčevo plaćanje u LANA nije uspjelo, pa sredstva nisu primljena. NE predajte robu. Zamolite kupca da ponovi plaćanje.",
+  "login.profileNotFound": "Vaš profil (KIND 0) nije moguće provjeriti. Provjerite vezu i pokušajte ponovno, ili najprije izradite svoj profil."
 }

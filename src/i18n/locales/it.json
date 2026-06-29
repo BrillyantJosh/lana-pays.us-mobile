@@ -309,5 +309,6 @@
   "purchase.invalidCustomerWallet": "L'indirizzo del portafoglio del cliente non è valido. Esegui di nuovo la scansione del portafoglio e riprova.",
   "purchase.invalidMerchantWallet": "Questa unità commerciale ha un portafoglio non valido configurato. Contatta l'assistenza.",
   "purchase.paymentFailedTitle": "Pagamento non ricevuto",
-  "purchase.customerLanaFailed": "Il pagamento in LANA del cliente non è andato a buon fine, quindi nessun importo è stato ricevuto. NON consegnare la merce. Chiedi al cliente di riprovare il pagamento."
+  "purchase.customerLanaFailed": "Il pagamento in LANA del cliente non è andato a buon fine, quindi nessun importo è stato ricevuto. NON consegnare la merce. Chiedi al cliente di riprovare il pagamento.",
+  "login.profileNotFound": "Impossibile verificare il tuo profilo (KIND 0). Controlla la connessione e riprova, oppure crea prima il tuo profilo."
 }

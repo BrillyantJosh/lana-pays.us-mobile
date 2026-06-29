@@ -446,5 +446,6 @@
   "purchase.invalidCustomerWallet": "The customer's wallet address is invalid. Please re-scan the wallet and try again.",
   "purchase.invalidMerchantWallet": "This business unit has an invalid wallet configured. Please contact support.",
   "purchase.paymentFailedTitle": "Payment not received",
-  "purchase.customerLanaFailed": "The customer's LANA payment did not go through, so no funds were received. Do NOT hand over the goods. Ask the customer to try the payment again."
+  "purchase.customerLanaFailed": "The customer's LANA payment did not go through, so no funds were received. Do NOT hand over the goods. Ask the customer to try the payment again.",
+  "login.profileNotFound": "Your profile (KIND 0) could not be verified. Check your connection and try again, or create your profile first."
 }

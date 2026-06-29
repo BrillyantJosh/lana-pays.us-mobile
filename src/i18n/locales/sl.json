@@ -446,5 +446,6 @@
   "purchase.invalidCustomerWallet": "Strankina denarnica ni veljavna. Ponovno skenirajte denarnico in poskusite znova.",
   "purchase.invalidMerchantWallet": "Ta poslovna enota ima nastavljeno neveljavno denarnico. Obrnite se na podporo.",
   "purchase.paymentFailedTitle": "Plačilo ni prejeto",
-  "purchase.customerLanaFailed": "Strankino plačilo v LANA ni uspelo, zato sredstva niso bila prejeta. Blaga NE izročite. Prosite stranko, naj plačilo ponovi."
+  "purchase.customerLanaFailed": "Strankino plačilo v LANA ni uspelo, zato sredstva niso bila prejeta. Blaga NE izročite. Prosite stranko, naj plačilo ponovi.",
+  "login.profileNotFound": "Profila (KIND 0) ni mogoče preveriti. Preverite povezavo in poskusite znova, ali najprej ustvarite svoj profil."
 }
