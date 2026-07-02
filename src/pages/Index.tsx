@@ -822,21 +822,38 @@ const Index = () => {
                   <button
                     onClick={() => setActiveView("cash")}
                     disabled={payDisabled || cashQuotaBlocked || splitHappening}
-                    className="relative overflow-hidden flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                    className={`relative overflow-hidden flex-1 rounded-3xl border-2 shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:pointer-events-none ${
+                      splitHappening
+                        ? 'bg-destructive/10 border-destructive/50'  // Split in progress: keep the notice fully readable (no dim)
+                        : 'bg-card border-border disabled:opacity-40'
+                    }`}
                   >
-                    {/* Mandala background mesh */}
-                    <img
-                      src={mandalaMesh}
-                      alt=""
-                      aria-hidden="true"
-                      className="absolute inset-0 w-full h-full object-cover opacity-25 dark:opacity-15 mix-blend-multiply dark:mix-blend-screen pointer-events-none select-none"
-                    />
-                    {/* Content */}
-                    <div className="relative z-10 w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
-                      <Banknote className="w-11 h-11 text-primary" />
-                    </div>
-                    <span className="relative z-10 text-3xl font-bold text-foreground">{t('home.payWithCurrency', { symbol: CURRENCY_SYMBOL[effectiveUnit?.currency || ''] || currencySymbol })}</span>
-                    <span className="relative z-10 text-base text-muted-foreground">{t('home.cashPayment')}</span>
+                    {splitHappening ? (
+                      /* Split in progress → the notice lives ON the cash button (EN + SL) so it can't be missed. */
+                      <div className="relative z-10 flex flex-col items-center gap-2 text-center">
+                        <MitosisIcon className="w-12 h-12 text-destructive" />
+                        <span className="text-xl font-bold text-destructive leading-tight">{t('split.happening.title', { lng: 'en' })}</span>
+                        <span className="text-sm font-medium text-destructive/90 leading-snug">{t('split.happening.body', { lng: 'en' })}</span>
+                        <span className="text-xl font-bold text-destructive leading-tight mt-1">{t('split.happening.title', { lng: 'sl' })}</span>
+                        <span className="text-sm font-medium text-destructive/90 leading-snug">{t('split.happening.body', { lng: 'sl' })}</span>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Mandala background mesh */}
+                        <img
+                          src={mandalaMesh}
+                          alt=""
+                          aria-hidden="true"
+                          className="absolute inset-0 w-full h-full object-cover opacity-25 dark:opacity-15 mix-blend-multiply dark:mix-blend-screen pointer-events-none select-none"
+                        />
+                        {/* Content */}
+                        <div className="relative z-10 w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
+                          <Banknote className="w-11 h-11 text-primary" />
+                        </div>
+                        <span className="relative z-10 text-3xl font-bold text-foreground">{t('home.payWithCurrency', { symbol: CURRENCY_SYMBOL[effectiveUnit?.currency || ''] || currencySymbol })}</span>
+                        <span className="relative z-10 text-base text-muted-foreground">{t('home.cashPayment')}</span>
+                      </>
+                    )}
                   </button>
 
                   <button
@@ -889,23 +906,6 @@ const Index = () => {
                     </div>
                   )}
 
-                  {/* Split in progress → CASH is greyed above (RED); LANA stays open.
-                      Shown in BOTH English and Slovenian. */}
-                  {splitHappening && !payDisabled && (
-                    <div className="rounded-2xl bg-destructive/10 border-2 border-destructive/40 p-6 text-center space-y-3">
-                      <div className="w-14 h-14 mx-auto rounded-full bg-destructive/15 flex items-center justify-center">
-                        <MitosisIcon className="w-8 h-8 text-destructive" />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-destructive">{t('split.happening.title', { lng: 'en' })}</h3>
-                        <p className="text-base font-medium text-destructive/90 leading-relaxed">{t('split.happening.body', { lng: 'en' })}</p>
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-destructive">{t('split.happening.title', { lng: 'sl' })}</h3>
-                        <p className="text-base font-medium text-destructive/90 leading-relaxed">{t('split.happening.body', { lng: 'sl' })}</p>
-                      </div>
-                    </div>
-                  )}
                 </>
               );
             })()}
