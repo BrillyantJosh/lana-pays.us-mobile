@@ -202,6 +202,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     if ((status === 409 || status === 403) && data?.error === 'MERCHANT_QUOTA_EXCEEDED') {
       return t('cash.monthlyCashLimitReached');
     }
+    // Split in progress — cash is disabled, LANA still works.
+    if (status === 403 && data?.error === 'SPLIT_HAPPENING') {
+      return t('split.happening.body');
+    }
     return data?.error || t('cash.purchaseFailed');
   };
 

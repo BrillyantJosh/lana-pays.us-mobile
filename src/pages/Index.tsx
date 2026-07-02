@@ -235,6 +235,8 @@ const Index = () => {
   const [principlesOpen, setPrinciplesOpen] = useState(false);
   const [splitApproaching, setSplitApproaching] = useState(false);
   const [splitInfoOpen, setSplitInfoOpen] = useState(false);
+  // Split IN PROGRESS → CASH is disabled (LANA is fine). Polled continuously.
+  const [splitHappening, setSplitHappening] = useState(false);
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
   const [lanaPaymentRequest, setLanaPaymentRequest] = useState<{ walletAddress: string } | null>(null);
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
@@ -330,10 +332,13 @@ const Index = () => {
         const res = await fetch('/api/system-params');
         const json = await res.json();
         setSplitApproaching(json.data?.splitApproaching === true);
+        setSplitHappening(json.data?.splitHappening === true);
       } catch { /* keep previous state on error */ }
     };
     fetchSplitStatus();
-    const interval = setInterval(fetchSplitStatus, 60_000);
+    // Poll fairly often — while a Split is in progress this drives the live
+    // cash block, so it must pick up the admin toggle without a reload.
+    const interval = setInterval(fetchSplitStatus, 30_000);
     return () => clearInterval(interval);
   }, []);
 
@@ -816,7 +821,7 @@ const Index = () => {
                 <>
                   <button
                     onClick={() => setActiveView("cash")}
-                    disabled={payDisabled || cashQuotaBlocked}
+                    disabled={payDisabled || cashQuotaBlocked || splitHappening}
                     className="relative overflow-hidden flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {/* Mandala background mesh */}
@@ -881,6 +886,24 @@ const Index = () => {
                       </div>
                       <h3 className="text-xl font-bold text-amber-700 dark:text-amber-400">{t('home.cashLimitReachedTitle')}</h3>
                       <p className="text-base font-medium text-amber-700/90 dark:text-amber-300/90 leading-relaxed">{t('home.cashLimitReachedDetail')}</p>
+                    </div>
+                  )}
+
+                  {/* Split in progress → CASH is greyed above (RED); LANA stays open.
+                      Shown in BOTH English and Slovenian. */}
+                  {splitHappening && !payDisabled && (
+                    <div className="rounded-2xl bg-destructive/10 border-2 border-destructive/40 p-6 text-center space-y-3">
+                      <div className="w-14 h-14 mx-auto rounded-full bg-destructive/15 flex items-center justify-center">
+                        <MitosisIcon className="w-8 h-8 text-destructive" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-destructive">{t('split.happening.title', { lng: 'en' })}</h3>
+                        <p className="text-base font-medium text-destructive/90 leading-relaxed">{t('split.happening.body', { lng: 'en' })}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-destructive">{t('split.happening.title', { lng: 'sl' })}</h3>
+                        <p className="text-base font-medium text-destructive/90 leading-relaxed">{t('split.happening.body', { lng: 'sl' })}</p>
+                      </div>
                     </div>
                   )}
                 </>

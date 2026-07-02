@@ -8,7 +8,6 @@ import Index from "./pages/Index";
 import Login from "./pages/Login";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
-import { SplitLockOverlay } from "@/components/SplitLockOverlay";
 
 const queryClient = new QueryClient();
 
@@ -55,8 +54,6 @@ const App = () => (
       <Sonner />
       <AuthProvider>
         <BrowserRouter>
-          {/* Split-in-progress hard lock — overlays every authed route except /admin */}
-          <SplitLockOverlay />
           <Routes>
             <Route path="/login" element={<LoginRoute />} />
             <Route

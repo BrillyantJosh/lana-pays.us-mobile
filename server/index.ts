@@ -1004,6 +1004,20 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
     return res.status(503).json({ success: false, error: 'Brain service not configured' });
   }
 
+  // ── Split in progress → CASH is blocked (LANA is fine). Mobile-local flag
+  // (app_settings.split_happening) — the same one the POS reads via
+  // /api/system-params. Backstop for the disabled cash button. ──
+  if (String(req.body?.payment_type) === 'cash') {
+    const sh = db.prepare("SELECT value FROM app_settings WHERE key = 'split_happening'").get() as any;
+    if (sh?.value === 'true') {
+      return res.status(403).json({
+        success: false,
+        error: 'SPLIT_HAPPENING',
+        message: 'Cash payments are disabled while a Split is in progress. Please pay with LANA.',
+      });
+    }
+  }
+
   // ── Defense in depth: gateway gate using last-synced KIND 30903 state ──
   // The brain is authoritative for any race condition (its own kind_30903 is
   // freshest), but a quick local check catches the obvious blocked-merchant
