@@ -175,6 +175,9 @@ export function initializeSchema(db: Database.Database): void {
     db.prepare("INSERT INTO app_settings (key, value) VALUES ('default_max_tx_amount', '0')").run();
     console.log('Seeded default app settings');
   }
+  // Split-in-progress lock flag (admin-toggled). Idempotent so it also lands on
+  // already-seeded DBs; INSERT OR IGNORE never clobbers an existing value.
+  db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('split_happening', 'false')").run();
 
   // Migrations: add suspension columns if missing
   const cols = db.pragma('table_info(business_units)') as any[];

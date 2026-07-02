@@ -103,8 +103,14 @@ app.get('/api/system-params', (req, res) => {
     'SELECT * FROM kind_38888 ORDER BY id DESC LIMIT 1'
   ).get() as any;
 
+  // Split-in-progress lock — an admin-toggled app_settings flag (mobile-only),
+  // independent of KIND 38888. Surfaced here so the POS reads it on its existing
+  // /api/system-params poll. Always included (even when no kind_38888 row yet).
+  const shRow = db.prepare("SELECT value FROM app_settings WHERE key = 'split_happening'").get() as any;
+  const splitHappening = shRow?.value === 'true';
+
   if (!row) {
-    return res.json({ data: null });
+    return res.json({ data: { splitHappening } });
   }
 
   res.json({
@@ -121,6 +127,7 @@ app.get('/api/system-params', (req, res) => {
       splitEndsAt: row.split_ends_at,
       splitApproaching: row.split_approaching === 1,
       freezeLanaRetailAccountAbove: row.freeze_lana_retail_account_above,
+      splitHappening,
       updatedAt: row.updated_at,
     },
   });

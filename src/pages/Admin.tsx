@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Shield, Save, Loader2, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Shield, Save, Loader2, ShieldAlert, Lock, Unlock } from 'lucide-react';
 
 const Admin = () => {
   const { session } = useAuth();
@@ -13,6 +13,8 @@ const Admin = () => {
   const [defaultMaxTx, setDefaultMaxTx] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [splitHappening, setSplitHappening] = useState(false);
+  const [splitSaving, setSplitSaving] = useState(false);
 
   // Check admin status
   useEffect(() => {
@@ -33,6 +35,7 @@ const Admin = () => {
       .then(d => {
         setSettings(d.settings || {});
         setDefaultMaxTx(d.settings?.default_max_tx_amount || '0');
+        setSplitHappening(d.settings?.split_happening === 'true');
       })
       .catch(() => {});
   }, [isAdmin, session?.nostrHexId]);
@@ -60,6 +63,27 @@ const Admin = () => {
       }
     } catch {}
     setSaving(false);
+  };
+
+  // Split lock is a live switch — saved immediately on toggle (no Save click).
+  // Optimistic: reflect right away, revert on failure. Partial upsert leaves
+  // default_max_tx_amount untouched.
+  const toggleSplitHappening = async (next: boolean) => {
+    if (!session?.nostrHexId) return;
+    setSplitSaving(true);
+    setSplitHappening(next);
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-admin-hex-id': session.nostrHexId },
+        body: JSON.stringify({ settings: { split_happening: next ? 'true' : 'false' } }),
+      });
+      if (!res.ok) setSplitHappening(!next);
+    } catch {
+      setSplitHappening(!next);
+    } finally {
+      setSplitSaving(false);
+    }
   };
 
   // Loading state
@@ -150,6 +174,40 @@ const Admin = () => {
               <><Save className="w-4 h-4" /> {t('common.save')}</>
             )}
           </button>
+        </div>
+
+        {/* Split-in-progress lock */}
+        <div className={`rounded-2xl border p-5 space-y-4 ${splitHappening ? 'bg-destructive/5 border-destructive/30' : 'bg-card border-border'}`}>
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Split in progress — lock trading</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              When ON, the entire POS is locked for everyone with a full-screen "A Split is happening" notice
+              (English + Slovenian) and no purchases can be made. Turn it OFF here when the Split is finished to resume.
+            </p>
+          </div>
+          <button
+            onClick={() => toggleSplitHappening(!splitHappening)}
+            disabled={splitSaving}
+            className={`w-full h-12 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 ${
+              splitHappening
+                ? 'bg-destructive text-white hover:bg-destructive/90'
+                : 'bg-muted text-foreground hover:bg-muted/80'
+            }`}
+          >
+            {splitSaving ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : splitHappening ? (
+              <Lock className="w-4 h-4" />
+            ) : (
+              <Unlock className="w-4 h-4" />
+            )}
+            {splitHappening ? 'Split happening — POS LOCKED (tap to unlock)' : 'Trading open (tap to lock for Split)'}
+          </button>
+          {splitHappening && (
+            <p className="text-[11px] text-destructive font-medium">
+              ⚠ The POS is locked for all sellers right now. Trading resumes the moment you turn this off.
+            </p>
+          )}
         </div>
 
         {/* Current limits info */}
