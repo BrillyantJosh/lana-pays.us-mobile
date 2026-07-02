@@ -1,23 +1,44 @@
 import { useEffect, useState } from 'react';
-import { useLocation, Link } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Lock } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Lock, ShieldCheck } from 'lucide-react';
 
 /**
  * Full-screen HARD lock shown while a Split is in progress. Driven by the
  * admin-toggled `split_happening` flag (mobile app_settings), surfaced on
- * /api/system-params and polled here every 30s. Covers every authed route
- * EXCEPT /admin — the operator must still reach the toggle to turn it off.
+ * /api/system-params and polled here every 30s.
  *
- * No dismiss control: it clears only when the flag goes false. The notice is
- * shown in BOTH English and Slovenian regardless of the selected locale (the
- * seller could be either), via the i18n per-call `lng` override.
+ * ADMINS ARE NEVER LOCKED — they must be able to keep working and, crucially,
+ * reach /admin to turn the lock back OFF. So the overlay only shows for
+ * CONFIRMED non-admins. As a belt-and-suspenders escape (e.g. if the admin
+ * check is briefly unavailable) it also skips /admin and offers a visible
+ * "Admin" button that navigates there (which is never locked).
+ *
+ * The notice is shown in BOTH English and Slovenian regardless of the selected
+ * locale, via the i18n per-call `lng` override.
  */
 export function SplitLockOverlay() {
   const { t } = useTranslation();
+  const { session } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [locked, setLocked] = useState(false);
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null); // null = not yet known
 
+  // Resolve admin status — admins are exempt from the lock.
+  useEffect(() => {
+    const hex = session?.nostrHexId;
+    if (!hex) { setIsAdmin(false); return; }
+    let alive = true;
+    fetch(`/api/admin/check?hex_id=${hex}`)
+      .then(r => r.json())
+      .then(d => { if (alive) setIsAdmin(!!d.isAdmin); })
+      .catch(() => { if (alive) setIsAdmin(false); });
+    return () => { alive = false; };
+  }, [session?.nostrHexId]);
+
+  // Poll the split-happening flag.
   useEffect(() => {
     let alive = true;
     const check = async () => {
@@ -36,8 +57,10 @@ export function SplitLockOverlay() {
     return () => { alive = false; clearInterval(id); };
   }, []);
 
-  // Never cover the admin page — the operator needs it to unlock.
-  if (!locked || location.pathname === '/admin') return null;
+  // Show ONLY when: the flag is on, the viewer is a confirmed non-admin, and we
+  // are not on /admin. While admin status is still unknown (null) we do NOT lock,
+  // so an admin never even flashes the overlay.
+  if (!locked || isAdmin !== false || location.pathname === '/admin') return null;
 
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-background/95 backdrop-blur-md p-6">
@@ -60,10 +83,15 @@ export function SplitLockOverlay() {
           <p className="text-base text-muted-foreground leading-relaxed">{t('split.happening.body', { lng: 'sl' })}</p>
         </div>
 
-        {/* Discreet path back to admin so the operator can unlock. */}
-        <Link to="/admin" className="inline-block text-xs text-muted-foreground/50 hover:text-muted-foreground underline">
+        {/* Escape hatch — /admin is never locked, so the operator can always
+            reach the toggle even if their admin status wasn't detected here. */}
+        <button
+          onClick={() => navigate('/admin')}
+          className="mx-auto inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted text-muted-foreground text-sm font-medium hover:bg-muted/80 hover:text-foreground transition-colors"
+        >
+          <ShieldCheck className="w-4 h-4" />
           Admin
-        </Link>
+        </button>
       </div>
     </div>
   );
