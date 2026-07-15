@@ -20,7 +20,7 @@ import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Loader2, CheckCircle2, AlertCircle, Snowflake, ExternalLink,
-  QrCode, KeyRound, Receipt, Store, Clock, XCircle,
+  QrCode, KeyRound, Receipt, Store, Clock, XCircle, Globe,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +30,7 @@ import { signCustomerLanaTx } from '@/lib/transaction';
 import { classifyWifInput } from '@/lib/wifInput';
 import { currencySymbol, formatLanoshis } from '@/lib/format';
 import { changeLanguage } from '@/i18n';
+import { LANGUAGES } from '@/i18n/languages';
 import lanaIcon from '@/assets/lana-icon.png';
 
 interface RequestView {
@@ -61,7 +62,7 @@ type Phase = 'loading' | 'not_found' | 'closed' | 'ready' | 'checking' | 'confir
 
 const PublicPay = () => {
   const { token } = useParams<{ token: string }>();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const [phase, setPhase] = useState<Phase>('loading');
   const [request, setRequest] = useState<RequestView | null>(null);
@@ -326,19 +327,39 @@ const PublicPay = () => {
   };
 
   // ── Shared page chrome ───────────────────────────────────────────────────
-  const Shell = ({ children }: { children: React.ReactNode }) => (
+  // NOTE: these are plain render FUNCTIONS, not components. Defining component
+  // types inside the render body would give React a new type identity on every
+  // render → the whole subtree (incl. the manual WIF input) would remount and
+  // lose focus on each keystroke.
+  const currentLang = (i18n.language || 'en').split('-')[0];
+  const shell = (children: React.ReactNode) => (
     <div className="min-h-screen bg-background flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-md flex flex-col gap-5">
-        <div className="flex items-center justify-center gap-2.5 pb-1">
-          <img src={lanaIcon} alt="LANA" className="w-8 h-8 object-contain dark:invert" />
-          <span className="font-display text-lg font-bold text-foreground">{t('pay.title')}</span>
+        <div className="flex items-center justify-between gap-2 pb-1">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <img src={lanaIcon} alt="LANA" className="w-8 h-8 object-contain dark:invert shrink-0" />
+            <span className="font-display text-lg font-bold text-foreground truncate">{t('pay.title')}</span>
+          </div>
+          {/* Language switcher — a remote customer has no profile/session, so
+              the page must let them pick their language directly. */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Globe className="w-4 h-4 text-muted-foreground" />
+            <select
+              value={currentLang}
+              onChange={(e) => changeLanguage(e.target.value)}
+              aria-label="Language"
+              className="h-9 rounded-lg bg-background border border-input px-2 text-sm text-foreground"
+            >
+              {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.native}</option>)}
+            </select>
+          </div>
         </div>
         {children}
       </div>
     </div>
   );
 
-  const RequestCard = () => request && (
+  const requestCard = () => request && (
     <div className="glass-card rounded-2xl p-5 space-y-3 border">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center shrink-0">
@@ -372,29 +393,29 @@ const PublicPay = () => {
 
   if (phase === 'loading') {
     return (
-      <Shell>
+      shell(<>
         <div className="flex flex-col items-center gap-3 py-16">
           <Loader2 className="w-10 h-10 animate-spin text-primary" />
         </div>
-      </Shell>
+      </>)
     );
   }
 
   if (phase === 'not_found') {
     return (
-      <Shell>
+      shell(<>
         <div className="flex flex-col items-center gap-3 py-16 text-center">
           <AlertCircle className="w-12 h-12 text-muted-foreground" />
           <p className="text-base text-muted-foreground">{t('pay.notFound')}</p>
         </div>
-      </Shell>
+      </>)
     );
   }
 
   if (phase === 'closed' && request) {
     return (
-      <Shell>
-        <RequestCard />
+      shell(<>
+        {requestCard()}
         <div className={`rounded-2xl p-6 border text-center space-y-2 ${
           request.status === 'paid'
             ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/10'
@@ -424,26 +445,26 @@ const PublicPay = () => {
             </>
           )}
         </div>
-      </Shell>
+      </>)
     );
   }
 
   if (phase === 'checking') {
     return (
-      <Shell>
-        <RequestCard />
+      shell(<>
+        {requestCard()}
         <div className="flex flex-col items-center gap-3 py-10">
           <Loader2 className="w-10 h-10 animate-spin text-primary" />
           <p className="text-sm text-muted-foreground">{t('lana.checkingBalance')}</p>
         </div>
-      </Shell>
+      </>)
     );
   }
 
   if (phase === 'confirm' && preview && request) {
     return (
-      <Shell>
-        <RequestCard />
+      shell(<>
+        {requestCard()}
         {rateChanged && (
           <div className="rounded-2xl bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/10 p-4">
             <p className="text-sm text-amber-700 dark:text-amber-400 text-center">{t('pay.rateUpdatedReconfirm')}</p>
@@ -474,24 +495,24 @@ const PublicPay = () => {
           <CheckCircle2 className="w-5 h-5" />
           {t('pay.confirmAndPay')}
         </Button>
-      </Shell>
+      </>)
     );
   }
 
   if (phase === 'paying') {
     return (
-      <Shell>
+      shell(<>
         <div className="flex flex-col items-center justify-center gap-4 py-16">
           <Loader2 className="w-14 h-14 animate-spin text-primary" />
           <h2 className="text-xl font-bold text-foreground">{t('lana.processingTitle')}</h2>
         </div>
-      </Shell>
+      </>)
     );
   }
 
   if (phase === 'paid' && request) {
     return (
-      <Shell>
+      shell(<>
         <div className="flex flex-col items-center gap-3 py-6">
           <CheckCircle2 className="w-14 h-14 text-primary" />
           <h2 className="text-2xl font-bold text-foreground">{t('pay.paidTitle')}</h2>
@@ -529,14 +550,14 @@ const PublicPay = () => {
           )}
         </div>
         <p className="text-sm text-muted-foreground text-center">{t('pay.paidClose')}</p>
-      </Shell>
+      </>)
     );
   }
 
   // ── phase === 'ready' ─────────────────────────────────────────────────────
   return (
-    <Shell>
-      <RequestCard />
+    shell(<>
+      {requestCard()}
 
       {/* Indicative LANA + the at-payment-rate note (the money-honesty line) */}
       {request?.indicativeLanaLanoshis ? (
@@ -621,7 +642,7 @@ const PublicPay = () => {
         description={t('pay.enterWif')}
         onManualEntry={() => { setScannerOpen(false); setShowManual(true); }}
       />
-    </Shell>
+    </>)
   );
 };
 
