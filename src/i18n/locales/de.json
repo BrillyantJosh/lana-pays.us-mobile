@@ -359,5 +359,9 @@
   "pay.alreadyPaid": "Diese Anforderung wurde bereits bezahlt",
   "pay.cancelledInfo": "Diese Zahlungsanforderung wurde vom Verkäufer storniert.",
   "pay.expiredInfo": "Diese Zahlungsanforderung ist abgelaufen.",
-  "pay.notFound": "Zahlungsanforderung nicht gefunden. Bitte überprüfen Sie den Link."
+  "pay.notFound": "Zahlungsanforderung nicht gefunden. Bitte überprüfen Sie den Link.",
+  "pay.yourBalance": "Ihr Guthaben",
+  "pay.balanceEnough": "Sie haben genug für diese Zahlung",
+  "pay.balanceAfter": "Nach der Zahlung verbleiben ≈ {{amount}} LANA",
+  "pay.balanceNotEnough": "Nicht genug LANA — es fehlen {{missing}} LANA"
 }

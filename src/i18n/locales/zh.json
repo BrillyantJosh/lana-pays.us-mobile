@@ -359,5 +359,9 @@
   "pay.alreadyPaid": "此请求已支付",
   "pay.cancelledInfo": "此付款请求已被卖家取消。",
   "pay.expiredInfo": "此付款请求已过期。",
-  "pay.notFound": "未找到付款请求。请检查链接。"
+  "pay.notFound": "未找到付款请求。请检查链接。",
+  "pay.yourBalance": "您的余额",
+  "pay.balanceEnough": "余额足以完成本次支付",
+  "pay.balanceAfter": "支付后剩余 ≈ {{amount}} LANA",
+  "pay.balanceNotEnough": "LANA 不足 — 还差 {{missing}} LANA"
 }

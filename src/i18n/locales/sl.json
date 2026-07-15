@@ -498,5 +498,9 @@
   "pay.alreadyPaid": "Ta zahtevek je že plačan",
   "pay.cancelledInfo": "Prodajalec je ta zahtevek za plačilo preklical.",
   "pay.expiredInfo": "Ta zahtevek za plačilo je potekel.",
-  "pay.notFound": "Zahtevka za plačilo ni mogoče najti. Preverite povezavo."
+  "pay.notFound": "Zahtevka za plačilo ni mogoče najti. Preverite povezavo.",
+  "pay.yourBalance": "Vaše stanje",
+  "pay.balanceEnough": "Dovolj sredstev za to plačilo",
+  "pay.balanceAfter": "Po plačilu ostane ≈ {{amount}} LANA",
+  "pay.balanceNotEnough": "Premalo sredstev — manjka {{missing}} LANA"
 }

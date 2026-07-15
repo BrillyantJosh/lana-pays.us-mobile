@@ -28,7 +28,7 @@ import { QRScanner } from '@/components/QRScanner';
 import { convertWifToIds } from '@/lib/crypto';
 import { signCustomerLanaTx } from '@/lib/transaction';
 import { classifyWifInput } from '@/lib/wifInput';
-import { currencySymbol, formatLanoshis } from '@/lib/format';
+import { currencySymbol, formatLana, formatLanoshis } from '@/lib/format';
 import { changeLanguage } from '@/i18n';
 import { LANGUAGES } from '@/i18n/languages';
 import lanaIcon from '@/assets/lana-icon.png';
@@ -73,6 +73,9 @@ const PublicPay = () => {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [manualWif, setManualWif] = useState('');
   const [showManual, setShowManual] = useState(false);
+  // The scanned wallet's LANA balance — shown on the confirm step so the
+  // customer sees whether they actually have enough before paying.
+  const [customerBalance, setCustomerBalance] = useState<number | null>(null);
   const [paidResult, setPaidResult] = useState<{ txHash: string; lanaPaidLanoshis: number | null; exchangeRate: number | null } | null>(null);
 
   // The customer's key material lives ONLY in these refs for the duration of
@@ -171,6 +174,7 @@ const PublicPay = () => {
       const balanceData = await res.json();
       if (!res.ok) throw new Error(balanceData.error || 'Failed to check balance');
       const walletLana = balanceData.lana || 0;
+      setCustomerBalance(walletLana);
       const neededLana = (request.indicativeLanaLanoshis || 0) / 1e8;
       if (neededLana > 0 && walletLana < neededLana) {
         setError(t('lana.insufficientBalance', {
@@ -462,6 +466,13 @@ const PublicPay = () => {
   }
 
   if (phase === 'confirm' && preview && request) {
+    // Balance vs the EXACT preview total. (The on-chain fee is tiny and added
+    // by the signer; the signer/brain still error cleanly on razor-edge cases.)
+    const totalLana = preview.lanaTotalLanoshis / 1e8;
+    const hasBalance = customerBalance !== null;
+    const enough = hasBalance && (customerBalance as number) >= totalLana;
+    const remaining = hasBalance ? Math.max(0, (customerBalance as number) - totalLana) : 0;
+    const missing = hasBalance ? Math.max(0, totalLana - (customerBalance as number)) : 0;
     return (
       shell(<>
         {requestCard()}
@@ -488,9 +499,41 @@ const PublicPay = () => {
             </p>
           ) : null}
         </div>
+
+        {/* Wallet balance + sufficiency check */}
+        {hasBalance && (
+          <div className={`rounded-2xl border p-4 space-y-2 ${
+            enough
+              ? 'bg-emerald-50 dark:bg-emerald-500/5 border-emerald-200 dark:border-emerald-500/10'
+              : 'bg-destructive/10 border-destructive/40'
+          }`}>
+            <div className="flex justify-between items-baseline">
+              <span className="text-sm text-muted-foreground">{t('pay.yourBalance')}</span>
+              <span className="text-base font-bold text-foreground">{formatLana(customerBalance as number)} LANA</span>
+            </div>
+            {enough ? (
+              <>
+                <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  {t('pay.balanceEnough')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t('pay.balanceAfter', { amount: formatLana(remaining) })}
+                </p>
+              </>
+            ) : (
+              <p className="text-sm font-semibold text-destructive flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                {t('pay.balanceNotEnough', { missing: formatLana(missing) })}
+              </p>
+            )}
+          </div>
+        )}
+
         <Button
           onClick={() => confirmAndPay(rateChanged)}
-          className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
+          disabled={hasBalance && !enough}
+          className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
         >
           <CheckCircle2 className="w-5 h-5" />
           {t('pay.confirmAndPay')}

@@ -359,5 +359,9 @@
   "pay.alreadyPaid": "Этот запрос уже оплачен",
   "pay.cancelledInfo": "Этот запрос на оплату был отменён продавцом.",
   "pay.expiredInfo": "Срок действия этого запроса на оплату истёк.",
-  "pay.notFound": "Запрос на оплату не найден. Проверьте ссылку."
+  "pay.notFound": "Запрос на оплату не найден. Проверьте ссылку.",
+  "pay.yourBalance": "Ваш баланс",
+  "pay.balanceEnough": "Средств достаточно для этого платежа",
+  "pay.balanceAfter": "После оплаты останется ≈ {{amount}} LANA",
+  "pay.balanceNotEnough": "Недостаточно LANA — не хватает {{missing}} LANA"
 }

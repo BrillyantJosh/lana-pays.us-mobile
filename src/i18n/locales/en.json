@@ -498,5 +498,9 @@
   "pay.alreadyPaid": "This request has already been paid",
   "pay.cancelledInfo": "This payment request was cancelled by the seller.",
   "pay.expiredInfo": "This payment request has expired.",
-  "pay.notFound": "Payment request not found. Please check the link."
+  "pay.notFound": "Payment request not found. Please check the link.",
+  "pay.yourBalance": "Your balance",
+  "pay.balanceEnough": "You have enough for this payment",
+  "pay.balanceAfter": "After payment ≈ {{amount}} LANA remains",
+  "pay.balanceNotEnough": "Not enough LANA — you are missing {{missing}} LANA"
 }

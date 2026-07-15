@@ -359,5 +359,9 @@
   "pay.alreadyPaid": "Este pedido já foi pago",
   "pay.cancelledInfo": "Este pedido de pagamento foi cancelado pelo vendedor.",
   "pay.expiredInfo": "Este pedido de pagamento expirou.",
-  "pay.notFound": "Pedido de pagamento não encontrado. Verifique o link."
+  "pay.notFound": "Pedido de pagamento não encontrado. Verifique o link.",
+  "pay.yourBalance": "O seu saldo",
+  "pay.balanceEnough": "Tem fundos suficientes para este pagamento",
+  "pay.balanceAfter": "Após o pagamento restam ≈ {{amount}} LANA",
+  "pay.balanceNotEnough": "LANA insuficientes — faltam {{missing}} LANA"
 }

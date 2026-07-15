@@ -359,5 +359,9 @@
   "pay.alreadyPaid": "Ezt a kérelmet már kifizették",
   "pay.cancelledInfo": "Ezt a fizetési kérelmet az eladó törölte.",
   "pay.expiredInfo": "Ez a fizetési kérelem lejárt.",
-  "pay.notFound": "A fizetési kérelem nem található. Ellenőrizd a linket."
+  "pay.notFound": "A fizetési kérelem nem található. Ellenőrizd a linket.",
+  "pay.yourBalance": "Egyenlege",
+  "pay.balanceEnough": "Elegendő fedezete van ehhez a fizetéshez",
+  "pay.balanceAfter": "Fizetés után ≈ {{amount}} LANA marad",
+  "pay.balanceNotEnough": "Nincs elég LANA — {{missing}} LANA hiányzik"
 }

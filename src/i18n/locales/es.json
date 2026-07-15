@@ -359,5 +359,9 @@
   "pay.alreadyPaid": "Esta solicitud ya ha sido pagada",
   "pay.cancelledInfo": "Esta solicitud de pago fue cancelada por el vendedor.",
   "pay.expiredInfo": "Esta solicitud de pago ha caducado.",
-  "pay.notFound": "Solicitud de pago no encontrada. Comprueba el enlace."
+  "pay.notFound": "Solicitud de pago no encontrada. Comprueba el enlace.",
+  "pay.yourBalance": "Tu saldo",
+  "pay.balanceEnough": "Tienes fondos suficientes para este pago",
+  "pay.balanceAfter": "Tras el pago quedan ≈ {{amount}} LANA",
+  "pay.balanceNotEnough": "LANA insuficientes — te faltan {{missing}} LANA"
 }
