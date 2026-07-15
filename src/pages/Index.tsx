@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from 'react-i18next';
-import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark } from "lucide-react";
+import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark, Globe } from "lucide-react";
+import { toast } from "sonner";
 
 // Mitosis / cell-division glyph (one cell splitting into two) — represents the Split.
 const MitosisIcon = ({ className }: { className?: string }) => (
@@ -14,6 +15,7 @@ import MenuDrawer from "@/components/MenuDrawer";
 import CashTab from "@/components/tabs/CashTab";
 import WalletsTab from "@/components/tabs/WalletsTab";
 import LanaTab from "@/components/tabs/LanaTab";
+import LanaOnlineTab from "@/components/tabs/LanaOnlineTab";
 import EditProfile from "@/components/EditProfile";
 import RegularCustomersTab from "@/components/tabs/RegularCustomersTab";
 import RegisterCustomerTab from "@/components/tabs/RegisterCustomerTab";
@@ -223,7 +225,7 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
-type View = "home" | "cash" | "wallets" | "lana" | "profile" | "regulars" | "register" | "caretaker";
+type View = "home" | "cash" | "wallets" | "lana" | "lana-online" | "profile" | "regulars" | "register" | "caretaker";
 
 const Index = () => {
   const { t } = useTranslation();
@@ -341,6 +343,56 @@ const Index = () => {
     const interval = setInterval(fetchSplitStatus, 30_000);
     return () => clearInterval(interval);
   }, []);
+
+  // ── Lana-online paid-request notification (30s poll) ──────────────────
+  // Counts PAID-but-unseen remote payment requests across ALL the merchant's
+  // units. A rising count fires a sonner toast (one per new payment, ≤3);
+  // the count also badges the Lana-online home button. Opening the tab
+  // fires mark-seen which zeroes it.
+  const [unseenPaidCount, setUnseenPaidCount] = useState(0);
+  const prevUnseenRef = useRef<number | null>(null);
+  const notifiedIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!session?.nostrHexId) { setUnseenPaidCount(0); return; }
+    const fetchUnseen = async () => {
+      try {
+        const res = await fetch(`/api/payment-requests/unseen-count?hex=${encodeURIComponent(session.nostrHexId)}`);
+        const json = await res.json();
+        if (!json.success) return;
+        const count = json.count || 0;
+        // Toast only on a RISE after the first read (avoid a login-time blast),
+        // and only once per request id (poll overlap safety).
+        if (prevUnseenRef.current !== null && count > prevUnseenRef.current) {
+          for (const item of (json.latest || [])) {
+            if (notifiedIdsRef.current.has(item.id)) continue;
+            notifiedIdsRef.current.add(item.id);
+            toast.success(t('lanaOnline.paidToast', {
+              amount: `${CURRENCY_SYMBOL[item.currency] || ''}${Number(item.amount_fiat).toFixed(2)}`,
+              currency: item.currency,
+              unit: item.unit_name,
+            }), { duration: 10_000 });
+          }
+        }
+        prevUnseenRef.current = count;
+        setUnseenPaidCount(count);
+      } catch { /* keep previous state */ }
+    };
+    fetchUnseen();
+    const interval = setInterval(fetchUnseen, 30_000);
+    return () => clearInterval(interval);
+  }, [session?.nostrHexId, t]);
+
+  const openLanaOnline = () => {
+    setActiveView("lana-online");
+    // Mark paid requests as seen → clears the badge; list still shows them.
+    if (session?.nostrHexId) {
+      fetch('/api/payment-requests/mark-seen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hex: session.nostrHexId }),
+      }).then(() => { setUnseenPaidCount(0); prevUnseenRef.current = 0; }).catch(() => {});
+    }
+  };
 
   // Fetch max transaction limits for ALL business units
   useEffect(() => {
@@ -876,6 +928,34 @@ const Index = () => {
                     <span className="relative z-10 text-base text-muted-foreground">{t('home.lanaPayment')}</span>
                   </button>
 
+                  {/* Lana-online — remote payment request. Same gates as the LANA
+                      button (payout data required; splitHappening never blocks the
+                      LANA rail). Red badge = paid requests not yet seen. */}
+                  <button
+                    onClick={openLanaOnline}
+                    disabled={payDisabled || lanaPayoutMissing}
+                    className="relative overflow-hidden flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    {unseenPaidCount > 0 && (
+                      <span className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
+                        {unseenPaidCount}
+                      </span>
+                    )}
+                    {/* Mandala background mesh */}
+                    <img
+                      src={mandalaMesh}
+                      alt=""
+                      aria-hidden="true"
+                      className="absolute inset-0 w-full h-full object-cover opacity-25 dark:opacity-15 mix-blend-multiply dark:mix-blend-screen pointer-events-none select-none"
+                    />
+                    {/* Content */}
+                    <div className="relative z-10 w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
+                      <Globe className="w-11 h-11 text-primary" />
+                    </div>
+                    <span className="relative z-10 text-3xl font-bold text-foreground">{t('home.payLanaOnline')}</span>
+                    <span className="relative z-10 text-base text-muted-foreground">{t('home.lanaOnlinePayment')}</span>
+                  </button>
+
                   {noFunds && !noShopSelected && (
                     <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
                       <p className="text-sm text-destructive text-center font-medium">{t('home.noFunds')}</p>
@@ -1026,6 +1106,9 @@ const Index = () => {
             )}
             {activeView === "lana" && (
               <LanaTab paymentRequest={lanaPaymentRequest} onClearRequest={() => setLanaPaymentRequest(null)} unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} />
+            )}
+            {activeView === "lana-online" && (
+              <LanaOnlineTab unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} merchantHex={session?.nostrHexId} />
             )}
             {activeView === "profile" && (
               <EditProfile />

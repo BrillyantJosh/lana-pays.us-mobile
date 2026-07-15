@@ -357,6 +357,25 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
       }
     }
 
+    // ── Lana-online payment-request sweeps ──────────────────────────────
+    // 1) Expire overdue pending requests (lazy expiry also happens on read;
+    //    this keeps statuses fresh even when nobody is looking).
+    const expired = db.prepare(`
+      UPDATE payment_requests SET status = 'expired'
+      WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at < datetime('now')
+    `).run();
+    if (expired.changes > 0) console.log(`[lana-online] Expired ${expired.changes} overdue payment request(s)`);
+    // 2) Watchdog: a request stuck in 'paying' for >10 min means the submit
+    //    died mid-flight. Re-opening it is SAFE ONLY because the brain's
+    //    (unit_id, invoice_number) dedup converts any true replay into an
+    //    "already paid" self-heal at the next submit (paymentRequests.ts).
+    const stuck = db.prepare(`
+      UPDATE payment_requests SET status = 'pending', paying_started_at = NULL,
+        last_error = 'paying watchdog reset', last_error_at = datetime('now')
+      WHERE status = 'paying' AND paying_started_at < datetime('now', '-10 minutes')
+    `).run();
+    if (stuck.changes > 0) console.warn(`[lana-online] WATCHDOG re-opened ${stuck.changes} stuck 'paying' request(s) — check brain for orphaned payments`);
+
     // Update heartbeat log
     db.prepare(`
       UPDATE heartbeat_logs SET

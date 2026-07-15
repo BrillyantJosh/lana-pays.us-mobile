@@ -223,5 +223,51 @@ export function initializeSchema(db: Database.Database): void {
   try { db.exec(`ALTER TABLE kind_38888 ADD COLUMN split_approaching INTEGER DEFAULT 0`); } catch {}
   try { db.exec(`ALTER TABLE kind_38888 ADD COLUMN freeze_lana_retail_account_above INTEGER DEFAULT 0`); } catch {}
 
+  // ── Lana-online payment requests ──────────────────────────────────────────
+  // A merchant-created remote payment request. Stored in FIAT ONLY — the LANA
+  // amount is computed by the brain AT PAYMENT TIME from the then-current
+  // KIND 38888 rate (a split may republish new fx rates between creation and
+  // payment). The paid_* columns are a post-payment snapshot for history
+  // display, never an input to the money flow.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS payment_requests (
+      id TEXT PRIMARY KEY,
+      token TEXT NOT NULL UNIQUE,
+      unit_id TEXT NOT NULL,
+      merchant_hex TEXT NOT NULL,
+      unit_name TEXT NOT NULL,
+      amount_fiat REAL NOT NULL,
+      currency TEXT NOT NULL,
+      invoice_number TEXT NOT NULL,
+      receipt_url TEXT,
+      receipt_hash TEXT,
+      receipt_type TEXT,
+      receipt_description TEXT,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','paying','paid','cancelled','expired')),
+      created_at TEXT DEFAULT (datetime('now')),
+      expires_at TEXT,
+      paying_started_at TEXT,
+      paid_at TEXT,
+      brain_transaction_id TEXT,
+      tx_hash TEXT,
+      paid_lana_lanoshis INTEGER,
+      paid_exchange_rate REAL,
+      paid_split TEXT,
+      customer_hex TEXT,
+      customer_wallet TEXT,
+      customer_name TEXT,
+      preview_json TEXT,
+      preview_at TEXT,
+      last_error TEXT,
+      last_error_at TEXT,
+      seen_by_merchant INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_payreq_unit_created ON payment_requests(unit_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_payreq_status ON payment_requests(status);
+  `);
+  // Default validity of a payment request link: 168h = 7 days (0 = never expires).
+  db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('payment_request_expiry_hours', '168')").run();
+
   console.log('Database schema initialized');
 }

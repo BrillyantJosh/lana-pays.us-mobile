@@ -7,6 +7,8 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Index from "./pages/Index";
 import Login from "./pages/Login";
 import Admin from "./pages/Admin";
+import PublicPay from "./pages/PublicPay";
+import LanaOnlineHistory from "./pages/LanaOnlineHistory";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -69,6 +71,17 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <Admin />
+                </ProtectedRoute>
+              }
+            />
+            {/* PUBLIC remote-payment page — the 192-bit token is the capability,
+                so this route deliberately has NO ProtectedRoute wrapper. */}
+            <Route path="/pay/:token" element={<PublicPay />} />
+            <Route
+              path="/lana-online/history"
+              element={
+                <ProtectedRoute>
+                  <LanaOnlineHistory />
                 </ProtectedRoute>
               }
             />

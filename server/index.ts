@@ -16,6 +16,7 @@ import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, electrumCall, type ElectrumServer } from './lib/electrum.js';
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js';
+import { registerPaymentRequestRoutes } from './paymentRequests.js';
 
 const LANA_RELAYS = [
   'wss://relay.lanavault.space',
@@ -1417,6 +1418,10 @@ app.put('/api/admin/settings', (req, res) => {
   }
   res.json({ success: true, updated });
 });
+
+// ─── Lana-online payment requests (merchant + public /api/pay/:token) ─────
+
+registerPaymentRequestRoutes(app, db);
 
 // ─── Static Frontend (MUST be after all API routes) ───────────────────────
 
