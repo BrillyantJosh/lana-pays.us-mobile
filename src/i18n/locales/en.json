@@ -450,7 +450,7 @@
   "purchase.paymentFailedTitle": "Payment not received",
   "purchase.customerLanaFailed": "The customer's LANA payment did not go through, so no funds were received. Do NOT hand over the goods. Ask the customer to try the payment again.",
   "login.profileNotFound": "Your profile (KIND 0) could not be verified. Check your connection and try again, or create your profile first.",
-  "home.payLanaOnline": "Lana-online",
+  "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Remote LANA payment via link",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Create a payment request link",

@@ -311,7 +311,7 @@
   "purchase.paymentFailedTitle": "Zahlung nicht erhalten",
   "purchase.customerLanaFailed": "Die LANA-Zahlung des Kunden ist fehlgeschlagen, es wurde kein Geld empfangen. Geben Sie die Ware NICHT heraus. Bitten Sie den Kunden, die Zahlung erneut zu versuchen.",
   "login.profileNotFound": "Ihr Profil (KIND 0) konnte nicht überprüft werden. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut, oder erstellen Sie zuerst Ihr Profil.",
-  "home.payLanaOnline": "Lana-online",
+  "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "LANA-Fernzahlung per Link",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Zahlungsanforderungs-Link erstellen",

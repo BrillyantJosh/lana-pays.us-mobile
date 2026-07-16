@@ -311,7 +311,7 @@
   "purchase.paymentFailedTitle": "Plaćanje nije primljeno",
   "purchase.customerLanaFailed": "Kupčevo plaćanje u LANA nije uspjelo, pa sredstva nisu primljena. NE predajte robu. Zamolite kupca da ponovi plaćanje.",
   "login.profileNotFound": "Vaš profil (KIND 0) nije moguće provjeriti. Provjerite vezu i pokušajte ponovno, ili najprije izradite svoj profil.",
-  "home.payLanaOnline": "Lana-online",
+  "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Udaljeno LANA plaćanje putem poveznice",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Izradite poveznicu zahtjeva za plaćanje",

@@ -311,7 +311,7 @@
   "purchase.paymentFailedTitle": "未收到付款",
   "purchase.customerLanaFailed": "客户的 LANA 付款未成功，未收到任何款项。请勿交付商品。请让客户重新付款。",
   "login.profileNotFound": "无法验证您的资料 (KIND 0)。请检查网络连接后重试，或先创建您的资料。",
-  "home.payLanaOnline": "Lana-online",
+  "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "通过链接远程支付 LANA",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "创建付款请求链接",

@@ -311,7 +311,7 @@
   "purchase.paymentFailedTitle": "Pagamento não recebido",
   "purchase.customerLanaFailed": "O pagamento em LANA do cliente não foi concluído, por isso não foram recebidos fundos. NÃO entregue a mercadoria. Peça ao cliente para tentar o pagamento novamente.",
   "login.profileNotFound": "Não foi possível verificar o seu perfil (KIND 0). Verifique a sua ligação e tente novamente, ou crie primeiro o seu perfil.",
-  "home.payLanaOnline": "Lana-online",
+  "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Pagamento LANA remoto por link",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Crie um link de pedido de pagamento",

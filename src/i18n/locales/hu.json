@@ -311,7 +311,7 @@
   "purchase.paymentFailedTitle": "A fizetés nem érkezett meg",
   "purchase.customerLanaFailed": "Az ügyfél LANA-fizetése nem ment át, így nem érkezett pénz. NE adja át az árut. Kérje meg az ügyfelet, hogy próbálja meg újra a fizetést.",
   "login.profileNotFound": "A profilod (KIND 0) nem ellenőrizhető. Ellenőrizd a kapcsolatot és próbáld újra, vagy előbb hozd létre a profilodat.",
-  "home.payLanaOnline": "Lana-online",
+  "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Távoli LANA-fizetés linken keresztül",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Fizetési kérelem link létrehozása",
