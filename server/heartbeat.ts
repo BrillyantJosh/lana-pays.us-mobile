@@ -346,11 +346,11 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
           `).run(
             hexId,
             npub,
-            profile?.display_name || profile?.name || null,
+            profile?.name || profile?.display_name || null,
             profile?.picture || null
           );
 
-          console.log(`Registered user ${hexId.slice(0, 12)}... (${profile?.display_name || profile?.name || 'no profile'})`);
+          console.log(`Registered user ${hexId.slice(0, 12)}... (${profile?.name || profile?.display_name || 'no profile'})`);
         } catch (e: any) {
           console.warn(`Failed to register user ${hexId.slice(0, 12)}...:`, e.message);
         }

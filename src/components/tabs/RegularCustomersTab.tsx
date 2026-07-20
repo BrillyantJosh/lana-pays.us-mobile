@@ -221,7 +221,7 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
     setResolvedHexId(profile.pubkey);
     setResolvedWallet(profile.lanaWalletID);
     setResolvedNpub(null);
-    setResolvedName(profile.display_name || profile.name || null);
+    setResolvedName(profile.name || profile.display_name || null);
     setResolvedPicture(profile.picture || null);
     setNote('');
     setStep('confirm');
@@ -300,7 +300,7 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
         });
         const profileData = await profileRes.json();
         if (profileData.profile) {
-          setResolvedName(profileData.profile.display_name || profileData.profile.name || null);
+          setResolvedName(profileData.profile.name || profileData.profile.display_name || null);
           setResolvedPicture(profileData.profile.picture || null);
         }
       } catch {}
@@ -770,7 +770,7 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
                       )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-foreground truncate">
-                          {p.display_name || p.name || t('regulars.unknownCustomer')}
+                          {p.name || p.display_name || t('regulars.unknownCustomer')}
                           {p.name && p.display_name && p.name !== p.display_name && (
                             <span className="ml-1.5 text-xs font-normal text-muted-foreground">@{p.name}</span>
                           )}

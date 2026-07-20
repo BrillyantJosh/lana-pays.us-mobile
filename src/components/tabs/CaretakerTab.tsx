@@ -118,7 +118,7 @@ const CaretakerTab = ({ businessUnits, initialUnitId }: CaretakerTabProps) => {
     if (!initialUnitId) return;
     const entry = data[initialUnitId];
     if (entry && entry !== 'loading' && entry !== 'missing') {
-      const name = entry.profile?.display_name || entry.profile?.name || `${entry.hex.slice(0, 8)}…`;
+      const name = entry.profile?.name || entry.profile?.display_name || `${entry.hex.slice(0, 8)}…`;
       setChatFor({ hex: entry.hex, name, picture: entry.profile?.picture || null });
     }
   }, [initialUnitId, data]);
@@ -207,7 +207,7 @@ const CaretakerTab = ({ businessUnits, initialUnitId }: CaretakerTabProps) => {
                     info={entry}
                     onMessage={() => setChatFor({
                       hex: entry.hex,
-                      name: entry.profile?.display_name || entry.profile?.name || `${entry.hex.slice(0, 8)}…`,
+                      name: entry.profile?.name || entry.profile?.display_name || `${entry.hex.slice(0, 8)}…`,
                       picture: entry.profile?.picture || null,
                     })}
                     onCopyHex={handleCopyHex}
@@ -248,7 +248,7 @@ function CaretakerCard({
 }) {
   const { t } = useTranslation();
   const p = info.profile;
-  const displayName = p?.display_name || p?.name || `${info.hex.slice(0, 8)}…`;
+  const displayName = p?.name || p?.display_name || `${info.hex.slice(0, 8)}…`;
   const fullPhone = p?.phone_country_code && p?.phone
     ? `${p.phone_country_code}${p.phone}`
     : p?.phone;

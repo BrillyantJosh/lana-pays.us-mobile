@@ -171,7 +171,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             hex_id: derivedIds.nostrHexId,
             npub: derivedIds.nostrNpubId,
             lana_address: derivedIds.walletId,
-            display_name: profileDisplayName || profileName || null,
+            display_name: profileName || profileDisplayName || null,   // KIND 0 `name` is the REAL name; display_name is a nickname
             picture: profilePicture || null,
           }),
         });
