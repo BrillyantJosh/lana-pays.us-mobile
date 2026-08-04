@@ -266,10 +266,11 @@ const Index = () => {
     (window as any).__maxTransactionAmount = effectiveUnit
       ? effectiveMaxInvoice(effectiveUnit, selectedMaxTx)
       : null;
-    // LANA is never gated by the monthly quota (uncapped rail) — but it still
-    // respects the Direct-Fund investor capacity, so expose the RAW capacity
-    // (no quota cap) for the LANA tab.
-    (window as any).__maxTransactionAmountLana = selectedMaxTx?.max_amount ?? null;
+    // LANA is never gated by the monthly quota, the merchant per-tx limit
+    // (KIND 30902 max_tx_amount) or the app default — those are all CASH-only.
+    // Its ONLY ceiling is the physical one: Direct-Fund investor capacity,
+    // below which the purchase would fail downstream anyway.
+    (window as any).__maxTransactionAmountLana = selectedMaxTx?.fund_limit ?? null;
   }, [effectiveUnit, selectedMaxTx]);
 
   // Whenever the polled list refreshes, swap our selected reference for the
@@ -849,7 +850,14 @@ const Index = () => {
               // a cryptic "Missing required fields" because unit_id was empty.)
               const noShopSelected = !effectiveUnit;
               const isBlocked = (selectedUnit ? isUnitBlocked(selectedUnit) : false) || (businessUnits.length === 1 && isUnitBlocked(businessUnits[0]));
+              // CASH gate: the merged max (merchant ∧ fund ∧ default).
               const noFunds = selectedMaxTx !== null && selectedMaxTx !== undefined && (selectedMaxTx.max_amount === null || selectedMaxTx.max_amount === undefined || selectedMaxTx.max_amount <= 0);
+              // LANA gate: fund capacity ONLY — the merchant/default limits are
+              // cash-only, so a merchant limit of 0 must not grey the LANA rail.
+              // Fail-open on null (capacity unknown).
+              const lanaNoFunds = selectedMaxTx !== null && selectedMaxTx !== undefined
+                && selectedMaxTx.fund_limit !== null && selectedMaxTx.fund_limit !== undefined
+                && selectedMaxTx.fund_limit <= 0;
 
               // Blocked statuses (pending / quota_blocked / suspended /
               // rejected) replace the payment buttons entirely with a
@@ -858,7 +866,8 @@ const Index = () => {
                 return <BlockedStatusPanel unit={effectiveUnit} />;
               }
 
-              const payDisabled = noShopSelected || noFunds;
+              const cashPayDisabled = noShopSelected || noFunds;
+              const lanaPayDisabled = noShopSelected || lanaNoFunds;
 
               // A LANA purchase wires the merchant invoice to their bank, so it
               // needs payout data (IBAN). Cash does not. When the merchant hasn't
@@ -873,7 +882,7 @@ const Index = () => {
                 <>
                   <button
                     onClick={() => setActiveView("cash")}
-                    disabled={payDisabled || cashQuotaBlocked || splitHappening}
+                    disabled={cashPayDisabled || cashQuotaBlocked || splitHappening}
                     className={`relative overflow-hidden flex-1 rounded-3xl border-2 shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:pointer-events-none ${
                       splitHappening
                         ? 'bg-destructive/10 border-destructive/50'  // Split in progress: keep the notice fully readable (no dim)
@@ -910,7 +919,7 @@ const Index = () => {
 
                   <button
                     onClick={() => setActiveView("lana")}
-                    disabled={payDisabled || lanaPayoutMissing}
+                    disabled={lanaPayDisabled || lanaPayoutMissing}
                     className="relative overflow-hidden flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {/* Mandala background mesh */}
@@ -933,7 +942,7 @@ const Index = () => {
                       LANA rail). Red badge = paid requests not yet seen. */}
                   <button
                     onClick={openLanaOnline}
-                    disabled={payDisabled || lanaPayoutMissing}
+                    disabled={lanaPayDisabled || lanaPayoutMissing}
                     className="relative overflow-hidden flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {unseenPaidCount > 0 && (
@@ -964,7 +973,7 @@ const Index = () => {
 
                   {/* Merchant has no payout data (IBAN) → LANA is greyed above; explain why,
                       large + clear. Cash stays available. */}
-                  {lanaPayoutMissing && !payDisabled && (
+                  {lanaPayoutMissing && !lanaPayDisabled && (
                     <div className="rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
                       <div className="w-14 h-14 mx-auto rounded-full bg-amber-500/15 flex items-center justify-center">
                         <Landmark className="w-7 h-7 text-amber-600 dark:text-amber-400" />
@@ -976,7 +985,7 @@ const Index = () => {
 
                   {/* Monthly cash limit reached → cash is greyed above; explain why,
                       and point the seller to LANA (which stays unlimited). */}
-                  {cashQuotaBlocked && !payDisabled && (
+                  {cashQuotaBlocked && !cashPayDisabled && (
                     <div className="rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
                       <div className="w-14 h-14 mx-auto rounded-full bg-amber-500/15 flex items-center justify-center">
                         <Banknote className="w-7 h-7 text-amber-600 dark:text-amber-400" />

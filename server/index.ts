@@ -17,6 +17,7 @@ import { fetchSingleBalance, electrumCall, type ElectrumServer } from './lib/ele
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js';
 import { registerPaymentRequestRoutes } from './paymentRequests.js';
+import { getMaxTransaction, foldQuotaRemaining, clampCashAmount, round2 } from './lib/maxTransaction.js';
 
 const LANA_RELAYS = [
   'wss://relay.lanavault.space',
@@ -863,68 +864,9 @@ app.get('/api/max-transaction', (req, res) => {
     return res.status(400).json({ error: 'unit_id is required' });
   }
 
-  // Get merchant limit from KIND 30902 fee policy (includes currency)
-  const policy = db.prepare(
-    'SELECT max_tx_amount, max_tx_currency FROM fee_policies WHERE unit_id = ?'
-  ).get(unitId) as any;
-
-  const merchantLimit = policy?.max_tx_amount ? parseFloat(policy.max_tx_amount) : null;
-
-  // Use the currency from the fee policy tag, fall back to unit/query currency
-  const currency = (policy?.max_tx_currency || fallbackCurrency).toUpperCase();
-
-  // Get latest direct fund capacity for the unit's currency
-  const capacity = db.prepare(
-    'SELECT total_available, max_single_budget, investor_count, blocked_count, fetched_at FROM fund_capacity WHERE currency = ? ORDER BY id DESC LIMIT 1'
-  ).get(currency) as any;
-
-  // Max invoice = largest single budget (one invoice goes to one budget, not split across)
-  // When capacity exists but is 0, that means no budget available — respect that as 0, not null
-  const fundLimit = capacity
-    ? (capacity.max_single_budget ?? capacity.total_available ?? 0)
-    : null;
-
-  // Get global default limit from app_settings
-  const defaultMaxRow = db.prepare("SELECT value FROM app_settings WHERE key = 'default_max_tx_amount'").get() as any;
-  const defaultLimit = defaultMaxRow ? parseFloat(defaultMaxRow.value) : 0;
-
-  // Calculate effective max: always use fundLimit when available (even if 0)
-  let maxAmount: number | null = null;
-  let source = 'none';
-
-  if (fundLimit !== null && merchantLimit !== null) {
-    maxAmount = Math.min(merchantLimit, fundLimit);
-    source = maxAmount === merchantLimit ? 'merchant' : 'fund';
-  } else if (fundLimit !== null) {
-    maxAmount = fundLimit;
-    source = 'fund';
-  } else if (merchantLimit !== null) {
-    maxAmount = merchantLimit;
-    source = 'merchant';
-  }
-
-  // Apply global default limit if set (take lower of current max and default)
-  if (defaultLimit > 0) {
-    if (maxAmount === null) {
-      maxAmount = defaultLimit;
-      source = 'default';
-    } else if (defaultLimit < maxAmount) {
-      maxAmount = defaultLimit;
-      source = 'default';
-    }
-  }
-
-  res.json({
-    unit_id: unitId,
-    currency,
-    max_amount: maxAmount !== null ? Math.round(maxAmount * 100) / 100 : null,
-    source,
-    merchant_limit: merchantLimit !== null ? Math.round(merchantLimit * 100) / 100 : null,
-    fund_limit: fundLimit !== null ? Math.round(fundLimit * 100) / 100 : null,
-    default_limit: defaultLimit > 0 ? defaultLimit : null,
-    fund_investors: capacity?.investor_count || 0,
-    fund_updated_at: capacity?.fetched_at || null,
-  });
+  // Computation lives in lib/maxTransaction.ts, shared with the purchase
+  // proxy's cash clamp. Response shape unchanged.
+  res.json(getMaxTransaction(db, unitId, fallbackCurrency));
 });
 
 // ─── Brain API Proxy ──────────────────────────────────
@@ -1025,6 +967,9 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
   // and quota-exceeded cases without burning a brain round-trip.
   const unitId = req.body?.unit_id;
   const amount = Number(req.body?.amount || 0);
+  // Set when the cash clamp below rewrites the amount; echoed in the response
+  // so the client can tell the user what was actually charged.
+  let amountAdjusted: { original: number; adjusted: number; currency: string } | null = null;
   if (typeof unitId === 'string' && unitId.length > 0) {
     const u = db.prepare(`
       SELECT suspension_status, quota_volume_used, quota_volume_limit,
@@ -1059,12 +1004,35 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
             message: 'Monthly cash limit reached, resets 1st of next month',
           });
         }
-        // Pre-flight quota — only when currencies match (otherwise let brain do
-        // the conversion via KIND 38888 rates).
         const reqCurrency = String(req.body?.currency || '').toUpperCase();
+
+        // ── CASH CLAMP (authoritative). An invoice above the effective
+        // per-transaction maximum is ADJUSTED down to it, not rejected — the
+        // merchant charges the rest outside the system. This is the backstop
+        // behind the client-side clamp: it also catches stale bundles and the
+        // regular-customer path, whatever the client sent. It must run BEFORE
+        // the volume pre-flight below, which would otherwise 403 an amount
+        // the clamp brings under the quota. LANA is never clamped: its amount
+        // is baked into the client-signed TX.
+        if (Number.isFinite(amount) && amount > 0) {
+          const limits = getMaxTransaction(db, unitId, reqCurrency || String(u.currency || 'EUR'));
+          const effMax = foldQuotaRemaining(limits.max_amount, u, reqCurrency);
+          const clamp = clampCashAmount(amount, effMax);
+          if (clamp.adjusted) {
+            req.body.amount = clamp.amount;
+            amountAdjusted = { original: round2(amount), adjusted: clamp.amount, currency: limits.currency };
+            console.warn(`[mobile] CASH amount clamped: unit=${unitId.slice(0, 12)} ${amount} -> ${clamp.amount} (limit source=${limits.source})`);
+          }
+        }
+        const effAmount = Number(req.body?.amount || 0);
+
+        // Pre-flight quota — only when currencies match (otherwise let brain do
+        // the conversion via KIND 38888 rates). After the clamp this only fires
+        // when the remaining volume is effectively zero — which stays a BLOCK,
+        // since an amount cannot be adjusted down to nothing.
         const quotaCurrency = String(u.quota_currency || u.currency || 'EUR').toUpperCase();
         if (u.quota_volume_limit > 0 && reqCurrency === quotaCurrency
-            && u.quota_volume_used + amount > u.quota_volume_limit) {
+            && u.quota_volume_used + effAmount > u.quota_volume_limit) {
           console.warn(`[mobile] Blocking CASH pre-flight: unit ${unitId.slice(0, 12)} would exceed volume quota`);
           return res.status(403).json({
             success: false,
@@ -1110,6 +1078,11 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
     const data = await response.json();
     if (response.status !== 200) {
       console.error('[mobile] Brain purchase response:', response.status, JSON.stringify(data));
+    }
+    // Tell the client the charged amount differs from what it sent. Old
+    // bundles ignore the extra field; new ones toast it.
+    if (amountAdjusted && response.ok && data && typeof data === 'object') {
+      (data as any).amount_adjusted = amountAdjusted;
     }
     res.status(response.status).json(data);
   } catch (error: any) {

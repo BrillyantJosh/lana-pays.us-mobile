@@ -9,6 +9,8 @@ import { QRScanner } from "@/components/QRScanner";
 import { convertWifToIds } from "@/lib/crypto";
 import { createAndSignKind0, type Kind0Content } from "@/lib/nostr-sign";
 import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
+import { parseAmountInput, clampCashAmount, getCashMaxTx } from "@/lib/max-tx";
 
 const currencyIcons: Record<string, typeof PoundSterling> = {
   GBP: PoundSterling, USD: DollarSign, EUR: Euro,
@@ -95,6 +97,68 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   // ══════ SNAPSHOT REF — the ONLY ref needed for purchase data ══════
   // Set synchronously BEFORE scanner opens. Scanner callback reads from this.
   const purchaseDataRef = useRef<PurchaseSnapshot | null>(null);
+
+  /**
+   * Parse + CLAMP a cash amount at submit time — shared by all three submit
+   * paths, so the rule holds however the purchase is started (scan, regular
+   * customer, post-registration). An invoice above the effective maximum is
+   * ADJUSTED down to it and the seller is told — never blocked. This runs even
+   * if the seller retyped a higher figure after the scan-time adjustment; the
+   * proxy repeats it server-side as the authoritative backstop.
+   * Returns null for a genuinely invalid amount (caller shows invalidAmount).
+   */
+  const clampForSubmit = (rawAmount: string): number | null => {
+    const parsed = parseAmountInput(rawAmount);
+    if (isNaN(parsed) || parsed <= 0) return null;
+    const { amount: clamped, adjusted } = clampCashAmount(parsed, getCashMaxTx());
+    if (adjusted) {
+      toast.info(t('cash.amountAdjusted', {
+        symbol: currencySymbol,
+        original: parsed.toFixed(2),
+        amount: clamped.toFixed(2),
+      }), { duration: 8000 });
+      // Keep every surface honest about what is actually charged: the input
+      // field and the snapshot the confirmation screen reads from.
+      setAmount(String(clamped));
+      if (purchaseDataRef.current) purchaseDataRef.current.amount = String(clamped);
+    }
+    return clamped;
+  };
+
+  /**
+   * The proxy may clamp FURTHER than the client did (its limit data is fresher
+   * than our 60s poll). If the response says so, tell the seller and correct
+   * the confirmation figures — the recorded charge is the server's number.
+   */
+  const notifyServerAdjustment = (data: any) => {
+    const adj = data?.amount_adjusted;
+    if (!adj || typeof adj.adjusted !== 'number') return;
+    const shown = purchaseDataRef.current ? parseAmountInput(purchaseDataRef.current.amount) : NaN;
+    if (!isNaN(shown) && Math.abs(shown - adj.adjusted) < 0.005) return; // client already matched
+    if (purchaseDataRef.current) purchaseDataRef.current.amount = String(adj.adjusted);
+    setAmount(String(adj.adjusted));
+    toast.info(t('cash.amountAdjusted', {
+      symbol: currencySymbol,
+      original: Number(adj.original).toFixed(2),
+      amount: Number(adj.adjusted).toFixed(2),
+    }), { duration: 8000 });
+  };
+
+  /**
+   * Should CASH be hard-blocked outright? Only genuine cannot-charge states:
+   * zero effective capacity (which already folds in an exhausted volume
+   * quota) and an exhausted tx-count quota — a COUNT cannot be clamped.
+   * An amount merely above the limit no longer blocks; it gets adjusted.
+   */
+  const cashBlocked = (): boolean => {
+    const maxTx = getCashMaxTx();
+    if (maxTx !== null && maxTx <= 0) return true;
+    const u = (window as any).__selectedUnit;
+    if (u && (u.quota_tx_limit || 0) > 0) {
+      if (Math.max(0, u.quota_tx_limit - (u.quota_tx_used || 0)) <= 0) return true;
+    }
+    return false;
+  };
 
   // Receipt state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -269,7 +333,21 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
 
       if (analysis.isReceipt) {
         setReceiptType('receipt');
-        if (analysis.amount) setAmount(String(analysis.amount));
+        if (analysis.amount) {
+          // Scan-time adjustment: an invoice above the effective cash maximum
+          // is auto-filled at the maximum, with a notice — the merchant charges
+          // the rest outside the system. (Clamped again at submit either way.)
+          const scanned = parseAmountInput(String(analysis.amount));
+          const { amount: filled, adjusted } = clampCashAmount(scanned, getCashMaxTx());
+          setAmount(String(adjusted ? filled : analysis.amount));
+          if (adjusted) {
+            toast.info(t('cash.amountAdjusted', {
+              symbol: currencySymbol,
+              original: scanned.toFixed(2),
+              amount: filled.toFixed(2),
+            }), { duration: 8000 });
+          }
+        }
         if (analysis.invoiceNumber) {
           setInvoiceNumber(analysis.invoiceNumber);
           localInvoiceNumber = String(analysis.invoiceNumber);
@@ -449,8 +527,8 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       if (regRes.success) {
         if (regRes.registered) {
           // ══════ SUBMIT PURCHASE — using snapshot data ══════
-          const parsedAmount = parseFloat(pd.amount.replace(',', '.'));
-          if (isNaN(parsedAmount) || parsedAmount <= 0) {
+          const parsedAmount = clampForSubmit(pd.amount);
+          if (parsedAmount === null) {
             setSubmitError(t('cash.invalidAmount'));
             return;
           }
@@ -495,6 +573,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             return;
           }
 
+          notifyServerAdjustment(purchaseData);
           setStep("confirmed");
         } else if (hasNostrKeys) {
           // Check if wallet has balance — only virgin (empty) wallets can be registered
@@ -533,8 +612,9 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     };
 
     const pd = purchaseDataRef.current;
-    const parsedAmount = parseFloat(pd.amount.replace(',', '.'));
-    if (!pd.invoiceNumber.trim() || isNaN(parsedAmount) || parsedAmount <= 0) {
+    // This path used to skip the limit entirely — the clamp closes that hole.
+    const parsedAmount = clampForSubmit(pd.amount);
+    if (!pd.invoiceNumber.trim() || parsedAmount === null) {
       setSubmitError(t('cash.invalidAmount'));
       return;
     }
@@ -576,6 +656,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         return;
       }
 
+      notifyServerAdjustment(data);
       setWalletId(customer.customer_wallet);
       setNostrHexId(customer.customer_hex_id);
       setStep("confirmed");
@@ -657,8 +738,8 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       // 4. Auto-submit purchase (data already captured in purchaseDataRef)
       const pd = purchaseDataRef.current;
       if (pd && pd.invoiceNumber.trim() && pd.amount.trim()) {
-        const parsedAmount = parseFloat(pd.amount.replace(',', '.'));
-        if (!isNaN(parsedAmount) && parsedAmount > 0) {
+        const parsedAmount = clampForSubmit(pd.amount);
+        if (parsedAmount !== null) {
           // Self-purchase guard — same as the other sites. Even though the
           // customer just registered (so they're presumably new), they could
           // still have used the merchant's own WIF, which would now share the
@@ -696,6 +777,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             return;
           }
 
+          notifyServerAdjustment(purchaseData);
           setStep("confirmed");
           return;
         }
@@ -983,26 +1065,27 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           <Label className="text-sm font-medium text-foreground">{t('cash.amount', { symbol: currencySymbol })} <span className="text-destructive">*</span></Label>
           <Input type="text" inputMode="decimal" placeholder={t('cash.amountPlaceholder')} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ''))} className="h-12 rounded-xl bg-background border-input" />
           {(() => {
-            const maxTx = (window as any).__maxTransactionAmount;
-            const parsed = parseFloat(amount.replace(',', '.'));
-            if (maxTx !== null && maxTx !== undefined && maxTx <= 0) {
+            const maxTx = getCashMaxTx();
+            const parsed = parseAmountInput(amount);
+            if (maxTx !== null && maxTx <= 0) {
               return <p className="text-xs text-destructive mt-1">{t('cash.noFunds')}</p>;
             }
-            if (maxTx !== null && maxTx !== undefined && !isNaN(parsed) && parsed > maxTx) {
-              return <p className="text-xs text-destructive mt-1">{t('cash.exceedsMax', { symbol: currencySymbol, amount: maxTx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}</p>;
-            }
-            // ── Pre-flight quota check (defense in depth; brain is authoritative)
+            // ── Tx-count quota stays a hard block (a count cannot be clamped).
             const u = (window as any).__selectedUnit;
-            if (u && u.quota_volume_limit > 0 && !isNaN(parsed)) {
-              const remainingVolume = Math.max(0, u.quota_volume_limit - (u.quota_volume_used || 0));
+            if (u && u.quota_volume_limit > 0) {
               const remainingTx = Math.max(0, (u.quota_tx_limit || 0) - (u.quota_tx_used || 0));
-              const sameCurrency = (u.quota_currency || 'EUR') === currency;
-              if (remainingTx <= 0) {
+              if ((u.quota_tx_limit || 0) > 0 && remainingTx <= 0) {
                 return <p className="text-xs text-destructive mt-1">{t('cash.monthlyCashLimitReached')}</p>;
               }
-              if (sameCurrency && parsed > remainingVolume) {
-                return <p className="text-xs text-destructive mt-1">{t('cash.monthlyCashLimitReached')}</p>;
-              }
+            }
+            // Over the effective max (merchant limit ∧ fund ∧ quota remaining)
+            // is NOT an error anymore — the charge will be adjusted down.
+            if (maxTx !== null && !isNaN(parsed) && parsed > maxTx) {
+              return (
+                <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
+                  {t('cash.willAdjustToMax', { symbol: currencySymbol, amount: maxTx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}
+                </p>
+              );
             }
             return null;
           })()}
@@ -1027,21 +1110,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           setStep("scan");
           setScannerOpen(true);
         }}
-        disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || (() => {
-          const maxTx = (window as any).__maxTransactionAmount;
-          if (maxTx !== null && maxTx !== undefined && maxTx <= 0) return true;
-          const parsed = parseFloat(amount.replace(',', '.'));
-          if (maxTx !== null && maxTx !== undefined && !isNaN(parsed) && parsed > maxTx) return true;
-          // Pre-flight quota check
-          const u = (window as any).__selectedUnit;
-          if (u && u.quota_volume_limit > 0 && !isNaN(parsed)) {
-            const remainingVolume = Math.max(0, u.quota_volume_limit - (u.quota_volume_used || 0));
-            const remainingTx = Math.max(0, (u.quota_tx_limit || 0) - (u.quota_tx_used || 0));
-            if (remainingTx <= 0) return true;
-            if ((u.quota_currency || 'EUR') === currency && parsed > remainingVolume) return true;
-          }
-          return false;
-        })()}
+        disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || cashBlocked()}
         className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
       >
         <Camera className="w-5 h-5" />{t('cash.scanCustomerWallet')}
@@ -1080,7 +1149,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
                 <button
                   key={c.customer_hex_id}
                   onClick={() => handleSelectRegularCustomer(c)}
-                  disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting}
+                  disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || cashBlocked()}
                   className="rounded-xl bg-card border border-border p-3 flex items-center gap-3 active:scale-[0.98] transition-all hover:border-primary/30 disabled:opacity-40 disabled:pointer-events-none text-left"
                 >
                   {c.picture ? (

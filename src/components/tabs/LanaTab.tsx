@@ -243,15 +243,26 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       setStep("processing");
       setPurchaseError(null);
 
-      // Input validation
+      // Input validation. Both guards must step back out of 'processing' —
+      // that screen renders only a spinner, so returning inside it stranded
+      // the seller with no error and no way forward (same pattern as the
+      // self-purchase guard below).
       const parsedAmount = parseFloat(amount.replace(',', '.'));
       if (isNaN(parsedAmount) || parsedAmount <= 0) {
         setPurchaseError(t('cash.invalidAmount'));
+        setStep("display");
         return;
       }
+      // LANA's only ceiling is Direct-Fund capacity (the global now carries
+      // fund_limit alone) — the merchant per-tx limit is CASH-only. This
+      // stays a BLOCK, not a clamp: the amount is baked into the signed TX.
       const maxTx = (window as any).__maxTransactionAmountLana;
       if (maxTx && parsedAmount > maxTx) {
-        setPurchaseError(t('lana.exceedsMaxLimit', { amount: maxTx }));
+        setPurchaseError(t('lana.exceedsFundCapacity', {
+          symbol: currencySymbol,
+          amount: Number(maxTx).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        }));
+        setStep("display");
         return;
       }
 
@@ -673,12 +684,12 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
               if (maxTx !== null && maxTx !== undefined && !isNaN(parsed) && parsed > maxTx) {
                 return (
                   <p className="text-xs text-destructive mt-1">
-                    {t('cash.exceedsMax', { symbol: currencySymbol, amount: maxTx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}
+                    {t('lana.exceedsFundCapacity', { symbol: currencySymbol, amount: maxTx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}
                   </p>
                 );
               }
-              // No monthly quota gate for LANA — the cash limit never applies to
-              // LANA sales (uncapped native rail).
+              // Neither the monthly quota nor the merchant per-tx limit applies
+              // to LANA — the global above carries Direct-Fund capacity only.
               return null;
             })()}
           </div>
