@@ -176,6 +176,7 @@
   "cash.invalidAmount": "Nieprawidłowa kwota",
   "cash.purchaseFailed": "Zakup nie powiódł się. Spróbuj ponownie.",
   "cash.monthlyCashLimitReached": "Miesięczny limit gotówki osiągnięty — sprzedaj za LANA.",
+  "cash.customerWindowExceeded": "Ten klient wydał tu już {{spent}} {{currency}} gotówką w ciągu ostatnich {{days}} dni — limit gotówkowy {{limit}} {{currency}} jest wyczerpany. Sprzedaj zamiast tego za LANA.",
   "home.cashLimitReachedTitle": "Miesięczny limit gotówki osiągnięty",
   "home.cashLimitReachedDetail": "Ten sklep osiągnął miesięczny limit gotówki. Sprzedaż za LANA pozostaje nieograniczona.",
   "cash.walletNotRegistered": "Ten portfel nie jest zarejestrowany. Zeskanuj klucz prywatny WIF, aby zarejestrować i zapłacić.",

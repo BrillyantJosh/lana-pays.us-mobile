@@ -4,7 +4,7 @@
  * are shared, plus the merge/quota logic that only exists here.
  */
 import { describe, it, expect } from 'vitest';
-import { computeEffectiveMax, foldQuotaRemaining, clampCashAmount } from './maxTransaction';
+import { computeEffectiveMax, foldQuotaRemaining, foldCustomerWindow, clampCashAmount } from './maxTransaction';
 
 describe('computeEffectiveMax', () => {
   it('merchant only', () => {
@@ -56,6 +56,26 @@ describe('foldQuotaRemaining', () => {
   });
   it('null max with a quota becomes the remaining volume', () => {
     expect(foldQuotaRemaining(null, unit, 'EUR')).toBe(300);
+  });
+});
+
+describe('foldCustomerWindow', () => {
+  it('a smaller customer remainder tightens the max', () => {
+    expect(foldCustomerWindow(200, 150)).toBe(150);
+  });
+  it('a larger remainder leaves the max alone', () => {
+    expect(foldCustomerWindow(100, 150)).toBe(100);
+  });
+  it('null max takes the remainder', () => {
+    expect(foldCustomerWindow(null, 150)).toBe(150);
+  });
+  it('null remainder (fail-open) leaves the max alone', () => {
+    expect(foldCustomerWindow(200, null)).toBe(200);
+  });
+  it('remainder 0 propagates — the caller blocks BEFORE clamping', () => {
+    // clampCashAmount refuses maxTx <= 0, so 0 here must be handled by the
+    // caller's explicit CUSTOMER_WINDOW_EXCEEDED block, not by the clamp.
+    expect(foldCustomerWindow(200, 0)).toBe(0);
   });
 });
 

@@ -176,6 +176,7 @@
   "cash.invalidAmount": "Nevažeći iznos",
   "cash.purchaseFailed": "Kupovina nije uspela. Pokušajte ponovo.",
   "cash.monthlyCashLimitReached": "Mesečni gotovinski limit dostignut — prodaj za LANA.",
+  "cash.customerWindowExceeded": "Ovaj kupac je ovde u poslednjih {{days}} dan(a) gotovinom već potrošio {{spent}} {{currency}} — gotovinski limit od {{limit}} {{currency}} je iskorišćen. Prodaj radije za LANA.",
   "home.cashLimitReachedTitle": "Mesečni gotovinski limit dostignut",
   "home.cashLimitReachedDetail": "Ova prodavnica je dostigla mesečni gotovinski limit. Prodaja za LANA ostaje neograničena.",
   "cash.walletNotRegistered": "Ovaj novčanik nije registrovan. Skenirajte WIF privatni ključ da biste se registrovali i platili.",

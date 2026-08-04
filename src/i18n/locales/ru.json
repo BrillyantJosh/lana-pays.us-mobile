@@ -176,6 +176,7 @@
   "cash.invalidAmount": "Неверная сумма",
   "cash.purchaseFailed": "Покупка не удалась. Попробуйте снова.",
   "cash.monthlyCashLimitReached": "Месячный лимит наличных достигнут — продайте за LANA.",
+  "cash.customerWindowExceeded": "Этот покупатель уже потратил здесь {{spent}} {{currency}} наличными за последние {{days}} дн. — лимит наличных {{limit}} {{currency}} исчерпан. Продайте за LANA.",
   "home.cashLimitReachedTitle": "Месячный лимит наличных достигнут",
   "home.cashLimitReachedDetail": "Этот магазин достиг месячного лимита наличных. Продажи за LANA остаются без ограничений.",
   "cash.walletNotRegistered": "Этот кошелёк не зарегистрирован. Отсканируйте WIF приватный ключ для регистрации и оплаты.",

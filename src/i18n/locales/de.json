@@ -176,6 +176,7 @@
   "cash.invalidAmount": "Ungültiger Betrag",
   "cash.purchaseFailed": "Kauf fehlgeschlagen. Bitte erneut versuchen.",
   "cash.monthlyCashLimitReached": "Monatliches Bargeldlimit erreicht — stattdessen für LANA verkaufen.",
+  "cash.customerWindowExceeded": "Dieser Kunde hat hier in den letzten {{days}} Tag(en) bereits {{spent}} {{currency}} bar ausgegeben — das Bargeldlimit von {{limit}} {{currency}} ist ausgeschöpft. Verkaufe stattdessen für LANA.",
   "home.cashLimitReachedTitle": "Monatliches Bargeldlimit erreicht",
   "home.cashLimitReachedDetail": "Dieser Shop hat sein monatliches Bargeldlimit erreicht. LANA-Verkäufe bleiben unbegrenzt.",
   "cash.walletNotRegistered": "Dieses Wallet ist nicht registriert. Scannen Sie stattdessen einen WIF privaten Schlüssel zum Registrieren und Bezahlen.",

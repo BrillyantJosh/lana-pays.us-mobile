@@ -11,6 +11,7 @@ const Admin = () => {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [defaultMaxTx, setDefaultMaxTx] = useState('');
+  const [windowDays, setWindowDays] = useState('1');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [splitHappening, setSplitHappening] = useState(false);
@@ -35,6 +36,7 @@ const Admin = () => {
       .then(d => {
         setSettings(d.settings || {});
         setDefaultMaxTx(d.settings?.default_max_tx_amount || '0');
+        setWindowDays(d.settings?.customer_window_days || '1');
         setSplitHappening(d.settings?.split_happening === 'true');
       })
       .catch(() => {});
@@ -54,6 +56,7 @@ const Admin = () => {
         body: JSON.stringify({
           settings: {
             default_max_tx_amount: defaultMaxTx || '0',
+            customer_window_days: windowDays || '1',
           },
         }),
       });
@@ -158,6 +161,22 @@ const Admin = () => {
               {parseFloat(defaultMaxTx || '0') > 0
                 ? `Limit active: max ${parseFloat(defaultMaxTx).toLocaleString(undefined, { minimumFractionDigits: 2 })} per transaction`
                 : 'No global limit \u2014 uses shop or fund limits only'}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">Customer cash window (days)</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={windowDays}
+              onChange={(e) => setWindowDays(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder="1"
+              className="w-full h-11 rounded-xl bg-background border border-input px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Within this many rolling days, the same customer's total CASH purchases at a shop
+              cannot exceed the shop's transaction limit. Cash only \u2014 LANA is never limited. Minimum 1.
             </p>
           </div>
 

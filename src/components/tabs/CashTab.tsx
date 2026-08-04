@@ -266,6 +266,17 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     if ((status === 409 || status === 403) && data?.error === 'MERCHANT_QUOTA_EXCEEDED') {
       return t('cash.monthlyCashLimitReached');
     }
+    // Per-customer rolling cash window (proxy pre-flight, CASH only): this
+    // customer's purchases at this shop within the window already used up
+    // the limit. LANA remains available — the message says so.
+    if (status === 403 && data?.error === 'CUSTOMER_WINDOW_EXCEEDED') {
+      return t('cash.customerWindowExceeded', {
+        spent: Number(data?.spent ?? 0).toFixed(2),
+        limit: Number(data?.limit ?? 0).toFixed(2),
+        days: Number(data?.days ?? 1),
+        currency: data?.currency || '',
+      });
+    }
     // Split in progress — cash is disabled, LANA still works.
     if (status === 403 && data?.error === 'SPLIT_HAPPENING') {
       return t('split.happening.body');

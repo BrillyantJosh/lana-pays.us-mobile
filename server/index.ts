@@ -17,7 +17,7 @@ import { fetchSingleBalance, electrumCall, type ElectrumServer } from './lib/ele
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js';
 import { registerPaymentRequestRoutes } from './paymentRequests.js';
-import { getMaxTransaction, foldQuotaRemaining, clampCashAmount, round2 } from './lib/maxTransaction.js';
+import { getMaxTransaction, foldQuotaRemaining, foldCustomerWindow, readCustomerWindowDays, clampCashAmount, round2 } from './lib/maxTransaction.js';
 
 const LANA_RELAYS = [
   'wss://relay.lanavault.space',
@@ -1016,7 +1016,56 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
         // is baked into the client-signed TX.
         if (Number.isFinite(amount) && amount > 0) {
           const limits = getMaxTransaction(db, unitId, reqCurrency || String(u.currency || 'EUR'));
-          const effMax = foldQuotaRemaining(limits.max_amount, u, reqCurrency);
+          let effMax = foldQuotaRemaining(limits.max_amount, u, reqCurrency);
+
+          // ── PER-CUSTOMER ROLLING WINDOW (owner rule, 2026-08-04). The same
+          // customer may buy repeatedly at this shop, but the SUM of their
+          // CASH purchases within the last N days must not exceed the shop's
+          // transaction limit. The history lives only in the brain, so we ask
+          // it; FAIL-OPEN on any read failure — a lookup must never stop a
+          // sale at the till. Known residual race: two truly simultaneous
+          // purchases can both pass this pre-flight; the brain counts
+          // 'created' rows immediately, so the exposure is same-instant only.
+          const custHex = String(req.body?.customer_hex || '');
+          const custWallet = String(req.body?.customer_wallet || '');
+          const windowCurrency = (reqCurrency || limits.currency).toUpperCase();
+          if (BRAIN_API_URL && (custHex || custWallet)
+              && limits.max_amount !== null && limits.max_amount > 0
+              && windowCurrency === limits.currency) {
+            const windowDays = readCustomerWindowDays(db);
+            try {
+              const params = new URLSearchParams({ unit_id: unitId, currency: windowCurrency, days: String(windowDays) });
+              if (custHex) params.set('customer_hex', custHex);
+              if (custWallet) params.set('customer_wallet', custWallet);
+              const wRes = await fetch(`${BRAIN_API_URL}/api/purchase/customer-window?${params}`, {
+                headers: BRAIN_PURCHASE_KEY ? { Authorization: `Bearer ${BRAIN_PURCHASE_KEY}` } : {},
+                signal: AbortSignal.timeout(2500),
+              });
+              if (wRes.ok) {
+                const w = await wRes.json() as any;
+                const spent = round2(Number(w?.spent || 0));
+                const customerRemaining = round2(Math.max(0, limits.max_amount - spent));
+                if (customerRemaining <= 0) {
+                  console.warn(`[mobile] Blocking CASH pre-flight: unit=${unitId.slice(0, 12)} customer window used up (spent ${spent}/${limits.max_amount} in ${windowDays}d)`);
+                  return res.status(403).json({
+                    success: false,
+                    error: 'CUSTOMER_WINDOW_EXCEEDED',
+                    message: `Customer reached the ${limits.max_amount.toFixed(2)} ${windowCurrency} cash limit for the last ${windowDays} day(s) — already spent ${spent.toFixed(2)}. Sell for LANA instead.`,
+                    spent,
+                    limit: limits.max_amount,
+                    days: windowDays,
+                    currency: windowCurrency,
+                  });
+                }
+                effMax = foldCustomerWindow(effMax, customerRemaining);
+              } else {
+                console.warn(`[mobile] customer-window check skipped (fail-open): brain ${wRes.status}${wRes.status === 404 ? ' — older brain without the endpoint' : ''}`);
+              }
+            } catch (e: any) {
+              console.warn(`[mobile] customer-window check failed (fail-open): ${e?.message || e}`);
+            }
+          }
+
           const clamp = clampCashAmount(amount, effMax);
           if (clamp.adjusted) {
             req.body.amount = clamp.amount;
@@ -1386,7 +1435,13 @@ app.put('/api/admin/settings', (req, res) => {
   `);
   let updated = 0;
   for (const [key, value] of Object.entries(settings)) {
-    upsert.run(key, String(value), adminHex);
+    let stored = String(value);
+    // Normalize at the write so every reader can trust the stored value:
+    // the window length is whole days, 1..90 (90 caps the brain's scan).
+    if (key === 'customer_window_days') {
+      stored = String(Math.min(90, Math.max(1, parseInt(stored, 10) || 1)));
+    }
+    upsert.run(key, stored, adminHex);
     updated++;
   }
   res.json({ success: true, updated });

@@ -178,6 +178,10 @@ export function initializeSchema(db: Database.Database): void {
   // Split-in-progress lock flag (admin-toggled). Idempotent so it also lands on
   // already-seeded DBs; INSERT OR IGNORE never clobbers an existing value.
   db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('split_happening', 'false')").run();
+  // Per-customer rolling cash-window length in days (admin-adjustable): the
+  // same customer's CASH purchases at one shop within this many days must not
+  // exceed the shop's transaction limit. Cash only — LANA is never limited.
+  db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('customer_window_days', '1')").run();
 
   // Migrations: add suspension columns if missing
   const cols = db.pragma('table_info(business_units)') as any[];

@@ -176,6 +176,7 @@
   "cash.invalidAmount": "Importo non valido",
   "cash.purchaseFailed": "Acquisto fallito. Riprova.",
   "cash.monthlyCashLimitReached": "Limite mensile contante raggiunto — vendi in LANA.",
+  "cash.customerWindowExceeded": "Questo cliente ha già speso {{spent}} {{currency}} in contanti qui negli ultimi {{days}} giorno/i — il limite in contanti di {{limit}} {{currency}} è esaurito. Vendi invece per LANA.",
   "home.cashLimitReachedTitle": "Limite mensile contante raggiunto",
   "home.cashLimitReachedDetail": "Questo negozio ha raggiunto il limite mensile di contante. Le vendite in LANA restano illimitate.",
   "cash.walletNotRegistered": "Questo portafoglio non è registrato. Scansiona una chiave privata WIF per registrarti e pagare.",

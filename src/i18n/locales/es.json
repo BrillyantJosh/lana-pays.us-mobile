@@ -176,6 +176,7 @@
   "cash.invalidAmount": "Monto inválido",
   "cash.purchaseFailed": "Error en la compra. Por favor, inténtalo de nuevo.",
   "cash.monthlyCashLimitReached": "Límite mensual de efectivo alcanzado — vende en LANA.",
+  "cash.customerWindowExceeded": "Este cliente ya gastó {{spent}} {{currency}} en efectivo aquí en los últimos {{days}} día(s) — el límite de efectivo de {{limit}} {{currency}} está agotado. Vende por LANA en su lugar.",
   "home.cashLimitReachedTitle": "Límite mensual de efectivo alcanzado",
   "home.cashLimitReachedDetail": "Esta tienda alcanzó su límite mensual de efectivo. Las ventas en LANA siguen siendo ilimitadas.",
   "cash.walletNotRegistered": "Esta billetera no está registrada. Escanea una clave privada WIF para registrar y pagar.",

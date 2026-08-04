@@ -176,6 +176,7 @@
   "cash.invalidAmount": "Érvénytelen összeg",
   "cash.purchaseFailed": "A vásárlás sikertelen. Kérjük, próbálja újra.",
   "cash.monthlyCashLimitReached": "Havi készpénzlimit elérve — adj el inkább LANA-ért.",
+  "cash.customerWindowExceeded": "Ez a vásárló az elmúlt {{days}} napban már {{spent}} {{currency}} készpénzt költött itt — a {{limit}} {{currency}} készpénzlimit kimerült. Adj el inkább LANA-ért.",
   "home.cashLimitReachedTitle": "Havi készpénzlimit elérve",
   "home.cashLimitReachedDetail": "Ez az üzlet elérte a havi készpénzlimitet. A LANA-eladások továbbra is korlátlanok.",
   "cash.walletNotRegistered": "Ez a tárca nincs regisztrálva. A regisztrációhoz és fizetéshez olvassa be a WIF privát kulcsot.",

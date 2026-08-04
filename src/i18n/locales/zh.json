@@ -176,6 +176,7 @@
   "cash.invalidAmount": "无效金额",
   "cash.purchaseFailed": "购买失败，请重试。",
   "cash.monthlyCashLimitReached": "已达每月现金上限，请改用 LANA 收款。",
+  "cash.customerWindowExceeded": "该顾客在过去 {{days}} 天内已在此现金消费 {{spent}} {{currency}}——{{limit}} {{currency}} 的现金限额已用完。请改用 LANA 出售。",
   "home.cashLimitReachedTitle": "已达每月现金上限",
   "home.cashLimitReachedDetail": "该店铺已达每月现金上限。LANA 销售仍然不受限制。",
   "cash.walletNotRegistered": "此钱包未注册。请扫描 WIF 私钥进行注册和支付。",

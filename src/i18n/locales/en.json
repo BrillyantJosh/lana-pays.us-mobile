@@ -193,6 +193,7 @@
   "cash.invalidAmount": "Invalid amount",
   "cash.purchaseFailed": "Purchase failed. Please try again.",
   "cash.monthlyCashLimitReached": "Monthly cash limit reached — sell for LANA instead.",
+  "cash.customerWindowExceeded": "This customer already spent {{spent}} {{currency}} in cash here in the last {{days}} day(s) — the {{limit}} {{currency}} cash limit is used up. Sell for LANA instead.",
   "home.cashLimitReachedTitle": "Monthly cash limit reached",
   "home.cashLimitReachedDetail": "This shop reached its monthly cash limit. LANA sales stay unlimited.",
   "cash.walletNotRegistered": "This wallet is not registered. Scan a WIF Private Key instead to register and pay.",
