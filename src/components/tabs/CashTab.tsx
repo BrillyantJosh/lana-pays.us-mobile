@@ -993,7 +993,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
                     body: JSON.stringify({ hex_id: nostrHexId }),
                   });
                   const profData = await profRes.json();
-                  displayName = profData.profile?.display_name || profData.profile?.name || null;
+                  // REAL name first: this is snapshotted onto the regular
+                  // customer and rides along as customer_name on every future
+                  // purchase, so it must be the person, not their handle.
+                  displayName = profData.profile?.name || profData.profile?.display_name || null;
                 } catch {}
 
                 await fetch('/api/regular-customers', {
