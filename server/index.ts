@@ -5,6 +5,7 @@
 
 import 'dotenv/config';
 import express from 'express';
+import compression from 'compression';
 import { installRequestLogging } from './shared/requestLogging.js';
 import path from 'path';
 import fs from 'fs';
@@ -29,6 +30,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// Gzip every response. Measured 2026-08-05 on direct.lana.fund: a 5.1 MB
+// admin JSON feed was going out UNCOMPRESSED — nothing in the chain (app or
+// nginx-proxy) set Content-Encoding — and the page took ~10 s. The same
+// payload gzips ~10x. Registered first so it wraps every route.
+app.use(compression());
 const PORT = parseInt(process.env.SERVER_PORT || process.env.PORT || '3005');
 
 // Trust proxy (behind nginx-proxy)
