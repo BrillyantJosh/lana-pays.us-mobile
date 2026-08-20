@@ -109,6 +109,7 @@ async function fetchFromRelay(relayUrl: string, timeout = 15000): Promise<NostrE
 
     ws.on('close', () => {
       clearTimeout(timeoutId);
+      resolve(null);
     });
   });
 }
@@ -426,6 +427,7 @@ export async function fetchKind30901(sinceTimestamp?: number, relays?: string[])
 
       ws.on('close', () => {
         clearTimeout(timeoutId);
+        resolve(events);
       });
     });
   };
@@ -558,7 +560,7 @@ export async function fetchKind30903(relays?: string[]): Promise<Kind30903Event[
       });
 
       ws.on('error', () => { clearTimeout(timeoutId); resolve(events); });
-      ws.on('close', () => { clearTimeout(timeoutId); });
+      ws.on('close', () => { clearTimeout(timeoutId); resolve(events); });
     });
   };
 
@@ -649,7 +651,7 @@ export async function fetchKind30902(relays?: string[]): Promise<Kind30902Policy
       });
 
       ws.on('error', () => { clearTimeout(timeoutId); resolve(events); });
-      ws.on('close', () => { clearTimeout(timeoutId); });
+      ws.on('close', () => { clearTimeout(timeoutId); resolve(events); });
     });
   };
 
