@@ -1,13 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { KeyRound, Loader2, Leaf, X, ChevronRight } from 'lucide-react';
 import { QRScanner } from '@/components/QRScanner';
+import LandingSections from '@/components/LandingSections';
 import { useAuth } from '@/contexts/AuthContext';
+import { changeLanguage } from '@/i18n';
 import lanaIconGreen from '@/assets/lana-icon-green.png';
-import mandalaGreen from '@/assets/mandala-green.png';
+import mandalaGreen from '@/assets/mandala-green-alpha.webp';
+import '@/landing.css';
+
+const REGISTER_URL = 'https://shop.lanapays.us/welcome';
 
 const Login = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { login } = useAuth();
   const [scannerOpen, setScannerOpen]       = useState(false);
   const [isLoggingIn, setIsLoggingIn]       = useState(false);
@@ -15,6 +20,11 @@ const Login = () => {
   const [principlesOpen, setPrinciplesOpen] = useState(false);
   const [showManualInput, setShowManualInput] = useState(false);
   const [manualWif, setManualWif]           = useState('');
+  const rootRef   = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+
+  const lang = i18n.language?.startsWith('sl') ? 'sl' : 'en';
+  const registerHref = `${REGISTER_URL}?lang=${lang}`;
 
   const handleScan = async (data: string) => {
     setIsLoggingIn(true);
@@ -27,23 +37,87 @@ const Login = () => {
     }
   };
 
+  // The page is scrollable (landing sits below the hero), so the full-screen
+  // modals need the body held still while they are open.
+  useEffect(() => {
+    if (!principlesOpen && !scannerOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [principlesOpen, scannerOpen]);
+
+  // The feed's soul, ported: the fixed mandala is full-strength in the hero
+  // and fades to a whisper once the reader scrolls past it. The same handler
+  // gives the fixed header its solid, blurred state.
+  useEffect(() => {
+    const onScroll = () => {
+      // Guard the divisor: innerHeight can be 0 on the very first call (before
+      // layout, or in a backgrounded tab), which yields NaN — and a NaN custom
+      // property makes the mandala invisible and never recovers on its own.
+      const vh = window.innerHeight || 1;
+      const heroProgress = Math.min(1, Math.max(0, window.scrollY / (vh * 0.75)));
+      const fade = 1 - 0.88 * heroProgress;
+      rootRef.current?.style.setProperty('--mandala-fade', String(Number.isFinite(fade) ? fade : 1));
+      headerRef.current?.classList.toggle('is-scrolled', window.scrollY > 24);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   return (
-    <div className="min-h-screen bg-white dark:bg-background flex flex-col items-center justify-center relative overflow-hidden py-4 gap-3">
+    <div className="pays-landing" ref={rootRef}>
 
-      {/* Top: title + subtitle ─ inside max-w-sm */}
-      <div className="px-6 w-full max-w-sm flex flex-col items-center gap-1 relative z-10">
-        <h1 className="font-display text-2xl font-bold text-foreground tracking-tight">Lana Pays.Us</h1>
-        <p className="text-sm text-muted-foreground text-center">{t('login.subtitle')}</p>
-      </div>
+      {/* ── fixed atmosphere: mandala + grain + vignette ─────────────── */}
+      <div
+        className="pl-mandala-fixed"
+        aria-hidden="true"
+        style={{ ['--pl-mandala-src' as string]: `url(${mandalaGreen})` }}
+      />
+      <div className="pl-grain" aria-hidden="true" />
+      <div className="pl-vignette" aria-hidden="true" />
 
-      {/* Mandala + scan button ─ wider, escapes max-w-sm */}
-      <div className="relative z-10 flex items-center justify-center w-full max-w-[480px] aspect-square px-2">
-        <img
-          src={mandalaGreen}
-          alt=""
-          aria-hidden="true"
-          className="absolute inset-0 w-full h-full object-contain opacity-65 dark:opacity-30 pointer-events-none select-none"
-        />
+      {/* ── fixed header: sign-in and registration always in reach ───── */}
+      <header className="pl-header" ref={headerRef}>
+        <a className="pl-wordmark" href="/login">Lana Pays.Us</a>
+        <div className="pl-header-actions">
+          <div className="pl-lang pl-lang-header" role="group" aria-label={t('landing.langLabel')}>
+            <button type="button" className={lang === 'sl' ? 'is-active' : ''} onClick={() => changeLanguage('sl')}>SL</button>
+            <button type="button" className={lang === 'en' ? 'is-active' : ''} onClick={() => changeLanguage('en')}>EN</button>
+          </div>
+          <button
+            type="button"
+            className="pl-btn-ghost"
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          >
+            {t('landing.headerLogin')}
+          </button>
+          <a className="pl-btn-solid" href={registerHref} target="_blank" rel="noopener noreferrer">
+            {t('landing.headerRegister')}
+          </a>
+        </div>
+      </header>
+
+      <div className="pl-content">
+
+      {/* ══ HERO — the login itself, in the atmosphere it deserved ═════ */}
+      <section className="pl-hero" id="vstop">
+        <div className="pl-hero-kicker">{t('login.subtitle')}</div>
+        <h1 className="pl-hero-title">{t('landing.heroTitle')}</h1>
+        <p className="pl-hero-lead">{t('landing.heroLead')}</p>
+
+        <div className="pl-hero-login">
+
+        {/* The rosette around the entry button — kept exactly as merchants
+            know it. The big fixed mandala behind is only a distant halo, so
+            this crisp one stays the flower that frames the door. */}
+        <div className="pl-rosette">
+          <img
+            src={mandalaGreen}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 w-full h-full object-contain opacity-65 dark:opacity-35 pointer-events-none select-none"
+          />
 
         <button
           onClick={() => setScannerOpen(true)}
@@ -72,10 +146,16 @@ const Login = () => {
             </>
           )}
         </button>
-      </div>
+        </div>
 
-      {/* Bottom: security + manual + principles ─ inside max-w-sm */}
-      <div className="px-6 w-full max-w-sm flex flex-col items-center gap-3 relative z-10">
+        {/* Registration — right where a new merchant first looks, not buried */}
+        <p className="pl-hero-register">
+          {t('landing.heroRegisterPrompt')}{' '}
+          <a href={registerHref} target="_blank" rel="noopener noreferrer">{t('landing.ctaRegister')}</a>
+        </p>
+
+        {/* Security note + manual entry + principles — the familiar controls */}
+        <div className="px-6 w-full max-w-sm flex flex-col items-center gap-3">
 
         {/* Security note */}
         <div className="flex items-center gap-2 text-muted-foreground/60">
@@ -142,7 +222,17 @@ const Login = () => {
           <p className="text-xs font-medium text-foreground leading-snug">{t('principles.banner')}</p>
         </button>
 
-      </div>
+        </div>{/* max-w-sm controls */}
+        </div>{/* pl-hero-login */}
+
+        <div className="pl-scroll-cue">{t('landing.scrollCue')}</div>
+      </section>
+      {/* ══ end of hero ═══════════════════════════════════════════════ */}
+
+      {/* ── The landing: what this app is for ────────────────────────── */}
+      <LandingSections />
+
+      </div>{/* pl-content */}
 
       {/* ── QR Scanner modal ─────────────────────────────────────────── */}
       <QRScanner

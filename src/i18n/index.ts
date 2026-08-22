@@ -35,11 +35,32 @@ function normalizeLocale(code: string): string {
   return base in resources ? base : 'en';
 }
 
-const savedLang = localStorage.getItem('lang');
+/**
+ * Which language to open in.
+ *
+ * A returning merchant always has `lang` in localStorage — either they picked
+ * it, or it was written from their KIND 0 profile on login — so they are never
+ * affected by this. It only decides the FIRST view, which since the landing
+ * page went live is a public page a prospect may open before they have any
+ * profile at all. Following the device beats defaulting everyone to English:
+ * a Slovenian shopkeeper opening mobile.lanapays.us should read Slovenian
+ * without hunting for a toggle.
+ */
+function initialLocale(): string {
+  const saved = localStorage.getItem('lang');
+  if (saved) return normalizeLocale(saved);
+
+  const candidates = navigator.languages?.length ? navigator.languages : [navigator.language];
+  for (const c of candidates) {
+    const base = c?.split('-')[0]?.toLowerCase();
+    if (base && base in resources) return base;
+  }
+  return 'en';
+}
 
 i18n.use(initReactI18next).init({
   resources,
-  lng: savedLang ? normalizeLocale(savedLang) : 'en',
+  lng: initialLocale(),
   fallbackLng: 'en',
   interpolation: { escapeValue: false },
 });
