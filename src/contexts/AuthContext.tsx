@@ -129,15 +129,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // (Profile lookup runs server-side to avoid nostr-tools buffer issues in
       // the browser.)
       let profileData: { profile: any } | null = null;
+      let profileRes: Response;
       try {
-        const profileRes = await fetch('/api/profile-lookup', {
+        profileRes = await fetch('/api/profile-lookup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ hex_id: derivedIds.nostrHexId }),
         });
+      } catch (e) {
+        // Could not reach our own server → unverifiable.
+        console.warn('Profile lookup unreachable:', e);
+        throw new Error(i18n.t('login.profileNotFound'));
+      }
+
+      // A rate-limited reply is plain text, so .json() below would throw and the
+      // login would blame a missing profile — the wrong diagnosis entirely. Name
+      // it, so the operator waits a minute instead of re-creating a profile that
+      // is perfectly fine.
+      if (profileRes.status === 429) {
+        throw new Error(i18n.t('login.tooManyRequests'));
+      }
+
+      try {
         profileData = await profileRes.json();
       } catch (e) {
-        // Could not reach our own server / parse the response → unverifiable.
+        // Reached the server but could not parse the response → unverifiable.
         console.warn('Profile lookup failed:', e);
         throw new Error(i18n.t('login.profileNotFound'));
       }

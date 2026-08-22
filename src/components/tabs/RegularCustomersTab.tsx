@@ -26,6 +26,7 @@ interface RegularCustomer {
   added_by_hex: string;
   note: string | null;
   created_at: string;
+  currency?: string;
 }
 
 interface BusinessUnitOption {
@@ -34,6 +35,20 @@ interface BusinessUnitOption {
   image?: string;
   currency?: string;
   owner_hex?: string;
+}
+
+/** One row of GET /api/customers-status — null means "we could not establish it". */
+interface CustomerStatus {
+  balance: CustomerBalance | null;
+  enrolled: boolean | null;
+  freeze: string | null;
+  wallets: CustomerWallet[];
+}
+
+interface CustomerWallet {
+  wallet_id?: string;
+  walletType?: string;
+  frozen?: boolean;
 }
 
 interface CustomerBalance {
@@ -142,47 +157,55 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
     fetchCustomers();
   }, [staffHexId]);
 
-  // Fetch balances + Lana8Wonder for all customers
+  // Balance + Lana8Wonder + freeze for the WHOLE list, in ONE request.
+  //
+  // This used to be three fetches per customer (/api/balance, /api/lana8wonder,
+  // /api/wallets), and the effect keyed on `businessUnits` — a fresh array on
+  // every parent render — so it re-fired about once a minute. At ~150 regulars
+  // that is ~470 requests a minute against a 1500/15min budget: the merchant
+  // rate-limited herself out of her own app (429 on login, white screen on the
+  // JS bundle). The server now fans out instead, cached and capped.
+  //
+  // Keyed on the customer ids, so it runs when the LIST changes — not when the
+  // parent happens to re-render.
+  const customerKey = useMemo(
+    () => customers.map(c => c.customer_hex_id).join(','),
+    [customers]
+  );
+
   useEffect(() => {
-    if (customers.length === 0) return;
+    if (!staffHexId || customers.length === 0) return;
+    let cancelled = false;
 
-    // Deduplicate by hex_id (same customer might be in multiple units)
-    const seen = new Set<string>();
-    customers.forEach(c => {
-      if (seen.has(c.customer_hex_id)) return;
-      seen.add(c.customer_hex_id);
+    fetch(`/api/customers-status?staff_hex=${staffHexId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return;
+        const statuses: Record<string, CustomerStatus> = data.statuses || {};
+        const nextBalances: Record<string, CustomerBalance> = {};
+        const nextWonder: Record<string, boolean> = {};
+        const nextFreeze: Record<string, string> = {};
+        const nextWallets: Record<string, CustomerWallet[]> = {};
 
-      const unitCurrency = businessUnits.find(u => u.unit_id === c.unit_id)?.currency || 'EUR';
+        Object.entries(statuses).forEach(([hex, st]) => {
+          // Anything the server could not establish comes back null — leave the
+          // previous value in place rather than showing a confident wrong one
+          // (no zero balances, no "not frozen" from a dead upstream).
+          if (st.balance) nextBalances[hex] = st.balance;
+          if (st.enrolled !== null && st.enrolled !== undefined) nextWonder[hex] = st.enrolled === true;
+          if (st.freeze) nextFreeze[hex] = st.freeze;
+          if (st.wallets) nextWallets[hex] = st.wallets;
+        });
 
-      fetch(`/api/balance/${encodeURIComponent(c.customer_wallet)}?currency=${unitCurrency}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.lana !== undefined) {
-            setBalances(prev => ({ ...prev, [c.customer_hex_id]: { lana: data.lana, fiatValue: data.fiatValue, currency: data.currency } }));
-          }
-        })
-        .catch(() => {});
+        setBalances(prev => ({ ...prev, ...nextBalances }));
+        setWonderStatus(prev => ({ ...prev, ...nextWonder }));
+        setFreezeStatus(prev => ({ ...prev, ...nextFreeze }));
+        setWalletsByHex(prev => ({ ...prev, ...nextWallets }));
+      })
+      .catch(() => { /* keep whatever is already on screen */ });
 
-      fetch(`/api/lana8wonder/${c.customer_hex_id}`)
-        .then(r => r.json())
-        .then(data => { setWonderStatus(prev => ({ ...prev, [c.customer_hex_id]: data.enrolled === true })); })
-        .catch(() => {});
-
-      // Check freeze status via wallet list — account-level OR any wallet frozen.
-      // We also cache the full wallets list so each row can look up the
-      // walletType of its own customer_wallet at render time.
-      fetch(`/api/wallets/${c.customer_hex_id}`)
-        .then(r => r.json())
-        .then(data => {
-          const wallets: any[] = data.wallets || [];
-          const accountFrozen = data.accountStatus === 'frozen';
-          const anyWalletFrozen = wallets.some(w => w.frozen === true);
-          setFreezeStatus(prev => ({ ...prev, [c.customer_hex_id]: (accountFrozen || anyWalletFrozen) ? 'frozen' : 'active' }));
-          setWalletsByHex(prev => ({ ...prev, [c.customer_hex_id]: wallets }));
-        })
-        .catch(() => {});
-    });
-  }, [customers, businessUnits]);
+    return () => { cancelled = true; };
+  }, [staffHexId, customerKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Profile search — debounced lookup against mejmoSeFajn Lana Transparency
   useEffect(() => {
@@ -557,7 +580,7 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
           {filtered.map(customer => {
             const bal = balances[customer.customer_hex_id];
             const hasWonder = wonderStatus[customer.customer_hex_id];
-            const unitCur = businessUnits.find(u => u.unit_id === customer.unit_id)?.currency || 'EUR';
+            const unitCur = customer.currency || businessUnits.find(u => u.unit_id === customer.unit_id)?.currency || 'EUR';
             const sym = CURRENCY_SYMBOL[unitCur] || '€';
             const missingFiat = bal ? Math.max(0, WONDER_THRESHOLD_FIAT - bal.fiatValue) : null;
             const missingLana = bal && bal.fiatValue < WONDER_THRESHOLD_FIAT && bal.lana > 0

@@ -313,6 +313,7 @@
   "purchase.paymentFailedTitle": "Płatność nieotrzymana",
   "purchase.customerLanaFailed": "Płatność klienta w LANA nie powiodła się, więc nie otrzymano środków. NIE wydawaj towaru. Poproś klienta o ponowienie płatności.",
   "login.profileNotFound": "Nie można zweryfikować Twojego profilu (KIND 0). Sprawdź połączenie i spróbuj ponownie lub najpierw utwórz swój profil.",
+  "login.tooManyRequests": "Zbyt wiele żądań w tej chwili. Odczekaj minutę i zaloguj się ponownie — Twój profil jest w porządku.",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Zdalna płatność LANA przez link",
   "lanaOnline.title": "Lana-online",

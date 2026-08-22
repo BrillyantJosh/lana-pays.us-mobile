@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from 'react-i18next';
 import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark, Globe } from "lucide-react";
 import { toast } from "sonner";
@@ -256,6 +256,9 @@ const Index = () => {
 
   // Sync selected unit ID to window for payment tabs to access
   const effectiveUnit = selectedUnit || (businessUnits.length === 1 ? businessUnits[0] : null);
+
+  // Stable identity for the child-facing list (see the note on setBusinessUnits).
+  const unblockedUnits = useMemo(() => businessUnits.filter(u => !isUnitBlocked(u)), [businessUnits]);
   const selectedMaxTx = effectiveUnit ? maxTransactions[effectiveUnit.unit_id] : null;
 
   useEffect(() => {
@@ -310,7 +313,11 @@ const Index = () => {
         const res = await fetch(`/api/business-units/${session.nostrHexId}`);
         const data = await res.json();
         const units = data.units || [];
-        setBusinessUnits(units);
+        // Keep the SAME array when nothing changed. A fresh array every 30s gave
+        // children a new prop identity and re-fired their data effects — the
+        // regulars list turned that into hundreds of requests a minute and
+        // rate-limited the merchant out of her own app.
+        setBusinessUnits(prev => JSON.stringify(prev) === JSON.stringify(units) ? prev : units);
         // Auto-select if only one and nothing selected yet
         if (units.length === 1) {
           setSelectedUnit(prev => prev || units[0]);
@@ -1123,7 +1130,7 @@ const Index = () => {
               <EditProfile />
             )}
             {activeView === "regulars" && (
-              <RegularCustomersTab unitId={effectiveUnit?.unit_id} staffHexId={session?.nostrHexId} businessUnits={businessUnits.filter(u => !isUnitBlocked(u))} />
+              <RegularCustomersTab unitId={effectiveUnit?.unit_id} staffHexId={session?.nostrHexId} businessUnits={unblockedUnits} />
             )}
             {activeView === "register" && (
               <RegisterCustomerTab unitCurrency={effectiveUnit?.currency} />

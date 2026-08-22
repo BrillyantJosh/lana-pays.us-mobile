@@ -95,8 +95,6 @@ export async function fetchSingleBalance(
   address: string,
   timeout = 30000
 ): Promise<WalletBalance> {
-  const LANOSHI_DIVISOR = 100000000;
-
   let socket: net.Socket | null = null;
   try {
     socket = await connectElectrum(servers);
@@ -119,28 +117,7 @@ export async function fetchSingleBalance(
         if (buffer.includes('\n')) {
           clearTimeout(timer);
           try {
-            const response = JSON.parse(buffer.trim());
-            if (response.result) {
-              const confirmed = (response.result.confirmed || 0) / LANOSHI_DIVISOR;
-              const unconfirmed = (response.result.unconfirmed || 0) / LANOSHI_DIVISOR;
-              const total = confirmed + unconfirmed;
-              resolve({
-                wallet_id: address,
-                balance: Math.round(total * 100) / 100,
-                confirmed: Math.round(confirmed * 100) / 100,
-                unconfirmed: Math.round(unconfirmed * 100) / 100,
-                status: total > 0 ? 'active' : 'inactive'
-              });
-            } else {
-              resolve({
-                wallet_id: address,
-                balance: 0,
-                confirmed: 0,
-                unconfirmed: 0,
-                status: 'error',
-                error: response.error?.message || 'Unknown error'
-              });
-            }
+            resolve(toWalletBalance(address, JSON.parse(buffer.trim())));
           } catch (e) {
             reject(new Error(`Failed to parse response: ${e}`));
           }
@@ -157,4 +134,112 @@ export async function fetchSingleBalance(
       try { socket.destroy(); } catch {}
     }
   }
+}
+
+const LANOSHI_DIVISOR = 100000000;
+
+/**
+ * Shape one Electrum `blockchain.address.get_balance` reply into a WalletBalance.
+ * Shared by the single and batched paths so both report the SAME numbers —
+ * the regulars list must never disagree with the wallet screens.
+ */
+export function toWalletBalance(address: string, response: any): WalletBalance {
+  if (response?.result) {
+    const confirmed = (response.result.confirmed || 0) / LANOSHI_DIVISOR;
+    const unconfirmed = (response.result.unconfirmed || 0) / LANOSHI_DIVISOR;
+    const total = confirmed + unconfirmed;
+    return {
+      wallet_id: address,
+      balance: Math.round(total * 100) / 100,
+      confirmed: Math.round(confirmed * 100) / 100,
+      unconfirmed: Math.round(unconfirmed * 100) / 100,
+      status: total > 0 ? 'active' : 'inactive',
+    };
+  }
+  return {
+    wallet_id: address,
+    balance: 0,
+    confirmed: 0,
+    unconfirmed: 0,
+    status: 'error',
+    error: response?.error?.message || 'Unknown error',
+  };
+}
+
+/**
+ * Batched balance lookup — ONE socket, every address pipelined over it.
+ *
+ * `fetchSingleBalance` opens a fresh TCP connection per address, which is fine
+ * for one wallet but pathological for a merchant's regular-customer list (157
+ * customers = 157 connections, every refresh). Electrum speaks newline-delimited
+ * JSON-RPC, so we write all requests up front keyed by id and match the replies
+ * back as they stream in. An address that does not answer before the timeout is
+ * simply ABSENT from the returned map — callers must treat missing as "unknown",
+ * never as a zero balance.
+ */
+export async function fetchBalancesBatch(
+  servers: ElectrumServer[],
+  addresses: string[],
+  timeout = 20000
+): Promise<Map<string, WalletBalance>> {
+  const out = new Map<string, WalletBalance>();
+  const unique = [...new Set(addresses)].filter(Boolean);
+  if (unique.length === 0) return out;
+
+  let socket: net.Socket;
+  try {
+    socket = await connectElectrum(servers);
+  } catch (error: any) {
+    console.error('[electrum] batch connect failed:', error.message);
+    return out; // no results — callers keep whatever they already had
+  }
+
+  try {
+    await new Promise<void>((resolve) => {
+      const byId = new Map<number, string>();
+      unique.forEach((addr, i) => byId.set(i + 1, addr));
+
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        console.warn(`[electrum] batch timeout: ${out.size}/${unique.length} balances in ${timeout}ms`);
+        finish();
+      }, timeout);
+
+      let buffer = '';
+      socket.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString();
+        let nl: number;
+        while ((nl = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (!line) continue;
+          try {
+            const response = JSON.parse(line);
+            const address = byId.get(response.id);
+            if (address) out.set(address, toWalletBalance(address, response));
+          } catch { /* ignore a malformed line, keep reading the rest */ }
+        }
+        if (out.size >= unique.length) finish();
+      });
+      socket.on('error', (err) => {
+        console.error('[electrum] batch socket error:', err.message);
+        finish();
+      });
+      socket.on('close', finish);
+
+      for (const [id, address] of byId) {
+        socket.write(JSON.stringify({ id, method: 'blockchain.address.get_balance', params: [address] }) + '\n');
+      }
+    });
+  } finally {
+    try { socket.destroy(); } catch { /* already gone */ }
+  }
+
+  return out;
 }

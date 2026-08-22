@@ -313,6 +313,7 @@
   "purchase.paymentFailedTitle": "Платёж не получен",
   "purchase.customerLanaFailed": "Платёж клиента в LANA не прошёл, средства не получены. НЕ выдавайте товар. Попросите клиента повторить платёж.",
   "login.profileNotFound": "Не удалось проверить ваш профиль (KIND 0). Проверьте соединение и попробуйте снова или сначала создайте свой профиль.",
+  "login.tooManyRequests": "Слишком много запросов. Подождите минуту и войдите снова — с вашим профилем всё в порядке.",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Удалённый платёж LANA по ссылке",
   "lanaOnline.title": "Lana-online",

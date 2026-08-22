@@ -313,6 +313,7 @@
   "purchase.paymentFailedTitle": "Плаћање није примљено",
   "purchase.customerLanaFailed": "Купчево плаћање у LANA није успело, па средства нису примљена. НЕ предајте робу. Замолите купца да понови плаћање.",
   "login.profileNotFound": "Vaš profil (KIND 0) nije moguće proveriti. Proverite vezu i pokušajte ponovo, ili prvo napravite svoj profil.",
+  "login.tooManyRequests": "Trenutno je previše zahteva. Sačekajte minut i prijavite se ponovo — vaš profil je u redu.",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Daljinsko LANA plaćanje putem linka",
   "lanaOnline.title": "Lana-online",

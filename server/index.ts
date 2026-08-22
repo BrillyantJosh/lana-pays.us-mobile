@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { getDb, closeDb } from './db/connection.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
-import { fetchSingleBalance, electrumCall, type ElectrumServer } from './lib/electrum.js';
+import { fetchSingleBalance, fetchBalancesBatch, electrumCall, type ElectrumServer } from './lib/electrum.js';
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js';
 import { registerPaymentRequestRoutes } from './paymentRequests.js';
@@ -74,9 +74,16 @@ installRequestLogging(app, db);
 
 // Rate limiting — 1500/15min per IP (raised from 1000 so an active merchant session
 // polling + purchasing can't exhaust the budget → 429).
+//
+// Mounted on /api ONLY, never globally. When it sat in front of everything it also
+// rate-limited express.static and the SPA fallback below, so a merchant who burned
+// the budget could no longer load index.html or the JS bundle — the app rendered an
+// empty #root, i.e. a WHITE SCREEN, and could not even reach the login form. The API
+// stays protected; serving the shell must never be something a client can lock itself
+// out of. (/health and /i18n/languages are static reads and deliberately exempt.)
 const globalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1500, standardHeaders: true, legacyHeaders: false });
 const purchaseLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
-app.use(globalLimiter);
+app.use('/api', globalLimiter);
 
 // ─── API Routes ────────────────────────────────────────
 
@@ -603,15 +610,15 @@ app.delete('/api/regular-customers/:unitId/:customerHexId', (req, res) => {
 });
 
 /**
- * Get ALL regular customers across all units the staff member is authorized for
+ * Resolve the deduplicated regular-customer list a staff member is allowed to see.
+ * Shared by /api/regular-customers-all (the list itself) and /api/customers-status
+ * (the batched badge data) so the two can never disagree about WHO the operator's
+ * customers are. Each row carries its unit's currency, so the client no longer has
+ * to join against its own business-units state to price a balance.
  */
-app.get('/api/regular-customers-all', (req, res) => {
-  const staffHex = req.query.staff_hex as string;
-  if (!staffHex) return res.status(400).json({ error: 'Missing staff_hex' });
-
-  // Get all units this staff member has access to
+function authorizedRegularCustomers(staffHex: string): any[] {
   const units = db.prepare(`
-    SELECT unit_id, name, owner_hex, authorized_hex FROM business_units WHERE status = 'active'
+    SELECT unit_id, name, owner_hex, authorized_hex, currency FROM business_units WHERE status = 'active'
   `).all() as any[];
 
   // Distinct OWNERS whose shops this staff can operate (regulars are per-owner).
@@ -621,11 +628,12 @@ app.get('/api/regular-customers-all', (req, res) => {
       || (() => { try { return JSON.parse(u.authorized_hex || '[]').includes(staffHex); } catch { return false; } })();
     if (authed && u.owner_hex) ownerSet.add(u.owner_hex);
   }
-  if (ownerSet.size === 0) return res.json({ customers: [] });
+  if (ownerSet.size === 0) return [];
 
-  // unit_id → name, for the "added-at" provenance shown on each row.
+  // unit_id → name/currency, for the "added-at" provenance shown on each row.
   const unitMap: Record<string, string> = {};
-  units.forEach(u => { unitMap[u.unit_id] = u.name; });
+  const currencyMap: Record<string, string> = {};
+  units.forEach(u => { unitMap[u.unit_id] = u.name; currencyMap[u.unit_id] = u.currency || 'EUR'; });
 
   const owners = [...ownerSet];
   const placeholders = owners.map(() => '?').join(',');
@@ -640,12 +648,20 @@ app.get('/api/regular-customers-all', (req, res) => {
   `).all(...owners) as any[];
 
   const seenHex = new Set<string>();
-  const enriched = rows
+  return rows
     .filter(c => (seenHex.has(c.customer_hex_id) ? false : (seenHex.add(c.customer_hex_id), true)))
-    .map(c => ({ ...c, unit_name: unitMap[c.unit_id] || c.unit_id }))
+    .map(c => ({ ...c, unit_name: unitMap[c.unit_id] || c.unit_id, currency: currencyMap[c.unit_id] || 'EUR' }))
     .sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
+}
 
-  res.json({ customers: enriched });
+/**
+ * Get ALL regular customers across all units the staff member is authorized for
+ */
+app.get('/api/regular-customers-all', (req, res) => {
+  const staffHex = req.query.staff_hex as string;
+  if (!staffHex) return res.status(400).json({ error: 'Missing staff_hex' });
+
+  res.json({ customers: authorizedRegularCustomers(staffHex) });
 });
 
 /**
@@ -704,6 +720,138 @@ app.get('/api/wallets/:hexId', async (req, res) => {
   } catch {
     res.json({ wallets: [], accountStatus: 'unknown', walletCount: 0 });
   }
+});
+
+/**
+ * GET /api/customers-status?staff_hex=<hex>
+ *
+ * Everything the regulars list needs about EVERY customer, in ONE request:
+ * balance, Lana8Wonder enrolment and freeze status.
+ *
+ * The list used to fire three requests per customer straight from the browser
+ * (/api/balance + /api/lana8wonder + /api/wallets). At 157 regulars that is 471
+ * requests per refresh, which burned the whole 1500/15min budget in ~3 minutes
+ * and then 429'd everything else the merchant did — including logging in. The
+ * fan-out now happens server-side, where it is capped, cached and reuses a single
+ * Electrum socket instead of one TCP connection per wallet.
+ *
+ * A value we could not establish is returned as null/[] and NEVER as a zero
+ * balance or an "active" (= not frozen) verdict — the client leaves unknown
+ * fields as they were rather than showing a confident wrong number.
+ */
+const STATUS_TTL_CHECK_MS = 120_000;  // enrolment + freeze change rarely
+const STATUS_TTL_BALANCE_MS = 60_000;
+const CHECK_CONCURRENCY = 6;          // be a good neighbour to check.lanapays.us
+const statusCache = new Map<string, { at: number; value: any }>();
+
+function cacheGet(key: string, ttlMs: number): any | null {
+  const hit = statusCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > ttlMs) { statusCache.delete(key); return null; }
+  return hit.value;
+}
+
+function cacheSet(key: string, value: any): void {
+  // Cheap bound: the cache only ever holds live customers, but a long-running
+  // process should not accumulate entries for people who left the list.
+  if (statusCache.size > 5000) {
+    for (const [k, v] of statusCache) {
+      if (Date.now() - v.at > STATUS_TTL_CHECK_MS) statusCache.delete(k);
+    }
+  }
+  statusCache.set(key, { at: Date.now(), value });
+}
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      for (let i = next++; i < items.length; i = next++) {
+        out[i] = await fn(items[i]);
+      }
+    })
+  );
+  return out;
+}
+
+app.get('/api/customers-status', async (req, res) => {
+  const staffHex = req.query.staff_hex as string;
+  if (!staffHex) return res.status(400).json({ error: 'Missing staff_hex' });
+
+  const customers = authorizedRegularCustomers(staffHex);
+  if (customers.length === 0) return res.json({ statuses: {} });
+
+  // ── 1. check.lanapays.us: enrolment + wallet/freeze, one cached pair per person
+  const checks = await mapLimit(customers, CHECK_CONCURRENCY, async (c: any) => {
+    const key = `chk:${c.customer_hex_id}`;
+    const cached = cacheGet(key, STATUS_TTL_CHECK_MS);
+    if (cached) return cached;
+
+    const [enrolled, walletInfo] = await Promise.all([
+      fetch(`https://check.lanapays.us/api/lana8wonder/${c.customer_hex_id}`, { signal: AbortSignal.timeout(8000) })
+        .then(r => r.json())
+        .then((d: any) => d.enrolled === true)
+        .catch(() => null),
+      fetch(`https://check.lanapays.us/api/wallets/${c.customer_hex_id}`, { signal: AbortSignal.timeout(10000) })
+        .then(r => r.json())
+        .catch(() => null),
+    ]);
+
+    const wallets: any[] = walletInfo?.wallets || [];
+    const value = {
+      enrolled,
+      wallets,
+      // null = upstream unreachable. Do NOT collapse that to "active": a dead
+      // check.lanapays.us must not quietly declare everyone unfrozen.
+      freeze: walletInfo
+        ? ((walletInfo.accountStatus === 'frozen' || wallets.some((w: any) => w.frozen === true)) ? 'frozen' : 'active')
+        : null,
+    };
+    if (enrolled !== null || walletInfo) cacheSet(key, value); // never cache a total failure
+    return value;
+  });
+
+  // ── 2. balances: one Electrum socket for every address still uncached
+  const sysRow = db.prepare(
+    'SELECT electrum_servers, exchange_rates FROM kind_38888 ORDER BY id DESC LIMIT 1'
+  ).get() as any;
+  const exchangeRates = JSON.parse(sysRow?.exchange_rates || '{}');
+  const electrumServers: ElectrumServer[] = JSON.parse(sysRow?.electrum_servers || '[]')
+    .map((sv: any) => ({ host: sv.host, port: parseInt(sv.port) }));
+
+  const balanceKey = (c: any) => `bal:${c.customer_wallet}:${c.currency}`;
+  const uncached = customers.filter((c: any) => c.customer_wallet && !cacheGet(balanceKey(c), STATUS_TTL_BALANCE_MS));
+  let fetched = new Map<string, any>();
+  if (uncached.length > 0 && electrumServers.length > 0) {
+    fetched = await fetchBalancesBatch(electrumServers, uncached.map((c: any) => c.customer_wallet));
+  }
+
+  const statuses: Record<string, any> = {};
+  customers.forEach((c: any, i: number) => {
+    const chk = checks[i] as any;
+    let balance = cacheGet(balanceKey(c), STATUS_TTL_BALANCE_MS);
+    if (!balance) {
+      const raw = fetched.get(c.customer_wallet);
+      if (raw && raw.status !== 'error') {
+        const rate = exchangeRates[c.currency] || exchangeRates.GBP || 0;
+        balance = {
+          lana: raw.balance,
+          fiatValue: Math.round(raw.balance * rate * 100) / 100,
+          currency: c.currency,
+        };
+        cacheSet(balanceKey(c), balance);
+      }
+    }
+    statuses[c.customer_hex_id] = {
+      balance: balance || null,
+      enrolled: chk?.enrolled ?? null,
+      freeze: chk?.freeze ?? null,
+      wallets: chk?.wallets || [],
+    };
+  });
+
+  res.json({ statuses });
 });
 
 /**
