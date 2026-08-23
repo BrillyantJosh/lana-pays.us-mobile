@@ -239,7 +239,8 @@
   background: var(--pl-emerald-950);
 }
 
-.pays-landing .pl-hero-image {
+.pays-landing .pl-hero-image,
+.pays-landing .pl-hero-video {
   display: block;
   width: 100%;
   height: 100%;
@@ -247,51 +248,9 @@
   object-position: center;
 }
 
-.pays-landing .pl-foliage-wind,
-.pays-landing .pl-foliage-sway {
+.pays-landing .pl-hero-video {
   position: absolute;
   inset: 0;
-  pointer-events: none;
-}
-
-.pays-landing .pl-foliage-wind {
-  overflow: hidden;
-}
-
-.pays-landing .pl-foliage-sway {
-  display: block;
-  background-repeat: no-repeat;
-  background-size: cover;
-  background-position: center;
-  will-change: transform;
-}
-
-.pays-landing .pl-foliage-canopy {
-  transform-origin: 78% 2%;
-  -webkit-mask-image: radial-gradient(ellipse 28% 20% at 78% 7%, #000 0 38%, rgba(0,0,0,.78) 55%, transparent 78%);
-  mask-image: radial-gradient(ellipse 28% 20% at 78% 7%, #000 0 38%, rgba(0,0,0,.78) 55%, transparent 78%);
-  animation: pl-leaf-sway-canopy 7.8s ease-in-out -3.1s infinite;
-}
-
-.pays-landing .pl-foliage-arch {
-  transform-origin: 82% 49%;
-  -webkit-mask-image: radial-gradient(ellipse 13% 30% at 81% 36%, #000 0 32%, rgba(0,0,0,.72) 55%, transparent 78%);
-  mask-image: radial-gradient(ellipse 13% 30% at 81% 36%, #000 0 32%, rgba(0,0,0,.72) 55%, transparent 78%);
-  animation: pl-leaf-sway-arch 6.6s ease-in-out -5.6s infinite;
-}
-
-.pays-landing .pl-foliage-pot-left {
-  transform-origin: 45% 76%;
-  -webkit-mask-image: radial-gradient(ellipse 9% 13% at 45% 67%, #000 0 34%, rgba(0,0,0,.7) 57%, transparent 80%);
-  mask-image: radial-gradient(ellipse 9% 13% at 45% 67%, #000 0 34%, rgba(0,0,0,.7) 57%, transparent 80%);
-  animation: pl-leaf-sway-pot 8.7s ease-in-out -7.2s infinite;
-}
-
-.pays-landing .pl-foliage-pot-right {
-  transform-origin: 64% 75%;
-  -webkit-mask-image: radial-gradient(ellipse 15% 14% at 63% 65%, #000 0 32%, rgba(0,0,0,.68) 56%, transparent 81%);
-  mask-image: radial-gradient(ellipse 15% 14% at 63% 65%, #000 0 32%, rgba(0,0,0,.68) 56%, transparent 81%);
-  animation: pl-leaf-sway-pot 7.3s ease-in-out -1.9s infinite reverse;
 }
 
 .pays-landing .pl-light-rays {
@@ -1195,23 +1154,6 @@
 @keyframes pl-scene-breathe { from { transform: scale(1.035) translate3d(-.3%,0,0); } to { transform: scale(1.075) translate3d(.6%,-.6%,0); } }
 @keyframes pl-story-breathe { from { transform: scale(1.015); } to { transform: scale(1.055) translate3d(-.4%,-.3%,0); } }
 @keyframes pl-service-breathe { from { filter: saturate(.95); } to { filter: saturate(1.12) brightness(1.04); } }
-@keyframes pl-leaf-sway-canopy {
-  0%, 100% { transform: translate3d(0,0,0) rotate(0); }
-  28% { transform: translate3d(5px,1px,0) rotate(.32deg); }
-  58% { transform: translate3d(-3px,2px,0) rotate(-.22deg); }
-  81% { transform: translate3d(3px,-1px,0) rotate(.18deg); }
-}
-@keyframes pl-leaf-sway-arch {
-  0%, 100% { transform: translate3d(0,0,0) rotate(0); }
-  35% { transform: translate3d(4px,-1px,0) rotate(.38deg); }
-  67% { transform: translate3d(-3px,2px,0) rotate(-.28deg); }
-}
-@keyframes pl-leaf-sway-pot {
-  0%, 100% { transform: translate3d(0,0,0) rotate(0); }
-  27% { transform: translate3d(4px,-2px,0) rotate(.44deg); }
-  57% { transform: translate3d(-3px,1px,0) rotate(-.34deg); }
-  79% { transform: translate3d(2px,-1px,0) rotate(.24deg); }
-}
 @keyframes pl-rays { from { opacity: .14; transform: rotate(-12deg) translateX(-4%); } to { opacity: .34; transform: rotate(-8deg) translateX(6%); } }
 @keyframes pl-shimmer { from { background-position: 0 0; } to { background-position: 26px 52px; } }
 @keyframes pl-rain-cycle { 0%, 68%, 100% { opacity: 0; background-position: 0 0; } 73%, 91% { opacity: .16; } 96% { opacity: 0; background-position: 0 420px; } }
@@ -1270,28 +1212,8 @@
   .pays-landing .pl-hero::after {
     background: linear-gradient(180deg, rgba(2,20,14,.56) 0%, rgba(2,20,14,.69) 43%, rgba(2,20,14,.91) 72%, #03140f 100%);
   }
-  .pays-landing .pl-hero-image { object-position: 68% center; }
-  .pays-landing .pl-foliage-sway { background-position: 68% center; }
-  .pays-landing .pl-foliage-canopy {
-    transform-origin: 70% 2%;
-    -webkit-mask-image: radial-gradient(ellipse 42% 18% at 70% 7%, #000 0 36%, rgba(0,0,0,.74) 56%, transparent 80%);
-    mask-image: radial-gradient(ellipse 42% 18% at 70% 7%, #000 0 36%, rgba(0,0,0,.74) 56%, transparent 80%);
-  }
-  .pays-landing .pl-foliage-arch {
-    transform-origin: 94% 47%;
-    -webkit-mask-image: radial-gradient(ellipse 22% 28% at 94% 35%, #000 0 32%, rgba(0,0,0,.7) 56%, transparent 80%);
-    mask-image: radial-gradient(ellipse 22% 28% at 94% 35%, #000 0 32%, rgba(0,0,0,.7) 56%, transparent 80%);
-  }
-  .pays-landing .pl-foliage-pot-left {
-    transform-origin: 28% 75%;
-    -webkit-mask-image: radial-gradient(ellipse 18% 12% at 28% 66%, #000 0 34%, rgba(0,0,0,.7) 58%, transparent 82%);
-    mask-image: radial-gradient(ellipse 18% 12% at 28% 66%, #000 0 34%, rgba(0,0,0,.7) 58%, transparent 82%);
-  }
-  .pays-landing .pl-foliage-pot-right {
-    transform-origin: 70% 75%;
-    -webkit-mask-image: radial-gradient(ellipse 27% 13% at 70% 64%, #000 0 32%, rgba(0,0,0,.68) 57%, transparent 82%);
-    mask-image: radial-gradient(ellipse 27% 13% at 70% 64%, #000 0 32%, rgba(0,0,0,.68) 57%, transparent 82%);
-  }
+  .pays-landing .pl-hero-image,
+  .pays-landing .pl-hero-video { object-position: 68% center; }
   .pays-landing .pl-mandala-veil { left: 50%; top: 47%; width: 88vw; opacity: .18; }
   .pays-landing .pl-hero-content { width: 100%; margin: 8px 0 0; }
   .pays-landing .pl-hero-kicker { margin-bottom: 10px; }
@@ -1376,7 +1298,7 @@
     transition-duration: .001ms !important;
   }
   .pays-landing .pl-fine-rain,
-  .pays-landing .pl-foliage-wind,
+  .pays-landing .pl-hero-video,
   .pays-landing .pl-floating-petals,
   .pays-landing .pl-water-drops { display: none; }
 }

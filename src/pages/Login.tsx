@@ -7,6 +7,7 @@ import LandingSections from '@/components/LandingSections';
 import { useAuth } from '@/contexts/AuthContext';
 import { changeLanguage } from '@/i18n';
 import abundanceHero from '@/assets/abundance-garden-hero.webp';
+import abundanceHeroLoop from '@/assets/abundance-garden-breeze-loop.mp4';
 import mandalaHeaderWhite from '@/assets/mandala-header-white-v2.png';
 import mandalaGreen from '@/assets/mandala-green-alpha.webp';
 import '@/landing.css';
@@ -145,12 +146,9 @@ const Login = () => {
         <section className="pl-hero" id="domov" aria-labelledby="pl-hero-title">
           <div className="pl-hero-scene" aria-hidden="true">
             <img src={abundanceHero} alt="" className="pl-hero-image" />
-            <div className="pl-foliage-wind">
-              <i className="pl-foliage-sway pl-foliage-canopy" style={{ backgroundImage: `url(${abundanceHero})` }} />
-              <i className="pl-foliage-sway pl-foliage-arch" style={{ backgroundImage: `url(${abundanceHero})` }} />
-              <i className="pl-foliage-sway pl-foliage-pot-left" style={{ backgroundImage: `url(${abundanceHero})` }} />
-              <i className="pl-foliage-sway pl-foliage-pot-right" style={{ backgroundImage: `url(${abundanceHero})` }} />
-            </div>
+            <video className="pl-hero-video" autoPlay muted loop playsInline preload="auto" poster={abundanceHero}>
+              <source src={abundanceHeroLoop} type="video/mp4" />
+            </video>
             <div className="pl-light-rays" />
             <div className="pl-lake-shimmer" />
             <div className="pl-fine-rain" />
