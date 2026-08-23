@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"SERVER_PORT=3005 tsx watch server/index.ts\"",
     "dev:client": "vite",
-    "build": "vite build",
+    "build": "tsc --noEmit && vite build",
     "build:dev": "vite build --mode development",
     "start": "tsx server/index.ts",
     "lint": "eslint .",

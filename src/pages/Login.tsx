@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { changeLanguage } from '@/i18n';
 import abundanceHero from '@/assets/abundance-garden-hero.webp';
 import mandalaHeaderWhite from '@/assets/mandala-header-white-v2.png';
+import mandalaGreen from '@/assets/mandala-green-alpha.webp';
 import '@/landing.css';
 
 const REGISTER_URL = 'https://shop.lanapays.us/welcome';
