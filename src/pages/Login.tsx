@@ -145,7 +145,12 @@ const Login = () => {
         <section className="pl-hero" id="domov" aria-labelledby="pl-hero-title">
           <div className="pl-hero-scene" aria-hidden="true">
             <img src={abundanceHero} alt="" className="pl-hero-image" />
-            <div className="pl-hero-foreground" style={{ backgroundImage: `url(${abundanceHero})` }} />
+            <div className="pl-foliage-wind">
+              <i className="pl-foliage-sway pl-foliage-canopy" style={{ backgroundImage: `url(${abundanceHero})` }} />
+              <i className="pl-foliage-sway pl-foliage-arch" style={{ backgroundImage: `url(${abundanceHero})` }} />
+              <i className="pl-foliage-sway pl-foliage-pot-left" style={{ backgroundImage: `url(${abundanceHero})` }} />
+              <i className="pl-foliage-sway pl-foliage-pot-right" style={{ backgroundImage: `url(${abundanceHero})` }} />
+            </div>
             <div className="pl-light-rays" />
             <div className="pl-lake-shimmer" />
             <div className="pl-fine-rain" />
