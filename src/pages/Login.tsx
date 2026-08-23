@@ -7,7 +7,7 @@ import LandingSections from '@/components/LandingSections';
 import { useAuth } from '@/contexts/AuthContext';
 import { changeLanguage } from '@/i18n';
 import abundanceHero from '@/assets/abundance-garden-hero.webp';
-import mandalaGreen from '@/assets/mandala-green-alpha.webp';
+import mandalaHeaderWhite from '@/assets/mandala-header-white-v2.png';
 import '@/landing.css';
 
 const REGISTER_URL = 'https://shop.lanapays.us/welcome';
@@ -106,7 +106,7 @@ const Login = () => {
       <header className="pl-header" ref={headerRef}>
         <a className="pl-brand" href="#domov" aria-label="Lana Pays.Us">
           <span className="pl-brand-mark" aria-hidden="true">
-            <img src={mandalaGreen} alt="" />
+            <img src={mandalaHeaderWhite} alt="" />
           </span>
           <span>
             <strong>Lana Pays.Us</strong>

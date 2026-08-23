@@ -83,8 +83,6 @@
   width: 58px;
   height: 58px;
   overflow: hidden;
-  filter: brightness(0) invert(1) drop-shadow(0 0 10px rgba(255, 255, 255, .2));
-  opacity: .97;
 }
 
 .pays-landing .pl-brand-mark img,
