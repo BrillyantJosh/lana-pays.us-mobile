@@ -24,6 +24,10 @@ const LANA_RELAYS = [
   'wss://relay.lanavault.space',
   'wss://relay.lanacoin-eternity.com',
 ];
+
+// Lana Registrar (wallet registry) base URL. Moved from Lovable/Supabase to
+// our lanatrace.us server; the /functions/v1/* path shape is preserved.
+const LANA_REGISTRAR_URL = process.env.LANA_REGISTRAR_URL || 'https://lanatrace.us';
 import rateLimit from 'express-rate-limit';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -325,7 +329,7 @@ app.post('/api/check-wallet', walletCheckLimiter, async (req, res) => {
   }
 
   try {
-    const response = await fetch('https://laluxmwarlejdwyboudz.supabase.co/functions/v1/check', {
+    const response = await fetch(`${LANA_REGISTRAR_URL}/functions/v1/check`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -349,7 +353,7 @@ app.post('/api/check-wallet', walletCheckLimiter, async (req, res) => {
 });
 
 /**
- * Register a wallet via Supabase check_wallet method
+ * Register a wallet via the registrar's check_wallet method
  * Auto-registers virgin (balance=0) wallets and broadcasts Nostr events
  */
 app.post('/api/register/wallet', walletCheckLimiter, async (req, res) => {
@@ -380,7 +384,7 @@ app.post('/api/register/wallet', walletCheckLimiter, async (req, res) => {
 
     console.log(`[mobile] Registering wallet ${wallet_id}${nostr_id_hex ? ` with nostr ${nostr_id_hex.slice(0, 8)}...` : ''}`);
 
-    const response = await fetch('https://laluxmwarlejdwyboudz.supabase.co/functions/v1/register-virgin-wallets', {
+    const response = await fetch(`${LANA_REGISTRAR_URL}/functions/v1/register-virgin-wallets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
