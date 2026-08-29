@@ -15,6 +15,7 @@ import multer from 'multer';
 import { getDb, closeDb } from './db/connection.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, fetchBalancesBatch, electrumCall, type ElectrumServer } from './lib/electrum.js';
+import { SIMPLE_UNIT_SQL } from './lib/unitOrigin.js';
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js';
 import { registerPaymentRequestRoutes } from './paymentRequests.js';
@@ -445,6 +446,9 @@ app.get('/api/business-units/:hexId', (req, res) => {
            bank_account, raw_event
     FROM business_units
     WHERE status = 'active'
+      -- Only this app's own shops: a card can also own units opened on
+      -- simple.lanapays.us, which sell for LANA only and have no cash rail.
+      AND NOT ${SIMPLE_UNIT_SQL}
       AND (owner_hex = ? OR authorized_hex LIKE ?)
     ORDER BY name ASC
   `).all(hexId, `%${hexId}%`) as any[];
@@ -622,7 +626,8 @@ app.delete('/api/regular-customers/:unitId/:customerHexId', (req, res) => {
  */
 function authorizedRegularCustomers(staffHex: string): any[] {
   const units = db.prepare(`
-    SELECT unit_id, name, owner_hex, authorized_hex, currency FROM business_units WHERE status = 'active'
+    SELECT unit_id, name, owner_hex, authorized_hex, currency FROM business_units
+    WHERE status = 'active' AND NOT ${SIMPLE_UNIT_SQL}
   `).all() as any[];
 
   // Distinct OWNERS whose shops this staff can operate (regulars are per-owner).

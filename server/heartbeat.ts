@@ -6,6 +6,7 @@
 import Database from 'better-sqlite3';
 import { bech32 } from 'bech32';
 import { fetchKind38888, fetchKind30901, fetchKind30902, fetchKind30903, fetchKind0Profile, type Kind38888Data, type Kind30901Event, type Kind30902Policy } from './lib/nostr.js';
+import { readUnitOrigin } from './lib/unitOrigin.js';
 
 const HEARTBEAT_INTERVAL = 1 * 60 * 1000; // 1 minute
 
@@ -96,8 +97,8 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
           bank_name, bank_swift, bank_account, longitude, latitude,
           country, currency, category, category_detail, image, logo,
           status, lanapays_payout_method, lanapays_payout_wallet,
-          opening_hours_json, content, raw_event, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          opening_hours_json, content, raw_event, unit_type, lana_only, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(unit_id) DO UPDATE SET
           event_id = excluded.event_id,
           pubkey = excluded.pubkey,
@@ -127,11 +128,17 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
           opening_hours_json = excluded.opening_hours_json,
           content = excluded.content,
           raw_event = excluded.raw_event,
+          -- Sticky on purpose: shop's own edit form emits neither marker, so a
+          -- merchant editing a simple.lanapays.us shop there would otherwise
+          -- publish a replacement that quietly moves it into this app.
+          unit_type = COALESCE(excluded.unit_type, business_units.unit_type),
+          lana_only = MAX(excluded.lana_only, business_units.lana_only),
           updated_at = datetime('now')
       `);
 
       const insertMany = db.transaction((units: Kind30901Event[]) => {
         for (const u of units) {
+          const origin = readUnitOrigin(u.raw_event);
           upsert.run(
             u.unit_id, u.event_id, u.pubkey, u.created_at, u.name, u.owner_hex,
             JSON.stringify(u.authorized_hex),
@@ -139,7 +146,8 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
             u.bank_name, u.bank_swift, u.bank_account, u.longitude, u.latitude,
             u.country, u.currency, u.category, u.category_detail, u.image, u.logo,
             u.status, u.lanapays_payout_method, u.lanapays_payout_wallet,
-            u.opening_hours_json, u.content, u.raw_event
+            u.opening_hours_json, u.content, u.raw_event,
+            origin.unitType, origin.lanaOnly ? 1 : 0
           );
         }
       });

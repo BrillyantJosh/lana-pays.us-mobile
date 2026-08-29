@@ -194,6 +194,39 @@ export function initializeSchema(db: Database.Database): void {
     console.log('Migrated: added suspension columns to business_units');
   }
 
+  // Migration: which app a unit was registered through. A card can own units
+
+  // from here and from simple.lanapays.us at once, and each app must list only
+
+  // its own — see server/lib/unitOrigin.ts.
+
+  const originCols = db.pragma('table_info(business_units)') as any[];
+
+  if (originCols.length > 0 && !originCols.some((c: any) => c.name === 'unit_type')) {
+
+    db.exec(`ALTER TABLE business_units ADD COLUMN unit_type TEXT`);
+
+    db.exec(`ALTER TABLE business_units ADD COLUMN lana_only INTEGER DEFAULT 0`);
+
+    db.exec(`
+
+      UPDATE business_units
+
+      SET unit_type = 'simple.lanapays.us', lana_only = 1
+
+      WHERE raw_event LIKE '%"unit_type","simple.lanapays.us"%'
+
+         OR raw_event LIKE '%"lana_only","true"%'
+
+    `);
+
+    const marked = db.prepare(`SELECT COUNT(*) AS n FROM business_units WHERE lana_only = 1`).get() as { n: number };
+
+    console.log(`Migrated: added unit_type/lana_only to business_units (${marked.n} belong to simple.lanapays.us)`);
+
+  }
+
+
   // Migration: add max_single_budget to fund_capacity
   const fcCols = db.pragma('table_info(fund_capacity)') as any[];
   if (fcCols.length > 0 && !fcCols.some((c: any) => c.name === 'max_single_budget')) {

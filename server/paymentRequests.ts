@@ -22,6 +22,7 @@
  */
 
 import crypto from 'crypto';
+import { SIMPLE_UNIT_SQL } from './lib/unitOrigin.js';
 import rateLimit from 'express-rate-limit';
 import type Database from 'better-sqlite3';
 import type { Express } from 'express';
@@ -58,7 +59,7 @@ function unitForMerchant(db: Database.Database, hex: string, unitId: string): an
   const u = db.prepare(`
     SELECT unit_id, name, owner_hex, authorized_hex, currency, suspension_status
     FROM business_units
-    WHERE status = 'active' AND unit_id = ?
+    WHERE status = 'active' AND unit_id = ? AND NOT ${SIMPLE_UNIT_SQL}
   `).get(unitId) as any;
   if (!u) return null;
   if (u.owner_hex === hex) return u;
@@ -74,7 +75,7 @@ function unitIdsForMerchant(db: Database.Database, hex: string): string[] {
   if (!HEX64.test(hex || '')) return [];
   const units = db.prepare(`
     SELECT unit_id, owner_hex, authorized_hex FROM business_units
-    WHERE status = 'active' AND (owner_hex = ? OR authorized_hex LIKE ?)
+    WHERE status = 'active' AND NOT ${SIMPLE_UNIT_SQL} AND (owner_hex = ? OR authorized_hex LIKE ?)
   `).all(hex, `%${hex}%`) as any[];
   return units.filter(u => {
     if (u.owner_hex === hex) return true;
