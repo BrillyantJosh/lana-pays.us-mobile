@@ -627,9 +627,12 @@ app.delete('/api/regular-customers/:unitId/:customerHexId', (req, res) => {
 function authorizedRegularCustomers(staffHex: string): any[] {
   const units = db.prepare(`
     SELECT unit_id, name, owner_hex, authorized_hex, currency FROM business_units
-    WHERE status = 'active' AND NOT ${SIMPLE_UNIT_SQL}
+    WHERE status = 'active'
   `).all() as any[];
 
+  // Deliberately NOT scoped to this app's own units: regulars are per-owner, and
+  // a merchant who later moves to this till should find the people they already
+  // serve waiting for them in its fuller form.
   // Distinct OWNERS whose shops this staff can operate (regulars are per-owner).
   const ownerSet = new Set<string>();
   for (const u of units) {
