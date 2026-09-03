@@ -922,9 +922,9 @@ const Index = () => {
               </button>
             )}
 
-            {/* ─── Action grid: Orders (only for online sellers) + payment buttons
-                    OR blocked-status panel ─── */}
-            <div className="flex-1 grid grid-cols-2 gap-4 auto-rows-fr">
+            {/* ─── Action column, ONE tile per row (Brilly, 3.9.2026): Orders (only
+                    for online sellers) + payment buttons OR blocked-status panel ─── */}
+            <div className="flex-1 grid grid-cols-1 gap-4 auto-rows-fr">
             {/* Orders — FIRST, shown only when this merchant sells online (see
                 ordersVisible), and otherwise gated ONLY on the session: a
                 suspended or quota-blocked merchant still owes delivery for orders
@@ -980,7 +980,7 @@ const Index = () => {
               // rejected) replace the payment buttons entirely with a
               // status panel — no confusion about why buttons are greyed.
               if (isBlocked && effectiveUnit) {
-                return <div className="col-span-2"><BlockedStatusPanel unit={effectiveUnit} /></div>;
+                return <div><BlockedStatusPanel unit={effectiveUnit} /></div>;
               }
 
               const cashPayDisabled = noShopSelected || noFunds;
@@ -1060,9 +1060,7 @@ const Index = () => {
                   <button
                     onClick={openLanaOnline}
                     disabled={lanaPayDisabled || lanaPayoutMissing}
-                    /* Without the Orders tile there are three buttons, so this one
-                       takes the whole second row instead of leaving a hole. */
-                    className={`relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none ${ordersVisible ? '' : 'col-span-2'}`}
+                    className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {unseenPaidCount > 0 && (
                       <span className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
@@ -1085,7 +1083,7 @@ const Index = () => {
                   </button>
 
                   {noFunds && !noShopSelected && (
-                    <div className="col-span-2 rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
+                    <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
                       <p className="text-sm text-destructive text-center font-medium">{t('home.noFunds')}</p>
                     </div>
                   )}
@@ -1093,7 +1091,7 @@ const Index = () => {
                   {/* Merchant has no payout data (IBAN) → LANA is greyed above; explain why,
                       large + clear. Cash stays available. */}
                   {lanaPayoutMissing && !lanaPayDisabled && (
-                    <div className="col-span-2 rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
+                    <div className="rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
                       <div className="w-14 h-14 mx-auto rounded-full bg-amber-500/15 flex items-center justify-center">
                         <Landmark className="w-7 h-7 text-amber-600 dark:text-amber-400" />
                       </div>
@@ -1105,7 +1103,7 @@ const Index = () => {
                   {/* Monthly cash limit reached → cash is greyed above; explain why,
                       and point the seller to LANA (which stays unlimited). */}
                   {cashQuotaBlocked && !cashPayDisabled && (
-                    <div className="col-span-2 rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
+                    <div className="rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
                       <div className="w-14 h-14 mx-auto rounded-full bg-amber-500/15 flex items-center justify-center">
                         <Banknote className="w-7 h-7 text-amber-600 dark:text-amber-400" />
                       </div>
