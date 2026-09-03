@@ -28,9 +28,16 @@ interface MenuDrawerProps {
   onRegularCustomers?: () => void;
   onRegisterCustomer?: () => void;
   onCaretaker?: () => void;
+  /**
+   * Show the "Order history" entry. Mirrors the home screen's Orders tile: a
+   * merchant who does not sell on the LanaRetail portals has no orders, and
+   * hiding the tile while leaving this entry would just move the entrance.
+   * Defaults to true so an older caller never loses the link.
+   */
+  showOrders?: boolean;
 }
 
-const MenuDrawer = ({ open, onClose, onHome, onEditProfile, onRegularCustomers, onRegisterCustomer, onCaretaker }: MenuDrawerProps) => {
+const MenuDrawer = ({ open, onClose, onHome, onEditProfile, onRegularCustomers, onRegisterCustomer, onCaretaker, showOrders = true }: MenuDrawerProps) => {
   const { session, logout } = useAuth();
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -70,7 +77,7 @@ const MenuDrawer = ({ open, onClose, onHome, onEditProfile, onRegularCustomers, 
     { label: t('menu.editProfile'), icon: UserPen, action: handleEditProfile },
     { label: t('menu.editShop'), icon: Store, action: () => { onClose(); window.open('https://shop.lanapays.us', '_blank'); } },
     { label: t('menu.myTrades'), icon: History, action: () => { onClose(); window.open('https://brain.lanapays.us', '_blank'); } },
-    { label: t('orders.history'), icon: Package, action: () => { onClose(); navigate('/orders/history'); } },
+    ...(showOrders ? [{ label: t('orders.history'), icon: Package, action: () => { onClose(); navigate('/orders/history'); } }] : []),
     { label: t('menu.caretaker'), icon: UserCog, action: () => { onClose(); onCaretaker?.(); } },
   ];
 

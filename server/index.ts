@@ -16,6 +16,7 @@ import { getDb, closeDb } from './db/connection.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, fetchBalancesBatch, electrumCall, type ElectrumServer } from './lib/electrum.js';
 import { SIMPLE_UNIT_SQL } from './lib/unitOrigin.js';
+import { isOnlineShopUnit } from './lib/unitFlags.js';
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js';
 import { registerPaymentRequestRoutes } from './paymentRequests.js';
@@ -493,9 +494,13 @@ app.get('/api/business-units/:hexId', (req, res) => {
   };
 
   const result = filtered.map((u) => {
-    // Strip the raw payout fields; expose only the computed boolean.
+    // Strip the raw payout fields; expose only the computed booleans.
     const { raw_event, bank_account, ...rest } = u;
-    return { ...rest, payout_configured: hasPayout({ raw_event, bank_account }) };
+    return {
+      ...rest,
+      payout_configured: hasPayout({ raw_event, bank_account }),
+      online_shop: isOnlineShopUnit(raw_event),
+    };
   });
 
   res.json({ units: result });

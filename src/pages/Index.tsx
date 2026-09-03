@@ -42,6 +42,10 @@ interface BusinessUnit {
   // Server-computed: merchant has entered payout data (IBAN/account). Required for
   // LANA purchases (invoice wires to the merchant's bank); not needed for cash.
   payout_configured?: boolean;
+  // Server-computed from the KIND 30901 `online_shop` tag: this unit sells on the
+  // LanaRetail portals. Absent (old server / unparseable event) ⇒ treat as true,
+  // see ordersVisible.
+  online_shop?: boolean;
   // suspension_status now carries the Merchant Registration Gateway status:
   //   'pending' | 'active' | 'quota_warning_80' | 'quota_blocked' | 'suspended' | 'rejected'
   suspension_status: string;
@@ -260,6 +264,7 @@ const Index = () => {
 
   // Stable identity for the child-facing list (see the note on setBusinessUnits).
   const unblockedUnits = useMemo(() => businessUnits.filter(u => !isUnitBlocked(u)), [businessUnits]);
+
   const selectedMaxTx = effectiveUnit ? maxTransactions[effectiveUnit.unit_id] : null;
 
   useEffect(() => {
@@ -446,6 +451,30 @@ const Index = () => {
     setLanaPaymentRequest(null);
     setActiveView("orders");
   };
+  /**
+   * Show the Orders tile only to merchants who actually sell online.
+   *
+   * A merchant who never switched "Online shop" on for any of their units can
+   * never receive an order, so the tile is dead weight on their home screen.
+   *
+   * Two deliberate escape hatches:
+   *   • `pendingOrderCount > 0` — turning selling OFF does not cancel a delivery
+   *     that was already PAID for. The KIND 36521 this tile publishes is the only
+   *     way that buyer ever learns their goods shipped, so the tile stays until
+   *     the last paid order is fulfilled. Same principle as rendering it above
+   *     the BlockedStatusPanel branch below.
+   *   • `online_shop !== false` — strict `=== false`, the fail-open convention
+   *     used for payout_configured: a server that does not send the field yet
+   *     (rollout lag) must never hide a real obligation.
+   *
+   * Scoped to ALL of the merchant's units, not the selected one: the badge and
+   * the list are merchant-wide (see /api/orders/pending-count), so gating on the
+   * picker would hide another shop's paid orders. While the units are still
+   * loading the tile stays hidden — for most merchants it would otherwise flash
+   * in and then vanish, taking the grid layout with it.
+   */
+  const ordersVisible = pendingOrderCount > 0
+    || (!loadingUnits && businessUnits.some(u => u.online_shop !== false));
 
   // Fetch max transaction limits for ALL business units
   useEffect(() => {
@@ -541,6 +570,7 @@ const Index = () => {
         onRegularCustomers={handleRegularCustomers}
         onRegisterCustomer={handleRegisterCustomer}
         onCaretaker={() => handleOpenCaretaker(null)}
+        showOrders={ordersVisible}
       />
 
       <main className="pt-14">
@@ -892,12 +922,15 @@ const Index = () => {
               </button>
             )}
 
-            {/* ─── 2×2 action grid: Orders (always) + payment buttons OR blocked-status panel ─── */}
+            {/* ─── Action grid: Orders (only for online sellers) + payment buttons
+                    OR blocked-status panel ─── */}
             <div className="flex-1 grid grid-cols-2 gap-4 auto-rows-fr">
-            {/* Orders — FIRST, and gated ONLY on the session: a suspended or
-                quota-blocked merchant still owes delivery for orders that were
-                PAID before the block, so this renders above the BlockedStatusPanel
-                branch below. Red badge = paid orders not yet shipped. */}
+            {/* Orders — FIRST, shown only when this merchant sells online (see
+                ordersVisible), and otherwise gated ONLY on the session: a
+                suspended or quota-blocked merchant still owes delivery for orders
+                that were PAID before the block, so this renders above the
+                BlockedStatusPanel branch below. Red badge = paid, not yet shipped. */}
+            {ordersVisible && (
             <button
               onClick={openOrders}
               disabled={!session}
@@ -922,6 +955,7 @@ const Index = () => {
               <span className="relative z-10 text-xl font-bold text-foreground text-center leading-tight">{t('home.orders')}</span>
               <span className="relative z-10 text-xs text-muted-foreground text-center leading-snug">{t('home.ordersSubtitle')}</span>
             </button>
+            )}
 
             {/* ─── Payment buttons OR blocked-status panel ─── */}
             {(() => {
@@ -1026,7 +1060,9 @@ const Index = () => {
                   <button
                     onClick={openLanaOnline}
                     disabled={lanaPayDisabled || lanaPayoutMissing}
-                    className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                    /* Without the Orders tile there are three buttons, so this one
+                       takes the whole second row instead of leaving a hole. */
+                    className={`relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none ${ordersVisible ? '' : 'col-span-2'}`}
                   >
                     {unseenPaidCount > 0 && (
                       <span className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
