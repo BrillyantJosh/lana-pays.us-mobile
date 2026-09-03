@@ -81,7 +81,7 @@ function purchaseEvent(signer: { sk: Uint8Array; pk: string }, unitId: string, d
   ]);
 }
 
-function fulfillmentEvent(signer: { sk: Uint8Array; pk: string }, order: any, status: string, extra: string[][] = [], kind = 36521, createdAt = now()) {
+function fulfillmentEvent(signer: { sk: Uint8Array; pk: string }, order: any, status: string, extra: string[][] = [], kind = 36521, createdAt = now(), content = '') {
   return sign(signer.sk, kind, [
     ['d', order.order_id],
     ['a', `36520:${order.buyer_pubkey}:${order.order_id}`],
@@ -92,7 +92,7 @@ function fulfillmentEvent(signer: { sk: Uint8Array; pk: string }, order: any, st
     ['payment', `30933:${order.paid_signer_hex}:${order.paid_tx_id}`],
     ...extra,
     ['v', '1'],
-  ], '', createdAt);
+  ], content, createdAt);
 }
 
 // ── fixtures ──────────────────────────────────────────────────────────────
@@ -292,6 +292,47 @@ describe('POST /api/orders/:id/fulfillment', () => {
     const r = await post(`/api/orders/${order.order_id}/fulfillment`, { hex: owner.pk, event: bad });
     expect(r.status).toBe(400);
     expect(r.json.error).toBe('INVALID_SIGNATURE');
+  });
+
+  // THE DELIVERY-NOTE TRAP. This event is broadcast VERBATIM to the public
+  // relays, and it is signed in the one component that holds the buyer's
+  // decrypted name and address. "Just put the ship-to on the event" must be a
+  // refusal, not a silent publication. PII lives only in the 36522 ciphertext.
+  it('refuses a tag that is not on the allowlist — including buyer PII', async () => {
+    const r = await post(`/api/orders/${order.order_id}/fulfillment`, {
+      hex: owner.pk,
+      event: fulfillmentEvent(owner, order, 'shipped', [
+        ['ship_to', 'Janez Novak, Trubarjeva 1, 1000 Ljubljana'],
+      ]),
+    });
+    expect(r.status).toBe(400);
+    expect(r.json.error).toBe('INVALID_TAGS');
+    expect(r.json.tag).toBe('ship_to');
+  });
+
+  it('refuses non-empty content', async () => {
+    const r = await post(`/api/orders/${order.order_id}/fulfillment`, {
+      hex: owner.pk,
+      event: fulfillmentEvent(owner, order, 'shipped', [], 36521, now(), 'Dobavnica: Janez Novak, Trubarjeva 1'),
+    });
+    expect(r.status).toBe(400);
+    expect(r.json.error).toBe('CONTENT_NOT_EMPTY');
+  });
+
+  it('still accepts every tag the merchant legitimately sends', async () => {
+    // carrier/tracking/shipped_at are what OrderDetailSheet actually pushes.
+    // Its OWN order: a successful transition would otherwise consume the shared
+    // fixture's `shipped` and turn the tests below into 409s.
+    const own = await placeAndPay(buyer, UNIT_A);
+    const r = await post(`/api/orders/${own.order_id}/fulfillment`, {
+      hex: owner.pk,
+      event: fulfillmentEvent(owner, own, 'shipped', [
+        ['carrier', 'Pošta Slovenije'],
+        ['tracking', 'RR123456789SI'],
+        ['shipped_at', new Date(now() * 1000).toISOString()],
+      ]),
+    });
+    expect(r.status).toBe(200);
   });
 
   it('rejects a foreign signer (and a hex that is not the signer)', async () => {

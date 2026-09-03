@@ -25,6 +25,24 @@ import type { SignedEvent } from './lib/dm.js';
 const TERMINAL = new Set(['shipped', 'delivered', 'completed', 'rejected', 'refunded']);
 const CREATED_AT_SKEW = 10 * 60; // seconds
 
+/**
+ * Every tag name a KIND 36521 may carry (SPEC §3).
+ *
+ * This server BROADCASTS the merchant's event verbatim to the public relays, and
+ * it is signed in OrderDetailSheet — the one component that holds the buyer's
+ * DECRYPTED name, phone and address. Without an allowlist, the obvious way to
+ * put a delivery note on the seller's screen ("just add the ship-to to the
+ * event") silently publishes that address to the world, and nothing here would
+ * have said no. PII belongs only in the NIP-44 ciphertext of KIND 36522.
+ *
+ * Anything not on this list is refused rather than stripped: silently dropping a
+ * tag would let a client believe it had recorded something it had not.
+ */
+const FULFILLMENT_TAGS = new Set([
+  'd', 'a', 'p', 'unit_id', 'status', 'payment',
+  'carrier', 'tracking', 'shipped_at', 'delivered_at', 'eta', 'refund', 'v',
+]);
+
 function parseItems(json: string): any[] {
   try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
 }
@@ -179,6 +197,12 @@ export function registerOrderRoutes(app: Express, db: Database.Database): void {
     const hasOrderRef = event.tags.some(t => t[0] === 'a' && t[1] === orderRef);
     const hasBuyerP = event.tags.some(t => t[0] === 'p' && t[1] === row.buyer_pubkey);
     if (!hasOrderRef || !hasBuyerP) return res.status(400).json({ success: false, error: 'INVALID_TAGS' });
+    // Fail closed on anything this event is not allowed to say — see FULFILLMENT_TAGS.
+    const badTag = event.tags.find(t => !Array.isArray(t) || typeof t[0] !== 'string' || !FULFILLMENT_TAGS.has(t[0]));
+    if (badTag) {
+      return res.status(400).json({ success: false, error: 'INVALID_TAGS', tag: String((badTag as any[])?.[0] ?? '') });
+    }
+    if (event.content !== '') return res.status(400).json({ success: false, error: 'CONTENT_NOT_EMPTY' });
     const now = Math.floor(Date.now() / 1000);
     if (Math.abs(event.created_at - now) > CREATED_AT_SKEW) return res.status(400).json({ success: false, error: 'STALE_EVENT' });
 
