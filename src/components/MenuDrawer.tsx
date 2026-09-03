@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, LogOut, Store, UserPen, Copy, Check, History, Wallet, Globe, Shield, Users, CreditCard, UserPlus, UserCog, Home } from "lucide-react";
+import { X, LogOut, Store, UserPen, Copy, Check, History, Wallet, Globe, Shield, Users, CreditCard, UserPlus, UserCog, Home, Package } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -70,6 +70,7 @@ const MenuDrawer = ({ open, onClose, onHome, onEditProfile, onRegularCustomers, 
     { label: t('menu.editProfile'), icon: UserPen, action: handleEditProfile },
     { label: t('menu.editShop'), icon: Store, action: () => { onClose(); window.open('https://shop.lanapays.us', '_blank'); } },
     { label: t('menu.myTrades'), icon: History, action: () => { onClose(); window.open('https://brain.lanapays.us', '_blank'); } },
+    { label: t('orders.history'), icon: Package, action: () => { onClose(); navigate('/orders/history'); } },
     { label: t('menu.caretaker'), icon: UserCog, action: () => { onClose(); onCaretaker?.(); } },
   ];
 

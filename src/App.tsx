@@ -9,6 +9,7 @@ import Login from "./pages/Login";
 import Admin from "./pages/Admin";
 import PublicPay from "./pages/PublicPay";
 import LanaOnlineHistory from "./pages/LanaOnlineHistory";
+import OrdersHistory from "./pages/OrdersHistory";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -82,6 +83,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <LanaOnlineHistory />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orders/history"
+              element={
+                <ProtectedRoute>
+                  <OrdersHistory />
                 </ProtectedRoute>
               }
             />

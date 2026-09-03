@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from 'react-i18next';
-import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark, Globe } from "lucide-react";
+import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark, Globe, Package } from "lucide-react";
 import { toast } from "sonner";
 
 // Mitosis / cell-division glyph (one cell splitting into two) — represents the Split.
@@ -16,6 +16,7 @@ import CashTab from "@/components/tabs/CashTab";
 import WalletsTab from "@/components/tabs/WalletsTab";
 import LanaTab from "@/components/tabs/LanaTab";
 import LanaOnlineTab from "@/components/tabs/LanaOnlineTab";
+import OrdersTab from "@/components/tabs/OrdersTab";
 import EditProfile from "@/components/EditProfile";
 import RegularCustomersTab from "@/components/tabs/RegularCustomersTab";
 import RegisterCustomerTab from "@/components/tabs/RegisterCustomerTab";
@@ -225,7 +226,7 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
-type View = "home" | "cash" | "wallets" | "lana" | "lana-online" | "profile" | "regulars" | "register" | "caretaker";
+type View = "home" | "cash" | "wallets" | "lana" | "lana-online" | "orders" | "profile" | "regulars" | "register" | "caretaker";
 
 const Index = () => {
   const { t } = useTranslation();
@@ -400,6 +401,50 @@ const Index = () => {
         body: JSON.stringify({ hex: session.nostrHexId }),
       }).then(() => { setUnseenPaidCount(0); prevUnseenRef.current = 0; }).catch(() => {});
     }
+  };
+
+  // ── Lana Online Shop paid-order notification (30s poll) ───────────────
+  // Counts PAID orders not yet shipped/delivered/rejected/refunded across ALL
+  // the merchant's units (a working counter — it clears when the order ships,
+  // there is no mark-seen). A rising count fires a sonner toast (one per new
+  // order, ≤3); the count also badges the Orders home button.
+  const [pendingOrderCount, setPendingOrderCount] = useState(0);
+  const prevPendingOrdersRef = useRef<number | null>(null);
+  const notifiedOrderIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!session?.nostrHexId) { setPendingOrderCount(0); return; }
+    const fetchPendingOrders = async () => {
+      try {
+        const res = await fetch(`/api/orders/pending-count?hex=${encodeURIComponent(session.nostrHexId)}`);
+        const json = await res.json();
+        if (!json.success) return;
+        const count = json.count || 0;
+        // Toast only on a RISE after the first read (avoid a login-time blast),
+        // and only once per order id (poll overlap safety).
+        if (prevPendingOrdersRef.current !== null && count > prevPendingOrdersRef.current) {
+          for (const item of (json.latest || [])) {
+            if (notifiedOrderIdsRef.current.has(item.order_id)) continue;
+            notifiedOrderIdsRef.current.add(item.order_id);
+            toast.success(t('orders.paidToast', {
+              amount: `${CURRENCY_SYMBOL[item.currency] || ''}${item.total}`,
+              currency: item.currency,
+              unit: item.unit_name,
+            }), { duration: 10_000 });
+          }
+        }
+        prevPendingOrdersRef.current = count;
+        setPendingOrderCount(count);
+      } catch { /* keep previous state */ }
+    };
+    fetchPendingOrders();
+    const interval = setInterval(fetchPendingOrders, 30_000);
+    return () => clearInterval(interval);
+  }, [session?.nostrHexId, t]);
+
+  const openOrders = () => {
+    setSelectedWallet(null);
+    setLanaPaymentRequest(null);
+    setActiveView("orders");
   };
 
   // Fetch max transaction limits for ALL business units
@@ -847,6 +892,37 @@ const Index = () => {
               </button>
             )}
 
+            {/* ─── 2×2 action grid: Orders (always) + payment buttons OR blocked-status panel ─── */}
+            <div className="flex-1 grid grid-cols-2 gap-4 auto-rows-fr">
+            {/* Orders — FIRST, and gated ONLY on the session: a suspended or
+                quota-blocked merchant still owes delivery for orders that were
+                PAID before the block, so this renders above the BlockedStatusPanel
+                branch below. Red badge = paid orders not yet shipped. */}
+            <button
+              onClick={openOrders}
+              disabled={!session}
+              className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+            >
+              {pendingOrderCount > 0 && (
+                <span className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
+                  {pendingOrderCount}
+                </span>
+              )}
+              {/* Mandala background mesh */}
+              <img
+                src={mandalaMesh}
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 w-full h-full object-cover opacity-25 dark:opacity-15 mix-blend-multiply dark:mix-blend-screen pointer-events-none select-none"
+              />
+              {/* Content */}
+              <div className="relative z-10 w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
+                <Package className="w-9 h-9 text-primary" />
+              </div>
+              <span className="relative z-10 text-xl font-bold text-foreground text-center leading-tight">{t('home.orders')}</span>
+              <span className="relative z-10 text-xs text-muted-foreground text-center leading-snug">{t('home.ordersSubtitle')}</span>
+            </button>
+
             {/* ─── Payment buttons OR blocked-status panel ─── */}
             {(() => {
               // Disable the pay buttons whenever there is no usable unit:
@@ -870,7 +946,7 @@ const Index = () => {
               // rejected) replace the payment buttons entirely with a
               // status panel — no confusion about why buttons are greyed.
               if (isBlocked && effectiveUnit) {
-                return <BlockedStatusPanel unit={effectiveUnit} />;
+                return <div className="col-span-2"><BlockedStatusPanel unit={effectiveUnit} /></div>;
               }
 
               const cashPayDisabled = noShopSelected || noFunds;
@@ -890,7 +966,7 @@ const Index = () => {
                   <button
                     onClick={() => setActiveView("cash")}
                     disabled={cashPayDisabled || cashQuotaBlocked || splitHappening}
-                    className={`relative overflow-hidden flex-1 rounded-3xl border-2 shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:pointer-events-none ${
+                    className={`relative overflow-hidden rounded-3xl border-2 shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:pointer-events-none ${
                       splitHappening
                         ? 'bg-destructive/10 border-destructive/50'  // Split in progress: keep the notice fully readable (no dim)
                         : 'bg-card border-border disabled:opacity-40'
@@ -898,12 +974,12 @@ const Index = () => {
                   >
                     {splitHappening ? (
                       /* Split in progress → the notice lives ON the cash button (EN + SL) so it can't be missed. */
-                      <div className="relative z-10 flex flex-col items-center gap-2 text-center">
-                        <MitosisIcon className="w-12 h-12 text-destructive" />
-                        <span className="text-xl font-bold text-destructive leading-tight">{t('split.happening.title', { lng: 'en' })}</span>
-                        <span className="text-sm font-medium text-destructive/90 leading-snug">{t('split.happening.body', { lng: 'en' })}</span>
-                        <span className="text-xl font-bold text-destructive leading-tight mt-1">{t('split.happening.title', { lng: 'sl' })}</span>
-                        <span className="text-sm font-medium text-destructive/90 leading-snug">{t('split.happening.body', { lng: 'sl' })}</span>
+                      <div className="relative z-10 flex flex-col items-center gap-1.5 text-center">
+                        <MitosisIcon className="w-10 h-10 text-destructive" />
+                        <span className="text-base font-bold text-destructive leading-tight">{t('split.happening.title', { lng: 'en' })}</span>
+                        <span className="text-xs font-medium text-destructive/90 leading-snug">{t('split.happening.body', { lng: 'en' })}</span>
+                        <span className="text-base font-bold text-destructive leading-tight mt-1">{t('split.happening.title', { lng: 'sl' })}</span>
+                        <span className="text-xs font-medium text-destructive/90 leading-snug">{t('split.happening.body', { lng: 'sl' })}</span>
                       </div>
                     ) : (
                       <>
@@ -915,11 +991,11 @@ const Index = () => {
                           className="absolute inset-0 w-full h-full object-cover opacity-25 dark:opacity-15 mix-blend-multiply dark:mix-blend-screen pointer-events-none select-none"
                         />
                         {/* Content */}
-                        <div className="relative z-10 w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
-                          <Banknote className="w-11 h-11 text-primary" />
+                        <div className="relative z-10 w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
+                          <Banknote className="w-9 h-9 text-primary" />
                         </div>
-                        <span className="relative z-10 text-3xl font-bold text-foreground">{t('home.payWithCurrency', { symbol: CURRENCY_SYMBOL[effectiveUnit?.currency || ''] || currencySymbol })}</span>
-                        <span className="relative z-10 text-base text-muted-foreground">{t('home.cashPayment')}</span>
+                        <span className="relative z-10 text-xl font-bold text-foreground text-center leading-tight">{t('home.payWithCurrency', { symbol: CURRENCY_SYMBOL[effectiveUnit?.currency || ''] || currencySymbol })}</span>
+                        <span className="relative z-10 text-xs text-muted-foreground text-center leading-snug">{t('home.cashPayment')}</span>
                       </>
                     )}
                   </button>
@@ -927,7 +1003,7 @@ const Index = () => {
                   <button
                     onClick={() => setActiveView("lana")}
                     disabled={lanaPayDisabled || lanaPayoutMissing}
-                    className="relative overflow-hidden flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                    className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {/* Mandala background mesh */}
                     <img
@@ -937,11 +1013,11 @@ const Index = () => {
                       className="absolute inset-0 w-full h-full object-cover opacity-25 dark:opacity-15 mix-blend-multiply dark:mix-blend-screen pointer-events-none select-none"
                     />
                     {/* Content */}
-                    <div className="relative z-10 w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
-                      <img src={lanaIcon} alt="Lana" className="w-11 h-11 object-contain dark:invert" />
+                    <div className="relative z-10 w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
+                      <img src={lanaIcon} alt="Lana" className="w-9 h-9 object-contain dark:invert" />
                     </div>
-                    <span className="relative z-10 text-3xl font-bold text-foreground">{t('home.payWithLana')}</span>
-                    <span className="relative z-10 text-base text-muted-foreground">{t('home.lanaPayment')}</span>
+                    <span className="relative z-10 text-xl font-bold text-foreground text-center leading-tight">{t('home.payWithLana')}</span>
+                    <span className="relative z-10 text-xs text-muted-foreground text-center leading-snug">{t('home.lanaPayment')}</span>
                   </button>
 
                   {/* Lana-online — remote payment request. Same gates as the LANA
@@ -950,7 +1026,7 @@ const Index = () => {
                   <button
                     onClick={openLanaOnline}
                     disabled={lanaPayDisabled || lanaPayoutMissing}
-                    className="relative overflow-hidden flex-1 rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-4 p-8 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                    className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {unseenPaidCount > 0 && (
                       <span className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
@@ -965,15 +1041,15 @@ const Index = () => {
                       className="absolute inset-0 w-full h-full object-cover opacity-25 dark:opacity-15 mix-blend-multiply dark:mix-blend-screen pointer-events-none select-none"
                     />
                     {/* Content */}
-                    <div className="relative z-10 w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
-                      <Globe className="w-11 h-11 text-primary" />
+                    <div className="relative z-10 w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center backdrop-blur-sm">
+                      <Globe className="w-9 h-9 text-primary" />
                     </div>
-                    <span className="relative z-10 text-3xl font-bold text-foreground">{t('home.payLanaOnline')}</span>
-                    <span className="relative z-10 text-base text-muted-foreground">{t('home.lanaOnlinePayment')}</span>
+                    <span className="relative z-10 text-xl font-bold text-foreground text-center leading-tight">{t('home.payLanaOnline')}</span>
+                    <span className="relative z-10 text-xs text-muted-foreground text-center leading-snug">{t('home.lanaOnlinePayment')}</span>
                   </button>
 
                   {noFunds && !noShopSelected && (
-                    <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
+                    <div className="col-span-2 rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
                       <p className="text-sm text-destructive text-center font-medium">{t('home.noFunds')}</p>
                     </div>
                   )}
@@ -981,7 +1057,7 @@ const Index = () => {
                   {/* Merchant has no payout data (IBAN) → LANA is greyed above; explain why,
                       large + clear. Cash stays available. */}
                   {lanaPayoutMissing && !lanaPayDisabled && (
-                    <div className="rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
+                    <div className="col-span-2 rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
                       <div className="w-14 h-14 mx-auto rounded-full bg-amber-500/15 flex items-center justify-center">
                         <Landmark className="w-7 h-7 text-amber-600 dark:text-amber-400" />
                       </div>
@@ -993,7 +1069,7 @@ const Index = () => {
                   {/* Monthly cash limit reached → cash is greyed above; explain why,
                       and point the seller to LANA (which stays unlimited). */}
                   {cashQuotaBlocked && !cashPayDisabled && (
-                    <div className="rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
+                    <div className="col-span-2 rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
                       <div className="w-14 h-14 mx-auto rounded-full bg-amber-500/15 flex items-center justify-center">
                         <Banknote className="w-7 h-7 text-amber-600 dark:text-amber-400" />
                       </div>
@@ -1005,6 +1081,7 @@ const Index = () => {
                 </>
               );
             })()}
+            </div>
 
           </div>
         )}
@@ -1125,6 +1202,9 @@ const Index = () => {
             )}
             {activeView === "lana-online" && (
               <LanaOnlineTab unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} merchantHex={session?.nostrHexId} />
+            )}
+            {activeView === "orders" && (
+              <OrdersTab unitId={effectiveUnit?.unit_id} merchantHex={session?.nostrHexId} businessUnits={businessUnits} />
             )}
             {activeView === "profile" && (
               <EditProfile />

@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import { bech32 } from 'bech32';
 import { fetchKind38888, fetchKind30901, fetchKind30902, fetchKind30903, fetchKind0Profile, type Kind38888Data, type Kind30901Event, type Kind30902Policy } from './lib/nostr.js';
 import { readUnitOrigin } from './lib/unitOrigin.js';
+import { syncShopOrders } from './lib/orderSync.js';
 
 const HEARTBEAT_INTERVAL = 1 * 60 * 1000; // 1 minute
 
@@ -383,6 +384,14 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
       WHERE status = 'paying' AND paying_started_at < datetime('now', '-10 minutes')
     `).run();
     if (stuck.changes > 0) console.warn(`[lana-online] WATCHDOG re-opened ${stuck.changes} stuck 'paying' request(s) — check brain for orphaned payments`);
+
+    // ── Lana Online Shop orders (36520/36521/36522 + trusted 30933) ─────
+    // Non-fatal: a relay hiccup must not fail the whole heartbeat.
+    try {
+      await syncShopOrders(db, systemParams.relays);
+    } catch (e: any) {
+      console.warn('[orders] sync failed (non-fatal):', e.message);
+    }
 
     // Update heartbeat log
     db.prepare(`

@@ -306,5 +306,119 @@ export function initializeSchema(db: Database.Database): void {
   // Default validity of a payment request link: 168h = 7 days (0 = never expires).
   db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('payment_request_expiry_hours', '168')").run();
 
+  // ── Lana Online Shop orders (KIND 36520/36521/36522 + 30933 mirror) ───────
+  // Relay mirror for the merchant's "Orders" button. NO PII anywhere in here:
+  // the buyer's name/address exist only as NIP-44 ciphertext inside the raw
+  // 36522 event (shop_order_delivery.raw_event) and are decrypted in the
+  // merchant's browser. Money truth is the brain-signed 30933 mirrored in
+  // shop_order_payments; the payment_state/pending columns on shop_orders are
+  // the resolver's output (server/lib/orderResolver.ts), recomputed on sync.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS shop_orders (
+      order_id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      buyer_pubkey TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      unit_id TEXT NOT NULL,
+      unit_owner_hex TEXT NOT NULL,
+      items_json TEXT NOT NULL,
+      shipping TEXT NOT NULL,
+      total TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      fulfillment TEXT NOT NULL,
+      order_status TEXT NOT NULL,
+      pay_by INTEGER NOT NULL,
+      client TEXT,
+      supersedes TEXT,
+      raw_event TEXT NOT NULL,
+      payment_state TEXT NOT NULL DEFAULT 'unpaid',
+      expected_total TEXT,
+      price_changed INTEGER NOT NULL DEFAULT 0,
+      effective_status TEXT NOT NULL DEFAULT 'unpaid',
+      pending INTEGER NOT NULL DEFAULT 0,
+      paid_signer_hex TEXT,
+      paid_tx_id TEXT,
+      paid_event_id TEXT,
+      paid_customer_hex TEXT,
+      paid_amount TEXT,
+      paid_lana_amount TEXT,
+      paid_at INTEGER,
+      fulfillment_status TEXT,
+      fulfillment_event_id TEXT,
+      fulfillment_pubkey TEXT,
+      fulfillment_created_at INTEGER,
+      fulfillment_carrier TEXT,
+      fulfillment_tracking TEXT,
+      fulfillment_published INTEGER NOT NULL DEFAULT 1,
+      resolved_at INTEGER,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_shop_orders_unit_created ON shop_orders(unit_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_shop_orders_pending ON shop_orders(pending);
+
+    -- Latest KIND 36521 per order (NIP-33 newest created_at wins). published=0
+    -- marks a fulfillment signed in THIS app that no relay has accepted yet;
+    -- the heartbeat republishes it.
+    CREATE TABLE IF NOT EXISTS shop_order_fulfillments (
+      order_id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      pubkey TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      payment_ref TEXT,
+      carrier TEXT,
+      tracking TEXT,
+      shipped_at TEXT,
+      delivered_at TEXT,
+      eta TEXT,
+      content TEXT,
+      raw_event TEXT NOT NULL,
+      published INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- KIND 30933 mirror, trusted signers only, shop orders only (invoice_number
+    -- has the order-id shape). Newest per (signer, tx id) wins.
+    CREATE TABLE IF NOT EXISTS shop_order_payments (
+      pubkey TEXT NOT NULL,
+      tx_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      unit_id TEXT NOT NULL,
+      invoice_number TEXT NOT NULL,
+      receipt_description TEXT,
+      amount TEXT,
+      currency TEXT,
+      lana_amount TEXT,
+      payment_type TEXT,
+      status TEXT,
+      customer_hex TEXT,
+      raw_event TEXT NOT NULL,
+      PRIMARY KEY (pubkey, tx_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_shop_payments_invoice ON shop_order_payments(unit_id, invoice_number);
+
+    -- KIND 36522 delivery details: CIPHERTEXT ONLY (the raw event, NIP-44 in
+    -- content). Never decrypted, never parsed beyond its tags, on this server.
+    CREATE TABLE IF NOT EXISTS shop_order_delivery (
+      d TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL,
+      recipient_hex TEXT NOT NULL,
+      buyer_pubkey TEXT NOT NULL,
+      unit_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      raw_event TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_shop_delivery_order ON shop_order_delivery(order_id, recipient_hex);
+
+    -- Relay since-cursors + tick counter for the order sync.
+    CREATE TABLE IF NOT EXISTS shop_order_sync_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
   console.log('Database schema initialized');
 }

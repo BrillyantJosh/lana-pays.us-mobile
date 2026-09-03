@@ -4,13 +4,28 @@
  */
 
 import WebSocket from 'ws';
+import { devRelays, devKind38888Signer } from './devOverrides.js';
 
-const LANA_RELAYS = [
-  'wss://relay.lanavault.space',
-  'wss://relay.lanacoin-eternity.com'
-];
+// Dev-only escape hatches (SPEC §12) — see ./devOverrides.ts for why the gate
+// is loopback-based rather than NODE_ENV-based.
+const relayOverride = devRelays;
 
-const KIND_38888_PUBKEY = '9eb71bf1e9c3189c78800e4c3831c1c1a93ab43b61118818c32e4490891a35b3';
+const LANA_RELAYS = relayOverride.length
+  ? relayOverride
+  : [
+      'wss://relay.lanavault.space',
+      'wss://relay.lanacoin-eternity.com'
+    ];
+
+const pubkeyOverride = devKind38888Signer;
+
+const KIND_38888_PUBKEY = pubkeyOverride || '9eb71bf1e9c3189c78800e4c3831c1c1a93ab43b61118818c32e4490891a35b3';
+
+if (relayOverride.length || pubkeyOverride) {
+  console.warn(
+    `[nostr] DEV OVERRIDE active — relays=${LANA_RELAYS.join(',')} kind38888Signer=${KIND_38888_PUBKEY.slice(0, 12)}…`
+  );
+}
 
 export interface NostrEvent {
   id: string;

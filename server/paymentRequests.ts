@@ -22,14 +22,13 @@
  */
 
 import crypto from 'crypto';
-import { SIMPLE_UNIT_SQL } from './lib/unitOrigin.js';
+import { HEX64, unitForMerchant, unitIdsForMerchant } from './lib/merchantAuth.js';
 import rateLimit from 'express-rate-limit';
 import type Database from 'better-sqlite3';
 import type { Express } from 'express';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
-const HEX64 = /^[0-9a-f]{64}$/i;
 const LANA_ADDR = /^[LM][1-9A-HJ-NP-Za-km-z]{25,40}$/;
 
 /** Canonical JSON (recursively sorted object keys) for allocation comparison. */
@@ -53,35 +52,8 @@ function latestSystemParams(db: Database.Database): { rates: Record<string, numb
   return { rates, split: row.split ?? null };
 }
 
-/** Business unit row if `hex` is its owner or an authorized staff hex, else null. */
-function unitForMerchant(db: Database.Database, hex: string, unitId: string): any | null {
-  if (!HEX64.test(hex || '') || !unitId) return null;
-  const u = db.prepare(`
-    SELECT unit_id, name, owner_hex, authorized_hex, currency, suspension_status
-    FROM business_units
-    WHERE status = 'active' AND unit_id = ? AND NOT ${SIMPLE_UNIT_SQL}
-  `).get(unitId) as any;
-  if (!u) return null;
-  if (u.owner_hex === hex) return u;
-  try {
-    const authList: string[] = JSON.parse(u.authorized_hex || '[]');
-    if (authList.includes(hex)) return u;
-  } catch { /* fall through */ }
-  return null;
-}
-
-/** All unit_ids where `hex` is owner or authorized (for cross-unit notification). */
-function unitIdsForMerchant(db: Database.Database, hex: string): string[] {
-  if (!HEX64.test(hex || '')) return [];
-  const units = db.prepare(`
-    SELECT unit_id, owner_hex, authorized_hex FROM business_units
-    WHERE status = 'active' AND NOT ${SIMPLE_UNIT_SQL} AND (owner_hex = ? OR authorized_hex LIKE ?)
-  `).all(hex, `%${hex}%`) as any[];
-  return units.filter(u => {
-    if (u.owner_hex === hex) return true;
-    try { return (JSON.parse(u.authorized_hex || '[]') as string[]).includes(hex); } catch { return false; }
-  }).map(u => u.unit_id);
-}
+// unitForMerchant / unitIdsForMerchant live in ./lib/merchantAuth.ts (shared
+// with the shop-order routes in ./orders.ts).
 
 /** Lazily flip a pending request past its expires_at to 'expired'. Returns fresh row. */
 function loadWithLazyExpiry(db: Database.Database, token: string): any | null {
@@ -286,7 +258,7 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
 
   /** Public view of a payment request — what the customer sees before paying. */
   app.get('/api/pay/:token', payViewLimiter, (req, res) => {
-    const row = loadWithLazyExpiry(db, req.params.token);
+    const row = loadWithLazyExpiry(db, String(req.params.token));
     // Uniform 404 (no token oracle).
     if (!row) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
 
@@ -327,7 +299,7 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
       return res.status(400).json({ success: false, error: 'INVALID_CUSTOMER' });
     }
 
-    const row = loadWithLazyExpiry(db, req.params.token);
+    const row = loadWithLazyExpiry(db, String(req.params.token));
     if (!row) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
     if (row.status !== 'pending') {
       return res.status(409).json({ success: false, error: 'REQUEST_NOT_PAYABLE', status: row.status === 'paying' ? 'pending' : row.status });

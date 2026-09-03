@@ -19,12 +19,19 @@ import { SIMPLE_UNIT_SQL } from './lib/unitOrigin.js';
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js';
 import { registerPaymentRequestRoutes } from './paymentRequests.js';
+import { registerOrderRoutes } from './orders.js';
+import { devRelays } from './lib/devOverrides.js';
 import { getMaxTransaction, foldQuotaRemaining, foldCustomerWindow, readCustomerWindowDays, clampCashAmount, round2 } from './lib/maxTransaction.js';
 
-const LANA_RELAYS = [
-  'wss://relay.lanavault.space',
-  'wss://relay.lanacoin-eternity.com',
-];
+// Seed list used only on a fresh DB before the first heartbeat (see line ~964).
+// Kept in sync with server/lib/nostr.ts, including its dev-only override so a
+// local run never seeds itself from production relays (SPEC §12).
+const LANA_RELAYS = devRelays.length
+  ? devRelays
+  : [
+      'wss://relay.lanavault.space',
+      'wss://relay.lanacoin-eternity.com',
+    ];
 
 // Lana Registrar (wallet registry) base URL. Moved from Lovable/Supabase to
 // our lanatrace.us server; the /functions/v1/* path shape is preserved.
@@ -1383,7 +1390,7 @@ app.post('/api/receipt/upload', receiptUpload.single('receipt'), async (req, res
   try {
     // Forward to file server
     const formData = new FormData();
-    const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
+    const blob = new Blob([req.file.buffer as Uint8Array<ArrayBuffer>], { type: req.file.mimetype });
     formData.append('receipt', blob, req.file.originalname || 'receipt.jpg');
 
     const uploadRes = await fetch(RECEIPT_UPLOAD_URL, {
@@ -1617,6 +1624,10 @@ app.put('/api/admin/settings', (req, res) => {
 // ─── Lana-online payment requests (merchant + public /api/pay/:token) ─────
 
 registerPaymentRequestRoutes(app, db);
+
+// ─── Lana Online Shop orders (merchant "Orders" button) ───────────────────
+
+registerOrderRoutes(app, db);
 
 // ─── Static Frontend (MUST be after all API routes) ───────────────────────
 

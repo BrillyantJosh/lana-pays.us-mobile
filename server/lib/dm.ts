@@ -54,7 +54,12 @@ export async function publishToRelays(relays: string[], event: SignedEvent): Pro
 
 // ─── internals ──────────────────────────────────────────────────────────
 
-function queryEvents(
+/**
+ * Generic one-shot REQ across relays (parallel, until EOSE or timeout).
+ * Results are concatenated as-is — callers de-dupe by event.id. Exported for
+ * the shop-order sync (server/lib/orderSync.ts).
+ */
+export function queryEvents(
   relays: string[],
   filter: Record<string, any>,
   timeout: number,

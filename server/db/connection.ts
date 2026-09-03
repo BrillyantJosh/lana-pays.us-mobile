@@ -6,7 +6,12 @@ import { initializeSchema } from './schema.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_PATH = path.resolve(__dirname, '../../data/lana-pays.db');
+// Dev/test-only escape hatch: point this process at an isolated SQLite file
+// (used by lana-shop-devstack so an E2E run never touches your dev data).
+// Unset in production -- falls back to the repo's data/ file exactly as before.
+const DB_PATH = process.env.LANA_DB_PATH
+  ? path.resolve(process.env.LANA_DB_PATH)
+  : path.resolve(__dirname, '../../data/lana-pays.db');
 
 let db: Database.Database;
 
