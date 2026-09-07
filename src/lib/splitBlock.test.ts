@@ -74,3 +74,14 @@ describe('the wording', () => {
     expect(untilMessage(null, 'sl')).toBeNull();
   });
 });
+
+describe('English dates are day-first', () => {
+  it('9 September is not printed as 9/9 in a way that reads as 9 October elsewhere', () => {
+    // 10 September, the date that gives month-first formatting away.
+    const tenth = new Date(2026, 8, 10, 18, 30);
+    const day = formatDay(tenth, 'en');
+    expect(day).toMatch(/10/);
+    expect(day.indexOf('10')).toBeLessThan(day.indexOf('9'));   // day before month
+    expect(formatTime(new Date(2026, 8, 10, 18, 30), 'en')).toBe('18:30');   // 24-hour, like the Slovenian side
+  });
+});

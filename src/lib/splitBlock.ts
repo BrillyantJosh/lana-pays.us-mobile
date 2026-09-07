@@ -52,10 +52,17 @@ export function blockedUntil(
   return { at, isMidnight, day };
 }
 
-/** Weekday + date, in the reader's language: "Wed, 9 Sept 2026" / "sre., 9. 9. 2026". */
+/**
+ * Plain "en" formats dates month-first, so 10/9 would read as 9 October to a
+ * seller in Ljubljana or London. Every currency this POS takes is European, so
+ * English dates are day-first (and the clock 24-hour, like the Slovenian side).
+ */
+const localeFor = (lng: string) => (lng === 'en' || lng.startsWith('en-US') ? 'en-GB' : lng);
+
+/** Weekday + date, in the reader's language: "Wed, 09/09/2026" / "sre., 9. 9. 2026". */
 export function formatDay(day: Date, lng: string): string {
   try {
-    return new Intl.DateTimeFormat(lng, {
+    return new Intl.DateTimeFormat(localeFor(lng), {
       weekday: 'short', day: 'numeric', month: 'numeric', year: 'numeric',
     }).format(day);
   } catch {
@@ -66,7 +73,7 @@ export function formatDay(day: Date, lng: string): string {
 /** Clock time, in the reader's language: "18:30". */
 export function formatTime(at: Date, lng: string): string {
   try {
-    return new Intl.DateTimeFormat(lng, { hour: '2-digit', minute: '2-digit' }).format(at);
+    return new Intl.DateTimeFormat(localeFor(lng), { hour: '2-digit', minute: '2-digit', hour12: false }).format(at);
   } catch {
     return at.toISOString().slice(11, 16);
   }
