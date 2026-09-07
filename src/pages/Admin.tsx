@@ -4,6 +4,15 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Shield, Save, Loader2, ShieldAlert, Lock, Unlock } from 'lucide-react';
 
+/** ISO instant → the value a datetime-local input wants, in local time. */
+function toLocalInput(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const at = new Date(String(iso));
+  if (Number.isNaN(at.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
 const Admin = () => {
   const { session } = useAuth();
   const navigate = useNavigate();
@@ -15,6 +24,11 @@ const Admin = () => {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [splitHappening, setSplitHappening] = useState(false);
+  // The deadline shown to sellers next to the block. Local wall clock in the
+  // datetime-local input, stored as an ISO instant.
+  const [splitUntil, setSplitUntil] = useState('');
+  const [untilSaving, setUntilSaving] = useState(false);
+  const [untilSaved, setUntilSaved] = useState(false);
   const [splitSaving, setSplitSaving] = useState(false);
 
   // Check admin status
@@ -38,6 +52,8 @@ const Admin = () => {
         setDefaultMaxTx(d.settings?.default_max_tx_amount || '0');
         setWindowDays(d.settings?.customer_window_days || '1');
         setSplitHappening(d.settings?.split_happening === 'true');
+        // The stored instant is UTC; the input speaks local wall clock.
+        setSplitUntil(toLocalInput(d.settings?.split_happening_until));
       })
       .catch(() => {});
   }, [isAdmin, session?.nostrHexId]);
@@ -86,6 +102,31 @@ const Admin = () => {
       setSplitHappening(!next);
     } finally {
       setSplitSaving(false);
+    }
+  };
+
+  /**
+   * Save the deadline. Sent as an ISO instant so every reader agrees on the
+   * moment; an empty box clears it. It only changes what sellers are TOLD —
+   * the block itself stays on until the switch above is turned off.
+   */
+  const saveSplitUntil = async (localValue: string) => {
+    if (!session?.nostrHexId) return;
+    const iso = localValue ? new Date(localValue).toISOString() : '';
+    if (localValue && Number.isNaN(new Date(localValue).getTime())) return;
+    setUntilSaving(true);
+    setUntilSaved(false);
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-admin-hex-id': session.nostrHexId },
+        body: JSON.stringify({ settings: { split_happening_until: iso } }),
+      });
+      if (res.ok) { setUntilSaved(true); setTimeout(() => setUntilSaved(false), 2000); }
+    } catch {
+      /* the field keeps what was typed; pressing Save again retries */
+    } finally {
+      setUntilSaving(false);
     }
   };
 
@@ -198,10 +239,10 @@ const Admin = () => {
         {/* Split-in-progress lock */}
         <div className={`rounded-2xl border p-5 space-y-4 ${splitHappening ? 'bg-destructive/5 border-destructive/30' : 'bg-card border-border'}`}>
           <div>
-            <h2 className="text-sm font-semibold text-foreground">Split in progress — lock trading</h2>
+            <h2 className="text-sm font-semibold text-foreground">Split in progress — block cash</h2>
             <p className="text-xs text-muted-foreground mt-1">
-              When ON, the entire POS is locked for everyone with a full-screen "A Split is happening" notice
-              (English + Slovenian) and no purchases can be made. Turn it OFF here when the Split is finished to resume.
+              When ON, CASH payments are blocked for everyone and the cash button carries an "A Split is happening"
+              notice (English + Slovenian). LANA payments keep working. Turn it OFF here when the Split is finished.
             </p>
           </div>
           <button
@@ -224,9 +265,40 @@ const Admin = () => {
           </button>
           {splitHappening && (
             <p className="text-[11px] text-destructive font-medium">
-              ⚠ The POS is locked for all sellers right now. Trading resumes the moment you turn this off.
+              ⚠ Cash is blocked for all sellers right now. It resumes the moment you turn this off.
             </p>
           )}
+
+          {/* When sellers are told it ends. Says nothing about when it actually
+              ends — that is the switch above — so a passed deadline simply
+              stops being shown on the POS. */}
+          <div className="space-y-2 pt-1">
+            <label className="text-xs font-semibold text-foreground" htmlFor="split-until">
+              Tell sellers it lasts until (your local time)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                id="split-until"
+                type="datetime-local"
+                value={splitUntil}
+                onChange={(e) => setSplitUntil(e.target.value)}
+                className="flex-1 h-11 rounded-xl border border-border bg-background px-3 text-sm"
+              />
+              <button
+                onClick={() => saveSplitUntil(splitUntil)}
+                disabled={untilSaving}
+                className="h-11 px-4 rounded-xl bg-muted text-foreground text-sm font-semibold hover:bg-muted/80 disabled:opacity-50"
+              >
+                {untilSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : untilSaved ? 'Saved' : 'Save'}
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Shown on the cash button as "Cash is expected to reopen after …", in English and Slovenian. Midnight is
+              written as the end of that day. Leave empty for no date. Once the moment passes the line disappears by
+              itself — sellers are never shown a date that is already gone — but cash stays blocked until you switch
+              it off above.
+            </p>
+          </div>
         </div>
 
         {/* Current limits info */}

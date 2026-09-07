@@ -137,9 +137,13 @@ app.get('/api/system-params', (req, res) => {
   // /api/system-params poll. Always included (even when no kind_38888 row yet).
   const shRow = db.prepare("SELECT value FROM app_settings WHERE key = 'split_happening'").get() as any;
   const splitHappening = shRow?.value === 'true';
+  // When the block is expected to end, for the notice on the cash button. An
+  // ISO instant or null; informational only — the flag above is the switch.
+  const shUntilRow = db.prepare("SELECT value FROM app_settings WHERE key = 'split_happening_until'").get() as any;
+  const splitHappeningUntil = shUntilRow?.value ? String(shUntilRow.value) : null;
 
   if (!row) {
-    return res.json({ data: { splitHappening } });
+    return res.json({ data: { splitHappening, splitHappeningUntil } });
   }
 
   res.json({
@@ -157,6 +161,7 @@ app.get('/api/system-params', (req, res) => {
       splitApproaching: row.split_approaching === 1,
       freezeLanaRetailAccountAbove: row.freeze_lana_retail_account_above,
       splitHappening,
+      splitHappeningUntil,
       updatedAt: row.updated_at,
     },
   });
@@ -1132,10 +1137,14 @@ app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
   if (String(req.body?.payment_type) === 'cash') {
     const sh = db.prepare("SELECT value FROM app_settings WHERE key = 'split_happening'").get() as any;
     if (sh?.value === 'true') {
+      const until = db.prepare("SELECT value FROM app_settings WHERE key = 'split_happening_until'").get() as any;
       return res.status(403).json({
         success: false,
         error: 'SPLIT_HAPPENING',
         message: 'Cash payments are disabled while a Split is in progress. Please pay with LANA.',
+        // The same deadline the POS shows on the button, so a client that only
+        // ever sees this refusal can say when it ends too.
+        until: until?.value ? String(until.value) : null,
       });
     }
   }

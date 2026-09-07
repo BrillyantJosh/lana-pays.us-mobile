@@ -625,5 +625,7 @@
   "landing.headerLogin": "Prijava",
   "landing.headerRegister": "Registracija",
   "landing.heroRegisterPrompt": "Nova trgovina?",
-  "landing.scrollCue": "Odkrijte več"
+  "landing.scrollCue": "Odkrijte več",
+  "split.happening.untilMidnight": "Gotovina naj bi bila spet mogoča po polnoči v {{day}}.",
+  "split.happening.until": "Gotovina naj bi bila spet mogoča po {{day}}, {{time}}."
 }

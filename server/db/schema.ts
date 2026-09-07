@@ -178,6 +178,10 @@ export function initializeSchema(db: Database.Database): void {
   // Split-in-progress lock flag (admin-toggled). Idempotent so it also lands on
   // already-seeded DBs; INSERT OR IGNORE never clobbers an existing value.
   db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('split_happening', 'false')").run();
+  // The deadline shown NEXT to the lock ("cash is blocked until …"), an ISO
+  // instant or '' for none. It never unblocks anything — only split_happening
+  // does — so a passed deadline simply stops being shown.
+  db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('split_happening_until', '')").run();
   // Per-customer rolling cash-window length in days (admin-adjustable): the
   // same customer's CASH purchases at one shop within this many days must not
   // exceed the shop's transaction limit. Cash only — LANA is never limited.

@@ -625,5 +625,7 @@
   "landing.headerLogin": "Sign in",
   "landing.headerRegister": "Register",
   "landing.heroRegisterPrompt": "New shop?",
-  "landing.scrollCue": "Discover more"
+  "landing.scrollCue": "Discover more",
+  "split.happening.untilMidnight": "Cash is expected to reopen after midnight on {{day}}.",
+  "split.happening.until": "Cash is expected to reopen after {{day}}, {{time}}."
 }

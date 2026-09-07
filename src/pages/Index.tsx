@@ -13,6 +13,7 @@ const MitosisIcon = ({ className }: { className?: string }) => (
 import TopBar from "@/components/TopBar";
 import MenuDrawer from "@/components/MenuDrawer";
 import CashTab from "@/components/tabs/CashTab";
+import { untilMessage } from "@/lib/splitBlock";
 import WalletsTab from "@/components/tabs/WalletsTab";
 import LanaTab from "@/components/tabs/LanaTab";
 import LanaOnlineTab from "@/components/tabs/LanaOnlineTab";
@@ -244,6 +245,9 @@ const Index = () => {
   const [splitInfoOpen, setSplitInfoOpen] = useState(false);
   // Split IN PROGRESS → CASH is disabled (LANA is fine). Polled continuously.
   const [splitHappening, setSplitHappening] = useState(false);
+  // When the block is expected to end. Shown next to the notice; it never
+  // unblocks anything on its own — the admin switch does.
+  const [splitHappeningUntil, setSplitHappeningUntil] = useState<string | null>(null);
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
   const [lanaPaymentRequest, setLanaPaymentRequest] = useState<{ walletAddress: string } | null>(null);
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
@@ -349,6 +353,7 @@ const Index = () => {
         const json = await res.json();
         setSplitApproaching(json.data?.splitApproaching === true);
         setSplitHappening(json.data?.splitHappening === true);
+        setSplitHappeningUntil(json.data?.splitHappeningUntil || null);
       } catch { /* keep previous state on error */ }
     };
     fetchSplitStatus();
@@ -1012,8 +1017,16 @@ const Index = () => {
                         <MitosisIcon className="w-10 h-10 text-destructive" />
                         <span className="text-base font-bold text-destructive leading-tight">{t('split.happening.title', { lng: 'en' })}</span>
                         <span className="text-xs font-medium text-destructive/90 leading-snug">{t('split.happening.body', { lng: 'en' })}</span>
+                        {(() => {
+                          const m = untilMessage(splitHappeningUntil, 'en');
+                          return m ? <span className="text-xs font-bold text-destructive leading-snug">{t(m.key, { lng: 'en', ...m.values })}</span> : null;
+                        })()}
                         <span className="text-base font-bold text-destructive leading-tight mt-1">{t('split.happening.title', { lng: 'sl' })}</span>
                         <span className="text-xs font-medium text-destructive/90 leading-snug">{t('split.happening.body', { lng: 'sl' })}</span>
+                        {(() => {
+                          const m = untilMessage(splitHappeningUntil, 'sl');
+                          return m ? <span className="text-xs font-bold text-destructive leading-snug">{t(m.key, { lng: 'sl', ...m.values })}</span> : null;
+                        })()}
                       </div>
                     ) : (
                       <>
