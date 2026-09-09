@@ -52,6 +52,7 @@ export interface Kind38888Data {
   valid_from: number;
   split_approaching: boolean;                // KIND 38888 v3: a Split round is near
   freeze_lana_retail_account_above: number;  // KIND 38888 v3: retail wallet freeze threshold (lanoshi/LANA per spec)
+  max_cap_lanas_on_split: number;            // Most LANA a non-retail wallet may carry into a Split (halves every Split)
   raw_event: string;
 }
 
@@ -165,6 +166,7 @@ function parseKind38888Event(event: NostrEvent): Kind38888Data {
   // KIND 38888 v3 additions — tag OR content (spec carries these in content).
   const split_approaching = String(tags.find(t => t[0] === 'split_approaching')?.[1] || content.split_approaching || 'false').toLowerCase() === 'true';
   const freeze_lana_retail_account_above = parseInt(tags.find(t => t[0] === 'freeze_lana_retail_account_above')?.[1] || content.freeze_lana_retail_account_above || '0');
+  const max_cap_lanas_on_split = parseInt(tags.find(t => t[0] === 'max_cap_lanas_on_split')?.[1] || content.max_cap_lanas_on_split || '0');
 
   return {
     event_id: event.id,
@@ -181,6 +183,7 @@ function parseKind38888Event(event: NostrEvent): Kind38888Data {
     valid_from,
     split_approaching,
     freeze_lana_retail_account_above,
+    max_cap_lanas_on_split,
     raw_event: JSON.stringify(event)
   };
 }

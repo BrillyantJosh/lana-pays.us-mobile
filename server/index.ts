@@ -160,6 +160,7 @@ app.get('/api/system-params', (req, res) => {
       splitEndsAt: row.split_ends_at,
       splitApproaching: row.split_approaching === 1,
       freezeLanaRetailAccountAbove: row.freeze_lana_retail_account_above,
+      maxCapLanasOnSplit: row.max_cap_lanas_on_split,
       splitHappening,
       splitHappeningUntil,
       updatedAt: row.updated_at,

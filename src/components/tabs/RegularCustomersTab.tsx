@@ -59,7 +59,6 @@ interface CustomerBalance {
 
 const CURRENCY_SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
 const WONDER_THRESHOLD_FIAT = 100;
-const MAX_CAP_LANA = 1500; // Above this, account will be frozen at next split
 
 interface RegularCustomersTabProps {
   unitId?: string;
@@ -131,10 +130,25 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
   // hex → list of wallets from /api/wallets. Lets us resolve walletType for
   // the SPECIFIC wallet stored on each regular_customers row (same hex can
   // appear with different wallets across units). Retail wallets are exempt
-  // from the 1500 LANA freeze rule — we use this map at render time so the
-  // warning hides only for the row whose scanned wallet IS Retail, while
-  // other rows for the same customer with a Main/etc wallet keep the warning.
+  // from the Split cap — they have their own, higher published threshold — so
+  // we use this map at render time and hide the warning only for the row whose
+  // scanned wallet IS Retail; other rows for the same customer with a
+  // Main/etc wallet keep the warning.
   const [walletsByHex, setWalletsByHex] = useState<Record<string, any[]>>({});
+
+  // Most LANA a non-retail wallet may carry into a Split, from KIND 38888
+  // (`max_cap_lanas_on_split`). It HALVES at every Split, so it must never be
+  // a constant in here — a hard-coded 1500 sat above every published cap and
+  // warned nobody. null = not answered yet; the warning then stays hidden,
+  // because a stale threshold is worse than no warning.
+  const [maxCapLana, setMaxCapLana] = useState<number | null>(null);
+
+  // …and whether a Split is near enough for that cap to be actionable. The
+  // warning says the account will be frozen at the next Split, so showing it
+  // months out is noise a merchant learns to scroll past — and most balances
+  // sit above the cap most of the time. mejmoSeFajn gates its equivalent the
+  // same way.
+  const [splitApproaching, setSplitApproaching] = useState(false);
 
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -156,6 +170,24 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
   useEffect(() => {
     fetchCustomers();
   }, [staffHexId]);
+
+  // The Split cap, straight from the published parameters. Refreshed on the
+  // same 30s beat the rest of the app polls system params on, so the new cap
+  // is on screen right after a Split without a reload.
+  useEffect(() => {
+    const fetchMaxCap = async () => {
+      try {
+        const res = await fetch('/api/system-params');
+        const json = await res.json();
+        const cap = Number(json.data?.maxCapLanasOnSplit);
+        setMaxCapLana(cap > 0 ? cap : null);
+        setSplitApproaching(json.data?.splitApproaching === true);
+      } catch { /* keep the previous cap on error */ }
+    };
+    fetchMaxCap();
+    const interval = setInterval(fetchMaxCap, 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Balance + Lana8Wonder + freeze for the WHOLE list, in ONE request.
   //
@@ -597,7 +629,7 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
             const isScannedRetail =
               !!scannedWallet && typeof scannedWallet.walletType === 'string'
                 && scannedWallet.walletType.toLowerCase() === 'retail';
-            const isNearMaxCap = bal && bal.lana > MAX_CAP_LANA && !isFrozen && !isScannedRetail;
+            const isNearMaxCap = splitApproaching && maxCapLana !== null && bal && bal.lana > maxCapLana && !isFrozen && !isScannedRetail;
 
             return (
               <div key={delKey} className={`rounded-2xl p-4 space-y-3 ${
@@ -702,8 +734,8 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
                     </div>
                     <p className="text-xs text-amber-600 dark:text-amber-400">
                       {hasWonder
-                        ? t('regulars.maxCapMessageWonder', { lana: MAX_CAP_LANA.toLocaleString() })
-                        : t('regulars.maxCapMessage', { lana: MAX_CAP_LANA.toLocaleString() })}
+                        ? t('regulars.maxCapMessageWonder', { lana: maxCapLana.toLocaleString() })
+                        : t('regulars.maxCapMessage', { lana: maxCapLana.toLocaleString() })}
                     </p>
                     {!hasWonder && (
                       <a

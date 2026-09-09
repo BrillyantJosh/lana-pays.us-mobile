@@ -17,6 +17,7 @@ export function initializeSchema(db: Database.Database): void {
       split_ends_at INTEGER,
       split_approaching INTEGER DEFAULT 0,
       freeze_lana_retail_account_above INTEGER DEFAULT 0,
+      max_cap_lanas_on_split INTEGER DEFAULT 0,
       raw_event TEXT,
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -260,9 +261,10 @@ export function initializeSchema(db: Database.Database): void {
     console.log('Migrated: added gateway quota columns to business_units');
   }
 
-  // Migration: KIND 38888 v3 fields (split_approaching + retail wallet freeze threshold)
+  // Migration: KIND 38888 v3 fields (split_approaching + retail wallet freeze threshold + Split cap)
   try { db.exec(`ALTER TABLE kind_38888 ADD COLUMN split_approaching INTEGER DEFAULT 0`); } catch {}
   try { db.exec(`ALTER TABLE kind_38888 ADD COLUMN freeze_lana_retail_account_above INTEGER DEFAULT 0`); } catch {}
+  try { db.exec(`ALTER TABLE kind_38888 ADD COLUMN max_cap_lanas_on_split INTEGER DEFAULT 0`); } catch {}
 
   // ── Lana-online payment requests ──────────────────────────────────────────
   // A merchant-created remote payment request. Stored in FIAT ONLY — the LANA
