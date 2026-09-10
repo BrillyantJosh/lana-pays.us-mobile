@@ -11,6 +11,8 @@ import { createAndSignKind0, type Kind0Content } from "@/lib/nostr-sign";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { parseAmountInput, clampCashAmount, getCashMaxTx } from "@/lib/max-tx";
+import { withCallerHex, withCallerField } from "@/lib/callerIdentity";
+import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
 
 const currencyIcons: Record<string, typeof PoundSterling> = {
   GBP: PoundSterling, USD: DollarSign, EUR: Euro,
@@ -234,6 +236,19 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   // Translate Brain's 409 dedup responses into a localized seller-facing
   // message. Falls through to the generic error path for anything else.
   const formatPurchaseError = (status: number, data: any): string => {
+    // A commission decision (KIND 87058) standing against SOMEBODY on this sale
+    // — the shopper, the shop, or the person holding the phone. Without this
+    // branch the till showed the raw English refusal body, so the money was
+    // correctly refused and the person at the counter was told nothing useful.
+    // Refused because of the SHOP, not because of anyone at the counter.
+    if (status === 403 && isMerchantUnavailable(data)) {
+      return t('purchase.merchantUnavailable');
+    }
+    const refusal = exclusionFromRefusal(data);
+    if (status === 403 && refusal) {
+      const said = (refusal.ground || '').trim();
+      return said ? `${t('purchase.personExcluded')} ${said}` : t('purchase.personExcluded');
+    }
     if (status === 409 && data?.error === 'DUPLICATE_RECEIPT_IMAGE') {
       const date = data?.original_created_at
         ? new Date(data.original_created_at + 'Z').toLocaleString()
@@ -315,7 +330,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     try {
       const formData = new FormData();
       formData.append('receipt', file, file.name);
-      const res = await fetch(UPLOAD_URL, { method: 'POST', body: formData });
+      const res = await fetch(UPLOAD_URL, { method: 'POST', body: withCallerField(formData) });
       const data = await res.json();
       if (data.success && data.url) {
         setReceiptUrl(data.url);
@@ -339,7 +354,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       analyzeForm.append('receipt', file, file.name);
       analyzeForm.append('currency', currency);
       analyzeForm.append('lang', i18n.language || 'en');
-      const analyzeRes = await fetch('/api/receipt/analyze', { method: 'POST', body: analyzeForm });
+      const analyzeRes = await fetch('/api/receipt/analyze', { method: 'POST', body: withCallerField(analyzeForm) });
       const analysis = await analyzeRes.json();
 
       if (analysis.isReceipt) {
@@ -402,7 +417,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       try {
         const dedupRes = await fetch('/api/brain/purchase/check-dedup', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withCallerHex({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             unit_id: unitId,
             receipt_hash: localHash || undefined,
@@ -544,6 +559,19 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             return;
           }
 
+          // NEVER sell to a blank name. When the registrar has no
+          // wallet.nostr_hex_id and this app's users table has no row either,
+          // resolvedHexId stays null and this used to send customer_hex: '' —
+          // which the server gate correctly let past, because a blank field
+          // names nobody, while the purchase went through on the WALLET alone.
+          // That made the wallet an ungated second identity for the same person.
+          // The server now resolves the wallet as well; refusing here too means
+          // the till says something useful instead of the sale quietly working.
+          if (!resolvedHexId) {
+            setSubmitError(t('cash.customerNotIdentified'));
+            return;
+          }
+
           // Self-purchase guard: a merchant cannot buy from their own unit.
           // Brain enforces this authoritatively; this is just for fast UX so we
           // don't fire a doomed network request. Uses the resolved primary hex
@@ -558,11 +586,11 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           setIsSubmitting(true);
           const res = await fetch('/api/brain/purchase', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: withCallerHex({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({
               unit_id: pd.unitId,
               payment_type: 'cash',
-              customer_hex: resolvedHexId || '',
+              customer_hex: resolvedHexId,
               customer_wallet: resolvedWalletId,
               // Snapshot the customer name so brain admin can show it even
               // if the KIND 0 event later disappears from relays.
@@ -644,7 +672,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     try {
       const res = await fetch('/api/brain/purchase', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: withCallerHex({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           unit_id: pd.unitId,
           payment_type: 'cash',
@@ -765,7 +793,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           console.log('[CashTab] Auto-submitting purchase after registration...');
           const purchaseRes = await fetch('/api/brain/purchase', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: withCallerHex({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({
               unit_id: pd.unitId,
               payment_type: 'cash',

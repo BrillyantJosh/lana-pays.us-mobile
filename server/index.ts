@@ -18,6 +18,8 @@ import { fetchSingleBalance, fetchBalancesBatch, electrumCall, type ElectrumServ
 import { SIMPLE_UNIT_SQL } from './lib/unitOrigin.js';
 import { isOnlineShopUnit } from './lib/unitFlags.js';
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
+import { ensureExclusionTables, exclusionRefusal, exclusionKnown } from './lib/personExclusion.js';
+import { gate, gateNames, excludedNow, logGateState, refreshPersonExclusions, type RequestNames } from './lib/exclusionGate.js';
 import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js';
 import { registerPaymentRequestRoutes } from './paymentRequests.js';
 import { registerOrderRoutes } from './orders.js';
@@ -78,6 +80,15 @@ app.use((req, res, next) => {
 // Initialize database
 const db = getDb();
 
+// ─── Gross-violation exclusions (Nostr KIND 87058) ────────────────────────
+// A commission of three facilitators on selfresponsible.life can decide that a
+// person is outside the community. While that decision stands, this application
+// is closed to them — no exemptions, this app's own admins included. The table
+// is created here so the standing set survives a restart with no relay answer;
+// see server/lib/personExclusion.ts for why an outage must never release anyone.
+ensureExclusionTables(db);
+logGateState();
+
 // ─── Request logging + 24h retention ──────────────────────
 // Breadcrumb trail of every request path, to debug stuck flows. Stores
 // method/path/status/duration/ip ONLY — never bodies (may hold WIF/secrets).
@@ -121,6 +132,43 @@ app.get('/health', (req, res) => {
       error: lastHeartbeat.error,
     } : null,
     userCount,
+  });
+});
+
+/**
+ * GET /api/exclusion/:hexId
+ *
+ * Is there a standing commission decision (KIND 87058) against this person?
+ * Answered from the cached set, never from a live relay round-trip — the /api
+ * rate limiter sits in front of this and an active till polls it.
+ *
+ * This route is deliberately NOT gated: it is the one thing an excluded person
+ * must still be able to ask, because it is what tells them they are excluded.
+ * Registered here, well above the SPA catch-all — a route added below
+ * `app.get('/{*path}')` answers index.html with HTTP 200 and only looks alive.
+ */
+app.get('/api/exclusion/:hexId', (req, res) => {
+  const hex = String(req.params.hexId || '');
+  if (!/^[0-9a-f]{64}$/i.test(hex)) {
+    return res.status(400).json({ error: 'Invalid hex id' });
+  }
+  // `known` says whether this container has EVER been served a report from a
+  // trusted signer. Without it, "excluded: false" from a freshly deployed
+  // container with an empty table is indistinguishable from a real all-clear —
+  // and the browser, believing it, would forget a decision it is currently
+  // showing and hand the person their till back. See src/lib/exclusion.ts.
+  const known = exclusionKnown(db);
+  const decision = excludedNow(db, hex);
+  if (!decision) {
+    return res.json({ excluded: false, known, ground: null, since: null, untilSplit: null, eventId: null });
+  }
+  res.json({
+    excluded: true,
+    known,
+    ground: decision.ground,
+    since: decision.since,
+    untilSplit: decision.untilSplit,
+    eventId: decision.eventId,
   });
 });
 
@@ -284,7 +332,7 @@ app.get('/api/lana-raw-tx/:hash', async (req, res) => {
 /**
  * Register/update user
  */
-app.post('/api/users', (req, res) => {
+app.post('/api/users', gate(db, req => req.body?.hex_id), (req, res) => {
   const { hex_id, npub, lana_address, display_name, picture } = req.body;
 
   if (!hex_id || !npub || !lana_address) {
@@ -310,7 +358,7 @@ app.post('/api/users', (req, res) => {
 /**
  * Look up Nostr KIND 0 profile by hex pubkey
  */
-app.post('/api/profile-lookup', async (req, res) => {
+app.post('/api/profile-lookup', gate(db, req => req.body?.hex_id), async (req, res) => {
   const { hex_id } = req.body;
 
   if (!hex_id) {
@@ -371,7 +419,7 @@ app.post('/api/check-wallet', walletCheckLimiter, async (req, res) => {
  * Register a wallet via the registrar's check_wallet method
  * Auto-registers virgin (balance=0) wallets and broadcasts Nostr events
  */
-app.post('/api/register/wallet', walletCheckLimiter, async (req, res) => {
+app.post('/api/register/wallet', walletCheckLimiter, gate(db, req => req.body?.nostr_id_hex), async (req, res) => {
   const { wallet_id, nostr_id_hex } = req.body;
 
   if (!wallet_id || typeof wallet_id !== 'string') {
@@ -443,7 +491,7 @@ app.get('/api/users/by-wallet/:address', (req, res) => {
 /**
  * Get business units where the given hex pubkey is authorized (owner or staff via p tags)
  */
-app.get('/api/business-units/:hexId', (req, res) => {
+app.get('/api/business-units/:hexId', gate(db, req => req.params.hexId), (req, res) => {
   const { hexId } = req.params;
 
   // Query units where owner_hex matches OR hexId is in the authorized_hex JSON array.
@@ -548,7 +596,7 @@ function authorizedOwners(db: any, staffHex: string): string[] {
 /**
  * List regular customers for a business unit
  */
-app.get('/api/regular-customers/:unitId', (req, res) => {
+app.get('/api/regular-customers/:unitId', gate(db, req => req.query.staff_hex), (req, res) => {
   const { unitId } = req.params;
   const staffHex = req.query.staff_hex as string;
 
@@ -576,7 +624,15 @@ app.get('/api/regular-customers/:unitId', (req, res) => {
 /**
  * Add/upsert a regular customer
  */
-app.post('/api/regular-customers', (req, res) => {
+// Both sides of the entry: the staff member adding, and the CUSTOMER being
+// added — by hex and by wallet. Writing an excluded person into a shop's
+// regulars is setting up the next sale to them, and the row is also one of the
+// places this server later resolves a wallet back to a person.
+app.post('/api/regular-customers', gateNames(db, req => ({
+  hex: [req.body?.staff_hex, req.body?.customer_hex_id],
+  wallet: [req.body?.customer_wallet],
+  unit: [req.body?.unit_id],
+})), (req, res) => {
   const { unit_id, customer_hex_id, customer_wallet, customer_npub, display_name, picture, staff_hex, note } = req.body;
 
   if (!unit_id || !customer_hex_id || !customer_wallet || !staff_hex) {
@@ -612,7 +668,7 @@ app.post('/api/regular-customers', (req, res) => {
 /**
  * Delete a regular customer
  */
-app.delete('/api/regular-customers/:unitId/:customerHexId', (req, res) => {
+app.delete('/api/regular-customers/:unitId/:customerHexId', gate(db, req => req.query.staff_hex), (req, res) => {
   const { unitId, customerHexId } = req.params;
   const staffHex = req.query.staff_hex as string;
 
@@ -687,7 +743,7 @@ function authorizedRegularCustomers(staffHex: string): any[] {
 /**
  * Get ALL regular customers across all units the staff member is authorized for
  */
-app.get('/api/regular-customers-all', (req, res) => {
+app.get('/api/regular-customers-all', gate(db, req => req.query.staff_hex), (req, res) => {
   const staffHex = req.query.staff_hex as string;
   if (!staffHex) return res.status(400).json({ error: 'Missing staff_hex' });
 
@@ -805,7 +861,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return out;
 }
 
-app.get('/api/customers-status', async (req, res) => {
+app.get('/api/customers-status', gate(db, req => req.query.staff_hex), async (req, res) => {
   const staffHex = req.query.staff_hex as string;
   if (!staffHex) return res.status(400).json({ error: 'Missing staff_hex' });
 
@@ -887,7 +943,7 @@ app.get('/api/customers-status', async (req, res) => {
 /**
  * Fetch full KIND 0 profile for editing
  */
-app.get('/api/profile-full/:hexId', async (req, res) => {
+app.get('/api/profile-full/:hexId', gate(db, req => req.params.hexId), async (req, res) => {
   const { hexId } = req.params;
 
   try {
@@ -902,7 +958,7 @@ app.get('/api/profile-full/:hexId', async (req, res) => {
 /**
  * Broadcast a pre-signed Nostr event to relays
  */
-app.post('/api/broadcast-event', async (req, res) => {
+app.post('/api/broadcast-event', gate(db, req => req.body?.event?.pubkey), async (req, res) => {
   const { event } = req.body;
 
   if (!event || !event.id || !event.sig || !event.pubkey) {
@@ -970,7 +1026,7 @@ app.get('/api/caretaker/:unitId', async (req, res) => {
  * Body: { userPubkey, since? }
  * Returns sent + received KIND 4 events for the user across all relays.
  */
-app.post('/api/dm/fetch', async (req, res) => {
+app.post('/api/dm/fetch', gate(db, req => req.body?.userPubkey), async (req, res) => {
   try {
     const { userPubkey, since } = req.body;
     if (!userPubkey || typeof userPubkey !== 'string' || !/^[0-9a-f]{64}$/i.test(userPubkey)) {
@@ -1001,7 +1057,7 @@ app.post('/api/dm/fetch', async (req, res) => {
  * POST /api/dm/publish
  * Body: { event } — signed KIND 4 ciphertext event (encrypted in the browser)
  */
-app.post('/api/dm/publish', async (req, res) => {
+app.post('/api/dm/publish', gate(db, req => req.body?.event?.pubkey), async (req, res) => {
   try {
     const { event } = req.body;
     if (!event?.id || !event?.sig || !event?.pubkey || event.kind !== 4) {
@@ -1060,6 +1116,31 @@ const BRAIN_API_URL = process.env.BRAIN_API_URL || '';
 const BRAIN_PURCHASE_KEY = process.env.BRAIN_PURCHASE_KEY || '';
 
 /**
+ * Everyone a purchase is made BY and FOR, in every way this request names them.
+ *
+ * A sale has two sides and this proxy used to look at half of one. It gated
+ * `customer_hex` alone, so:
+ *   - an EXCLUDED MERCHANT who knew their own unit_id kept selling and taking
+ *     real money, because the body carries no merchant identity at all; and
+ *   - an excluded CUSTOMER was served by sending `customer_hex: ''` and paying
+ *     from their wallet, because a blank name is not a name and the gate — which
+ *     answers "is this person excluded", not "is this request authenticated" —
+ *     correctly let it through while the handler charged the wallet anyway.
+ *
+ * So every carrier is asked: the customer's own key, the wallet they pay from
+ * (resolved through this app's `users` table), the selling unit (resolved to its
+ * owner and authorised staff through KIND 30901), and the session hex the till
+ * sends in `x-lana-hex`. The header is a CLAIM, not a proof — see the note on
+ * authentication in the report — but it is one more name that has to be clean,
+ * and it is never forwarded to the brain.
+ */
+const purchaseNames = (req: any): RequestNames => ({
+  hex: [req.body?.customer_hex, req.headers?.['x-lana-hex'], req.body?.staff_hex, req.body?.merchant_hex],
+  wallet: [req.body?.customer_wallet],
+  unit: [req.body?.unit_id],
+});
+
+/**
  * POST /api/brain/purchase
  * Proxy purchase requests to Brain orchestration service
  * Sends BRAIN_PURCHASE_KEY as Bearer token for authentication
@@ -1069,7 +1150,7 @@ const BRAIN_PURCHASE_KEY = process.env.BRAIN_PURCHASE_KEY || '';
  * Proxy to Brain's read-only preview endpoint — returns LANA recipients
  * for client-side signing, without committing the purchase.
  */
-app.post('/api/brain/purchase/preview', purchaseLimiter, async (req, res) => {
+app.post('/api/brain/purchase/preview', purchaseLimiter, gateNames(db, purchaseNames), async (req, res) => {
   if (!BRAIN_API_URL) {
     return res.status(503).json({ success: false, error: 'Brain service not configured' });
   }
@@ -1104,7 +1185,7 @@ app.post('/api/brain/purchase/preview', purchaseLimiter, async (req, res) => {
  * (unit_id, invoice_number) is already used. Lets the mobile UI hide the
  * "Continue" button at the receipt step rather than blocking only at submit.
  */
-app.post('/api/brain/purchase/check-dedup', purchaseLimiter, async (req, res) => {
+app.post('/api/brain/purchase/check-dedup', purchaseLimiter, gateNames(db, purchaseNames), async (req, res) => {
   if (!BRAIN_API_URL) {
     return res.status(503).json({ success: false, error: 'Brain service not configured' });
   }
@@ -1127,7 +1208,7 @@ app.post('/api/brain/purchase/check-dedup', purchaseLimiter, async (req, res) =>
   }
 });
 
-app.post('/api/brain/purchase', purchaseLimiter, async (req, res) => {
+app.post('/api/brain/purchase', purchaseLimiter, gateNames(db, purchaseNames), async (req, res) => {
   if (!BRAIN_API_URL) {
     return res.status(503).json({ success: false, error: 'Brain service not configured' });
   }
@@ -1359,10 +1440,61 @@ const upload = multer({
 app.use('/uploads', express.static(uploadsDir));
 
 /**
+ * Who is asking for something that costs money.
+ *
+ * The three upload/analyse routes below carry no identity of any kind, so the
+ * gate could never fire on them and an excluded merchant kept spending this
+ * app's storage and its Claude budget. They are multipart, so the hex travels
+ * as a plain text field in the form (multer populates req.body for those) or,
+ * for callers that find a header easier, in `x-lana-hex`.
+ *
+ * These routes REFUSE a request that names nobody. That is the opposite of the
+ * gate's own rule — which answers "is this person excluded", never "is this
+ * request signed" — and it is deliberate: an anonymous read costs nothing and is
+ * allowed, an anonymous request that spends money is not. The refusal names the
+ * missing field so a stale bundle is diagnosable rather than mysterious.
+ */
+const requireCaller = (req: any, res: any, next: any) => {
+  const named = String(req.body?.hex || req.body?.staff_hex || req.headers?.['x-lana-hex'] || '').trim();
+  if (!named) {
+    discardUploads(req);
+    return res.status(400).json({ error: 'Missing caller identity', code: 'NO_CALLER_HEX' });
+  }
+  next();
+};
+const uploadCaller = (req: any): unknown => [req.body?.hex, req.body?.staff_hex, req.headers?.['x-lana-hex']];
+
+/**
+ * Throw away whatever multer already wrote for a request we are about to refuse.
+ *
+ * The gate can only read the caller's hex out of a multipart form AFTER multer
+ * has parsed it — and /api/upload uses diskStorage, so by then the file is on
+ * disk. Measured: a request naming an EXCLUDED hex was correctly answered 403
+ * and data/uploads still went from 0 files to 1. Nothing else in this server
+ * ever deletes an upload, so the refusal was costing storage on every retry.
+ *
+ * Only files THIS request wrote, only inside uploadsDir, and never loud enough
+ * to mask the refusal itself.
+ */
+function discardUploads(req: any): void {
+  const files: any[] = [
+    ...(Array.isArray(req?.files) ? req.files : []),
+    ...(req?.file ? [req.file] : []),
+  ];
+  for (const f of files) {
+    const p = typeof f?.path === 'string' ? f.path : '';
+    if (!p) continue; // memoryStorage — nothing was written
+    const resolved = path.resolve(p);
+    if (resolved !== path.join(uploadsDir, path.basename(resolved))) continue;
+    try { fs.unlinkSync(resolved); } catch { /* already gone, or never written */ }
+  }
+}
+
+/**
  * Upload invoice images (up to 5 at once)
  * Returns array of public URLs
  */
-app.post('/api/upload', upload.array('images', 5), (req, res) => {
+app.post('/api/upload', upload.array('images', 5), gate(db, uploadCaller, discardUploads), requireCaller, (req, res) => {
   const files = req.files as Express.Multer.File[];
   if (!files || files.length === 0) {
     return res.status(400).json({ error: 'No images provided' });
@@ -1391,7 +1523,7 @@ const receiptUpload = multer({
   },
 });
 
-app.post('/api/receipt/upload', receiptUpload.single('receipt'), async (req, res) => {
+app.post('/api/receipt/upload', receiptUpload.single('receipt'), gate(db, uploadCaller, discardUploads), requireCaller, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
@@ -1446,7 +1578,7 @@ import sharp from 'sharp';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const MAX_IMAGE_BYTES = 3_500_000; // 3.5 MB raw → ~4.7 MB base64 (under Claude's 5 MB limit)
 
-app.post('/api/receipt/analyze', receiptUpload.single('receipt'), async (req, res) => {
+app.post('/api/receipt/analyze', receiptUpload.single('receipt'), gate(db, uploadCaller, discardUploads), requireCaller, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No image provided' });
   }
@@ -1588,11 +1720,16 @@ function requireAdmin(req: any, res: any): string | null {
   if (!hexId) { res.status(401).json({ error: 'Missing admin header' }); return null; }
   const admin = db.prepare('SELECT * FROM admin_users WHERE hex_id = ?').get(hexId) as any;
   if (!admin) { res.status(403).json({ error: 'Not an admin' }); return null; }
+  // NOBODY IS EXEMPT. Being an admin of this app is not a way past a commission
+  // decision — the check is folded into the existing person-auth helper rather
+  // than bolted on beside it, so no admin route can be added without it.
+  const excluded = excludedNow(db, hexId);
+  if (excluded) { res.status(403).json(exclusionRefusal(excluded)); return null; }
   return hexId;
 }
 
 // Check if a user is admin
-app.get('/api/admin/check', (req, res) => {
+app.get('/api/admin/check', gate(db, req => req.query.hex_id), (req, res) => {
   const hexId = req.query.hex_id as string;
   if (!hexId) return res.json({ isAdmin: false });
   const admin = db.prepare('SELECT * FROM admin_users WHERE hex_id = ?').get(hexId) as any;
@@ -1656,6 +1793,11 @@ app.get('/{*path}', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Lana Pays.Us server running on port ${PORT}`);
+  // Read the standing KIND 87058 set once at boot, from the CACHED KIND 38888.
+  // The heartbeat below refreshes it every minute, but its own 38888 fetch has
+  // to succeed first — this one still runs when the relays are having a bad day.
+  refreshPersonExclusions(db, 'boot').catch((e: any) =>
+    console.warn('[exclusion] (boot) refresh threw:', e?.message || e));
   startHeartbeat(db);
 });
 

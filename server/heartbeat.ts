@@ -8,6 +8,7 @@ import { bech32 } from 'bech32';
 import { fetchKind38888, fetchKind30901, fetchKind30902, fetchKind30903, fetchKind0Profile, type Kind38888Data, type Kind30901Event, type Kind30902Policy } from './lib/nostr.js';
 import { readUnitOrigin } from './lib/unitOrigin.js';
 import { syncShopOrders } from './lib/orderSync.js';
+import { refreshPersonExclusions } from './lib/exclusionGate.js';
 
 const HEARTBEAT_INTERVAL = 1 * 60 * 1000; // 1 minute
 
@@ -22,6 +23,97 @@ let isRunning = false;
 let heartbeatStartedAt = 0;
 
 const MAX_HEARTBEAT_DURATION = 120_000; // 2 minutes safety timeout
+
+/**
+ * A MACHINE MUST NOT AUTHENTICATE AS A PERSON.
+ *
+ * Brain owns the canonical write — its orchestrator increments
+ * merchant_quota_usage on every successful purchase — and this POS mirrors the
+ * counters into business_units so the staff sees current usage right away, not
+ * only on the next status transition. Only the *_used columns are touched here;
+ * *_limit and status come from KIND 30903.
+ *
+ * The line that fetched them used to carry a real person's 64-hex Nostr pubkey,
+ * hardcoded, as `x-admin-hex-id` to brain's ADMIN api: a POS terminal's
+ * background timer acting in a named human being's name. That person is one of
+ * the standing KIND 87058 subjects, so brain's own gate turns the call away for
+ * good — and when it does, quota_volume_used / quota_tx_used freeze at their
+ * last value and the CASH pre-flight in index.ts starts judging NON-excluded
+ * merchants against stale numbers, blocking or over-allowing them.
+ *
+ * Brain now has a door for machines: GET /api/peer/merchant-usage, read-only,
+ * authorised by a service key in an `Authorization: Bearer` header, naming
+ * nobody. BRAIN_PEER_KEY is this container's copy of that key and is the only
+ * credential this sync has. Unset means it does not run and says so — the same
+ * frozen counters a 403 produced, minus the impersonation. There is no fallback
+ * to somebody's hex, deliberately: that fallback is the bug.
+ *
+ * Exported so the credential can be tested directly. Swallows its own errors;
+ * returns the number of rows mirrored (0 on failure or skip).
+ */
+export async function mirrorMerchantUsageFromBrain(
+  db: Database.Database,
+  period: string = new Date().toISOString().slice(0, 7)
+): Promise<number> {
+  const BRAIN_URL = process.env.BRAIN_API_URL || 'http://lana-brain-web:3007';
+  const peerKey = String(process.env.BRAIN_PEER_KEY || '').trim();
+  if (!peerKey) {
+    console.error(
+      'merchant-usage sync SKIPPED — BRAIN_PEER_KEY is not set, so business_units.quota_volume_used / ' +
+      'quota_tx_used are NOT being refreshed and every CASH pre-flight in index.ts is judging merchants on ' +
+      "the last numbers it managed to fetch. FIX: put BRAIN_PEER_KEY in this container's .env, matching " +
+      "PEER_API_KEY in lana-brain's .env. This container will NOT borrow a person's key instead."
+    );
+    return 0;
+  }
+  try {
+    const usageRes = await fetch(`${BRAIN_URL}/api/peer/merchant-usage?period=${period}`, {
+      headers: { authorization: `Bearer ${peerKey}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!usageRes.ok) {
+      // Not a hiccup: brain refusing this container's key, or having none of
+      // its own, does not fix itself on the next tick — and the counters going
+      // stale is silent everywhere else. This used to be a console.warn inside
+      // a try/catch while the heartbeat still logged success, so nothing
+      // anywhere reported it.
+      if (usageRes.status === 401 || usageRes.status === 403 || usageRes.status === 503) {
+        console.error(
+          `merchant-usage REFUSED (HTTP ${usageRes.status}) — quota_volume_used/quota_tx_used are now FROZEN and ` +
+          `every cash pre-flight is judging merchants on stale numbers. BRAIN_PEER_KEY here must equal ` +
+          `PEER_API_KEY (or PURCHASE_API_KEY) in lana-brain's .env.`
+        );
+      } else {
+        console.warn(`merchant-usage fetch returned HTTP ${usageRes.status}`);
+      }
+      return 0;
+    }
+    const data = await usageRes.json() as any;
+    const rows = (data.usage || []) as Array<{
+      unit_id: string; tx_count: number; volume_native: number;
+      tx_count_cash?: number; volume_native_cash?: number;
+    }>;
+    const upd = db.prepare(`
+      UPDATE business_units SET
+        quota_volume_used = ?,
+        quota_tx_used = ?,
+        quota_period = ?
+      WHERE unit_id = ?
+    `);
+    // The monthly limit is CASH-only (LANA is uncapped), so the POS gates on
+    // CASH usage — mirror the *_cash counters into quota_*_used (fall back to
+    // 0 for an older brain that doesn't yet return the cash columns).
+    const txn = db.transaction(() => {
+      for (const r of rows) upd.run(r.volume_native_cash ?? 0, r.tx_count_cash ?? 0, period, r.unit_id);
+    });
+    txn();
+    console.log(`merchant_quota_usage: synced ${rows.length} usage rows from brain`);
+    return rows.length;
+  } catch (e: any) {
+    console.warn('merchant_quota_usage sync failed (non-fatal):', e.message);
+    return 0;
+  }
+}
 
 export async function runHeartbeat(db: Database.Database): Promise<void> {
   if (isRunning) {
@@ -42,6 +134,22 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
   ).run().lastInsertRowid;
 
   console.log('Heartbeat started');
+
+  // ── Standing gross-violation decisions (KIND 87058) ───────────────────
+  // FIRST, and OUTSIDE the try below, because that try throws the moment
+  // fetchKind38888() comes back empty. It used to sit at the end of it, so on
+  // any container whose 38888 fetch was failing this step was never reached at
+  // all: the '[exclusion] (heartbeat)' line never printed once, a NEW commission
+  // decision never landed, and the person kept full use of the till indefinitely.
+  // The refresh does not need this tick's 38888 — it reads the CACHED row — so
+  // there is no reason for it to depend on that fetch succeeding.
+  // Non-fatal in both directions: a relay hiccup must not fail the heartbeat,
+  // and a failed read leaves the last known set standing rather than emptying it.
+  try {
+    await refreshPersonExclusions(db, 'heartbeat');
+  } catch (e: any) {
+    console.warn('[exclusion] refresh threw (non-fatal):', e?.message || e);
+  }
 
   try {
     const systemParams = await fetchKind38888();
@@ -260,45 +368,10 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
     }
 
     // ── Sync merchant_quota_usage from brain ────────────────────────────
-    // Brain owns the canonical write (orchestrator increments on every
-    // successful purchase). Mobile pulls a snapshot here so the staff sees
-    // current usage right away, not just on the next status transition.
-    // Updates only the *_used columns; *_limit + status come from KIND 30903.
-    try {
-      const BRAIN_URL = process.env.BRAIN_API_URL || 'http://lana-brain-web:3007';
-      const adminHex = '56e8670aa65491f8595dc3a71c94aa7445dcdca755ca5f77c07218498a362061';
-      const period = new Date().toISOString().slice(0, 7);
-      const usageRes = await fetch(`${BRAIN_URL}/api/admin/merchant-usage?period=${period}`, {
-        headers: { 'x-admin-hex-id': adminHex },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (usageRes.ok) {
-        const data = await usageRes.json();
-        const rows = (data.usage || []) as Array<{
-          unit_id: string; tx_count: number; volume_native: number;
-          tx_count_cash?: number; volume_native_cash?: number;
-        }>;
-        const upd = db.prepare(`
-          UPDATE business_units SET
-            quota_volume_used = ?,
-            quota_tx_used = ?,
-            quota_period = ?
-          WHERE unit_id = ?
-        `);
-        // The monthly limit is CASH-only (LANA is uncapped), so the POS gates on
-        // CASH usage — mirror the *_cash counters into quota_*_used (fall back to
-        // 0 for an older brain that doesn't yet return the cash columns).
-        const txn = db.transaction(() => {
-          for (const r of rows) upd.run(r.volume_native_cash ?? 0, r.tx_count_cash ?? 0, period, r.unit_id);
-        });
-        txn();
-        console.log(`merchant_quota_usage: synced ${rows.length} usage rows from brain`);
-      } else {
-        console.warn(`merchant-usage fetch returned HTTP ${usageRes.status}`);
-      }
-    } catch (e: any) {
-      console.warn('merchant_quota_usage sync failed (non-fatal):', e.message);
-    }
+    // Lifted out of this function (see mirrorMerchantUsageFromBrain below) so
+    // the credential it uses can be tested without running a heartbeat's worth
+    // of relay traffic. It swallows its own errors, exactly as it did inline.
+    await mirrorMerchantUsageFromBrain(db);
 
     // Fetch Direct Fund capacity
     const DIRECT_FUND_URL = process.env.DIRECT_FUND_URL || 'http://lana-direct-fund-web:3005';

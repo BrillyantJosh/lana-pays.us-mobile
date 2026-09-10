@@ -23,6 +23,7 @@
 
 import crypto from 'crypto';
 import { HEX64, unitForMerchant, unitIdsForMerchant } from './lib/merchantAuth.js';
+import { gate, gateNames, excludedMerchant, merchantRefusal } from './lib/exclusionGate.js';
 import rateLimit from 'express-rate-limit';
 import type Database from 'better-sqlite3';
 import type { Express } from 'express';
@@ -109,7 +110,10 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
   //     /api/business-units/:hexId and /api/regular-customers) ═══
 
   /** Create a payment request. Stored in FIAT — no LANA amount (see header). */
-  app.post('/api/payment-requests', (req, res) => {
+  app.post('/api/payment-requests', gateNames(db, req => ({
+    hex: [req.body?.merchant_hex, req.headers?.['x-lana-hex']],
+    unit: [req.body?.unit_id],
+  })), (req, res) => {
     const { unit_id, merchant_hex, amount, currency, invoice_number,
       receipt_url, receipt_hash, receipt_type, receipt_description } = req.body || {};
 
@@ -176,7 +180,7 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
   });
 
   /** List requests for a unit (last N + total, for the tab list and history page). */
-  app.get('/api/payment-requests', (req, res) => {
+  app.get('/api/payment-requests', gate(db, req => req.query.hex), (req, res) => {
     const hex = String(req.query.hex || '');
     const unitId = String(req.query.unit_id || '');
     const unit = unitForMerchant(db, hex, unitId);
@@ -201,7 +205,7 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
   });
 
   /** Cancel a pending request. */
-  app.post('/api/payment-requests/:id/cancel', (req, res) => {
+  app.post('/api/payment-requests/:id/cancel', gate(db, req => req.body?.merchant_hex), (req, res) => {
     const hex = String(req.body?.merchant_hex || '');
     const row = db.prepare('SELECT id, unit_id, status FROM payment_requests WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
@@ -220,7 +224,7 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
 
   /** Unseen paid count across ALL the merchant's units — drives the in-app
    *  notification (30s poll from Index). `latest` feeds the toast text. */
-  app.get('/api/payment-requests/unseen-count', (req, res) => {
+  app.get('/api/payment-requests/unseen-count', gate(db, req => req.query.hex), (req, res) => {
     const hex = String(req.query.hex || '');
     const unitIds = unitIdsForMerchant(db, hex);
     if (unitIds.length === 0) return res.json({ success: true, count: 0, latest: [] });
@@ -240,7 +244,7 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
   });
 
   /** Mark paid requests as seen (fired when the merchant opens the tab). */
-  app.post('/api/payment-requests/mark-seen', (req, res) => {
+  app.post('/api/payment-requests/mark-seen', gate(db, req => req.body?.hex), (req, res) => {
     const hex = String(req.body?.hex || '');
     const scopeUnit = req.body?.unit_id ? String(req.body.unit_id) : null;
     const unitIds = unitIdsForMerchant(db, hex).filter(u => !scopeUnit || u === scopeUnit);
@@ -290,7 +294,10 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
 
   /** Brain preview with SERVER-STORED amount/unit/currency. Snapshots the
    *  response on the row so submit can enforce allocation integrity. */
-  app.post('/api/pay/:token/preview', payActionLimiter, async (req, res) => {
+  app.post('/api/pay/:token/preview', payActionLimiter, gateNames(db, req => ({
+    hex: [req.body?.customer_hex],
+    wallet: [req.body?.customer_wallet],
+  })), async (req, res) => {
     if (!BRAIN_API_URL) return res.status(503).json({ success: false, error: 'Brain service not configured' });
 
     const customerHex = String(req.body?.customer_hex || '');
@@ -304,6 +311,18 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
     if (row.status !== 'pending') {
       return res.status(409).json({ success: false, error: 'REQUEST_NOT_PAYABLE', status: row.status === 'paying' ? 'pending' : row.status });
     }
+
+    // The MERCHANT side of this sale. The customer's names were asked by the
+    // gate above; the seller is not a field on this request — it is the unit on
+    // the stored row — so it has to be asked here, once the row is in hand. An
+    // excluded merchant does not get to keep taking money through a link they
+    // handed out before the decision.
+    //
+    // The person reading this answer is the BUYER, and no commission decided
+    // anything about them. So they get merchantRefusal(): a different code, no
+    // ground, no event id, nothing that says they are the excluded one.
+    const sellerPreview = excludedMerchant(db, [row.unit_id]);
+    if (sellerPreview) return res.status(403).json(merchantRefusal());
 
     try {
       const response = await fetch(`${BRAIN_API_URL}/api/purchase/preview-lana-recipients`, {
@@ -347,7 +366,10 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
   });
 
   /** Execute the payment: atomic claim → allocation integrity → brain purchase. */
-  app.post('/api/pay/:token/submit', payActionLimiter, async (req, res) => {
+  app.post('/api/pay/:token/submit', payActionLimiter, gateNames(db, req => ({
+    hex: [req.body?.customer_hex],
+    wallet: [req.body?.customer_wallet],
+  })), async (req, res) => {
     if (!BRAIN_API_URL) return res.status(503).json({ success: false, error: 'Brain service not configured' });
 
     const token = req.params.token;
@@ -365,6 +387,16 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
     }
     if (!Array.isArray(clientAllocations)) {
       return res.status(400).json({ success: false, error: 'INVALID_ALLOCATIONS' });
+    }
+
+    // 0) The MERCHANT side. Read BEFORE the atomic claim below, so a refusal
+    //    never leaves a request stuck in 'paying' waiting for the watchdog. The
+    //    seller is on the row, not in the body, so the middleware gate could not
+    //    see them; the customer's own names it already did.
+    const preRow = db.prepare('SELECT unit_id FROM payment_requests WHERE token = ?').get(token) as any;
+    if (preRow) {
+      const seller = excludedMerchant(db, [preRow.unit_id]);
+      if (seller) return res.status(403).json(merchantRefusal());
     }
 
     // 1) Atomic claim — the double-pay mutex. better-sqlite3 is synchronous on a

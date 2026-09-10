@@ -17,6 +17,7 @@ import type { Express } from 'express';
 import { verifyEvent } from 'nostr-tools/pure';
 import { HEX64, unitForMerchant, unitIdsForMerchant } from './lib/merchantAuth.js';
 import { broadcastEvent } from './lib/nostr.js';
+import { gate } from './lib/exclusionGate.js';
 import {
   KIND_FULFILLMENT, FULFILLMENT_RANK, parseFulfillmentEvent, upsertFulfillmentRow, readRelays, unitRow, unitSigners,
 } from './lib/orderSync.js';
@@ -108,7 +109,7 @@ export function registerOrderRoutes(app: Express, db: Database.Database): void {
   /** Working counter for the home badge: paid ∧ not yet shipped/delivered/…
    *  across every unit the hex owns or staffs (SIMPLE units excluded). No
    *  mark-seen — the badge clears when the order ships. */
-  app.get('/api/orders/pending-count', (req, res) => {
+  app.get('/api/orders/pending-count', gate(db, req => req.query.hex), (req, res) => {
     const hex = String(req.query.hex || '').toLowerCase();
     const unitIds = unitIdsForMerchant(db, hex);
     if (unitIds.length === 0) return res.json({ success: true, count: 0, latest: [] });
@@ -126,7 +127,7 @@ export function registerOrderRoutes(app: Express, db: Database.Database): void {
   });
 
   /** List orders: one unit (unit_id=) or every unit of the hex; scope pending|all. */
-  app.get('/api/orders', (req, res) => {
+  app.get('/api/orders', gate(db, req => req.query.hex), (req, res) => {
     const hex = String(req.query.hex || '').toLowerCase();
     const unitIdParam = String(req.query.unit_id || '');
     const scope = String(req.query.scope || 'pending') === 'all' ? 'all' : 'pending';
@@ -156,7 +157,7 @@ export function registerOrderRoutes(app: Express, db: Database.Database): void {
   });
 
   /** One order (+ the 36522 ciphertext addressed to this hex, if any). */
-  app.get('/api/orders/:orderId', (req, res) => {
+  app.get('/api/orders/:orderId', gate(db, req => req.query.hex), (req, res) => {
     const hex = String(req.query.hex || '').toLowerCase();
     const row = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(String(req.params.orderId)) as any;
     if (!row) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
@@ -170,7 +171,11 @@ export function registerOrderRoutes(app: Express, db: Database.Database): void {
    * verifies, records (atomically — a double tap is a 409, not a second row)
    * and broadcasts. Unpublished events are retried by the heartbeat.
    */
-  app.post('/api/orders/:orderId/fulfillment', async (req, res) => {
+  // Both names the handler acts on: the claimed `hex` AND the pubkey that
+  // signed the event. It forces them equal a few lines down, but a gate that
+  // reads one field while the handler reads two is exactly the shape that got
+  // walked past elsewhere in this app — so it asks for both.
+  app.post('/api/orders/:orderId/fulfillment', gate(db, req => [req.body?.hex, req.body?.event?.pubkey]), async (req, res) => {
     const orderId = String(req.params.orderId);
     const hex = String(req.body?.hex || '').toLowerCase();
     const event = req.body?.event as SignedEvent | undefined;

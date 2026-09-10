@@ -29,6 +29,7 @@ import { convertWifToIds } from '@/lib/crypto';
 import { signCustomerLanaTx } from '@/lib/transaction';
 import { classifyWifInput } from '@/lib/wifInput';
 import { currencySymbol, formatLana, formatLanoshis } from '@/lib/format';
+import { isMerchantUnavailable, exclusionFromRefusal } from '@/lib/exclusion';
 import { changeLanguage } from '@/i18n';
 import { LANGUAGES } from '@/i18n/languages';
 import lanaIcon from '@/assets/lana-icon.png';
@@ -220,6 +221,23 @@ const PublicPay = () => {
         setPhase('closed');
         return false;
       }
+      // The SELLER carries a commission decision. The person reading this page
+      // is the buyer: they are the subject of nothing, so they are told the shop
+      // cannot take payments — in their own language, with no mention of anyone
+      // being excluded and none of the seller's sanction detail.
+      if (res.status === 403 && isMerchantUnavailable(json)) {
+        setError(t('purchase.merchantUnavailable'));
+        setPhase('ready');
+        return false;
+      }
+      // And when the customer themselves is the subject, say it in their own
+      // language rather than printing the server's English body at them.
+      if (res.status === 403 && exclusionFromRefusal(json)) {
+        const said = (exclusionFromRefusal(json)!.ground || '').trim();
+        setError(said ? `${t('purchase.personExcluded')} ${said}` : t('purchase.personExcluded'));
+        setPhase('ready');
+        return false;
+      }
       if (!res.ok || !json.success) {
         setError(json?.error || t('lana.purchaseFailed'));
         setPhase('ready');
@@ -318,7 +336,12 @@ const PublicPay = () => {
     }
 
     // Same error mapping as LanaTab.
-    if (res.status === 409 && json?.error === 'SELF_PURCHASE') {
+    if (res.status === 403 && isMerchantUnavailable(json)) {
+      setError(t('purchase.merchantUnavailable'));
+    } else if (res.status === 403 && exclusionFromRefusal(json)) {
+      const said = (exclusionFromRefusal(json)!.ground || '').trim();
+      setError(said ? `${t('purchase.personExcluded')} ${said}` : t('purchase.personExcluded'));
+    } else if (res.status === 409 && json?.error === 'SELF_PURCHASE') {
       setError(t('purchase.cannotSellToYourself'));
     } else if (res.status === 422 && json?.error === 'INVALID_WALLET') {
       setError(json?.field === 'customer_wallet' ? t('purchase.invalidCustomerWallet') : t('purchase.invalidMerchantWallet'));

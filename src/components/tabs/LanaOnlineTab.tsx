@@ -14,6 +14,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { withCallerHex, withCallerField } from '@/lib/callerIdentity';
 import { Link } from 'react-router-dom';
 import {
   Loader2, Camera, CheckCircle, CheckCircle2, ImagePlus, Globe,
@@ -130,7 +131,7 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
     try {
       const formData = new FormData();
       formData.append('receipt', file, file.name);
-      const res = await fetch('/api/receipt/upload', { method: 'POST', body: formData });
+      const res = await fetch('/api/receipt/upload', { method: 'POST', body: withCallerField(formData) });
       const data = await res.json();
       if (data.success && data.url) {
         setReceiptUrl(data.url);
@@ -148,7 +149,7 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
       analyzeForm.append('receipt', file, file.name);
       analyzeForm.append('currency', currency);
       analyzeForm.append('lang', i18n.language || 'en');
-      const analyzeRes = await fetch('/api/receipt/analyze', { method: 'POST', body: analyzeForm });
+      const analyzeRes = await fetch('/api/receipt/analyze', { method: 'POST', body: withCallerField(analyzeForm) });
       const analysis = await analyzeRes.json();
       if (analysis.isReceipt) {
         setReceiptType('receipt');
@@ -176,7 +177,7 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
       try {
         const dedupRes = await fetch('/api/brain/purchase/check-dedup', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withCallerHex({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             unit_id: unit,
             receipt_hash: localHash || undefined,

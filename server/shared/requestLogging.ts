@@ -10,9 +10,17 @@
  * own copy so none shares a runtime dependency (blast-radius isolation). Behaviour
  * is byte-for-byte the inline block it replaced. Edit the canonical copy, then
  * re-vendor (the copies are kept in sync by hand / a sync script, not a registry).
+ *
+ * ONE DELIBERATE DIVERGENCE (2026-09-10): the read endpoint now goes through this
+ * app's KIND 87058 gate (`../lib/exclusionGate.js`) before its hardcoded-hex
+ * comparison. The comparison alone was a second admin gate that no exclusion ever
+ * reached, so an excluded root key kept reading the whole till's request history
+ * while every other admin route refused it. When re-vendoring, carry the gate
+ * across too — a copy without it re-opens the hole in whichever app receives it.
  */
 import type { Express } from 'express';
 import type Database from 'better-sqlite3';
+import { gate } from '../lib/exclusionGate.js';
 
 const ROOT_ADMIN_HEX = '56e8670aa65491f8595dc3a71c94aa7445dcdca755ca5f77c07218498a362061';
 const ASSET_RE = /\.(js|css|map|png|jpe?g|gif|svg|ico|webp|woff2?|ttf|eot)$/i;
@@ -50,8 +58,25 @@ export function installRequestLogging(app: Express, db: Database.Database): void
   // running server — the HTTP listener holds the loop open — but lets tests/scripts exit).
   const purgeTimer = setInterval(purge, 60 * 60 * 1000);
   (purgeTimer as any).unref?.();
-  app.get('/api/request-logs', (req, res) => {
-    const caller = String(req.headers['x-admin-hex'] || req.headers['x-admin-hex-id'] || req.query.admin_hex || '').toLowerCase();
+  // NOBODY IS EXEMPT — the hardcoded hex below is an allow-list, and an
+  // allow-list is exactly what a commission decision has to be able to cross.
+  // This endpoint hands out the 24h breadcrumb trail of every person who used
+  // the till (method, path, status, duration, client IP), and it used to do so
+  // to an EXCLUDED key while /api/admin/settings and /api/admin/check were both
+  // refusing that same key: the comparison below was a second, ungated admin
+  // gate that nothing else in the app knew about.
+  //
+  // All three carriers are asked, not just the one the comparison happens to
+  // read first — filling a field the handler ignores is how gates get walked
+  // past. `gate()` refuses ANY of them that carries a standing decision, and it
+  // honours the one kill switch (EXCLUSION_GATE=off) like every other route.
+  const excludedGate = gate(db, (req: any) => [
+    req.headers['x-admin-hex'],
+    req.headers['x-admin-hex-id'],
+    req.query?.admin_hex,
+  ]);
+  app.get('/api/request-logs', excludedGate, (req, res) => {
+    const caller = String(req.headers['x-admin-hex'] || req.headers['x-admin-hex-id'] || req.query.admin_hex || '').toLowerCase().trim();
     if (caller !== ROOT_ADMIN_HEX) return res.status(403).json({ error: 'forbidden' });
     const limit = Math.min(parseInt(String(req.query.limit || '200')) || 200, 2000);
     const q = String(req.query.q || '').trim();

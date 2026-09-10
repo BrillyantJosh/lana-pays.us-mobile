@@ -1,6 +1,9 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { convertWifToIds } from '@/lib/crypto';
 import i18n from '@/i18n';
+import { checkExclusion, rememberedExclusion, exclusionFromRefusal, type ExclusionVerdict } from '@/lib/exclusion';
+import { SESSION_KEY } from '@/lib/callerIdentity';
+import { ExcludedScreen } from '@/components/ExcludedScreen';
 
 declare global {
   interface Document {
@@ -25,15 +28,79 @@ interface AuthContextType {
   isLoading: boolean;
   login: (wif: string) => Promise<void>;
   logout: () => void;
+  /** The standing commission decision against this person, or null. */
+  excluded: ExclusionVerdict | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const SESSION_KEY = 'lana_pays_session';
+
+/**
+ * What we were last told about whoever is already signed in on this device.
+ *
+ * Runs before the first render, so it must touch nothing but localStorage and
+ * must never throw: private mode, a corrupt blob and a missing key all mean
+ * "nothing remembered", which is not the same as "not excluded" — it only means
+ * this device has not been told yet, and the live check right after will say.
+ */
+function rememberedForStoredSession(): ExclusionVerdict | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as UserSession;
+    if (!parsed?.nostrHexId || !(parsed.expiresAt > Date.now())) return null;
+    return rememberedExclusion(parsed.nostrHexId);
+  } catch {
+    return null;
+  }
+}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<UserSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // A commission gross-violation decision (KIND 87058) standing against the
+  // person whose key is in this session. When set, the whole app is replaced by
+  // ExcludedScreen below — no route, no cached tab, no partial page.
+  //
+  // Read SYNCHRONOUSLY, in the initialiser, from the session that is already in
+  // localStorage. It used to start null and be corrected by the mount effect,
+  // which runs AFTER React has painted — so a restored session saw the whole
+  // till, with its balances and its buttons, for a frame before the door shut.
+  // A person with nothing remembered still gets that frame; that is inherent,
+  // and it is acceptable only because the server refuses every action anyway.
+  const [excluded, setExcluded] = useState<ExclusionVerdict | null>(() => rememberedForStoredSession());
+
+  // The gate lives HERE, at the session, not at the login form. This app grows a
+  // session in four different ways — login(), the localStorage restore on mount,
+  // Chrome's discarded-tab recovery, and a cross-tab storage event — and a new
+  // decision reaches exactly the people who are already signed in, so a gate on
+  // login() alone would be invisible to everyone it is meant to reach.
+  const enforceExclusion = useCallback(async (candidate: UserSession | null): Promise<boolean> => {
+    const hex = candidate?.nostrHexId;
+    if (!hex) return true;
+    const verdict = await checkExclusion(hex);
+    if (!verdict) {
+      setExcluded(null);
+      return true;
+    }
+    setExcluded(verdict);
+    // End the session: the door is closed, not merely covered over.
+    setSession(null);
+    try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
+    return false;
+  }, []);
+
+  /**
+   * Adopt a restored session, closing the door first if we already know about a
+   * decision. The remembered verdict blocks instantly, with no network wait and
+   * no flash of the dashboard; the live check right after can still lift it.
+   */
+  const adoptSession = useCallback((candidate: UserSession) => {
+    const remembered = rememberedExclusion(candidate.nostrHexId);
+    if (remembered) setExcluded(remembered);
+    setSession(candidate);
+    void enforceExclusion(candidate);
+  }, [enforceExclusion]);
 
   const isSessionValid = (session: UserSession): boolean => {
     return session.expiresAt > Date.now();
@@ -60,20 +127,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const loadedSession = loadSessionFromStorage();
     if (loadedSession) {
-      setSession(loadedSession);
+      adoptSession(loadedSession);
     }
     setIsLoading(false);
-  }, [loadSessionFromStorage]);
+  }, [loadSessionFromStorage, adoptSession]);
 
   // Chrome Memory Saver recovery
   useEffect(() => {
     if (document.wasDiscarded) {
       const loadedSession = loadSessionFromStorage();
       if (loadedSession) {
-        setSession(loadedSession);
+        adoptSession(loadedSession);
       }
     }
-  }, [loadSessionFromStorage]);
+  }, [loadSessionFromStorage, adoptSession]);
 
   // Save on background
   useEffect(() => {
@@ -101,7 +168,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           try {
             const updatedSession: UserSession = JSON.parse(event.newValue);
             if (isSessionValid(updatedSession)) {
-              setSession(updatedSession);
+              // A second tab can re-seed a session we just cleared, so this path
+              // is gated exactly like the other three.
+              adoptSession(updatedSession);
             }
           } catch (e) {
             console.error('Failed to sync session:', e);
@@ -112,11 +181,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
+  }, [adoptSession]);
+
+  // Re-ask every 10 minutes, so a decision published while somebody is standing
+  // at the till reaches them within the round, not at their next sign-in.
+  const sessionRef = useRef<UserSession | null>(null);
+  sessionRef.current = session;
+  useEffect(() => {
+    const id = setInterval(() => { void enforceExclusion(sessionRef.current); }, 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [enforceExclusion]);
 
   const login = async (wif: string) => {
     try {
       const derivedIds = await convertWifToIds(wif);
+
+      // Refuse a fresh sign-in too, so an excluded person never sees the
+      // dashboard flash past on the way to the closed door. No error is thrown:
+      // the screen that replaces the app IS the message, and a toast on top of
+      // it would only say the same thing worse.
+      const standing = await checkExclusion(derivedIds.nostrHexId);
+      if (standing) {
+        setExcluded(standing);
+        setSession(null);
+        try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
+        return;
+      }
+
       let profileName: string | undefined;
       let profileDisplayName: string | undefined;
       let profilePicture: string | undefined;
@@ -148,6 +239,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // is perfectly fine.
       if (profileRes.status === 429) {
         throw new Error(i18n.t('login.tooManyRequests'));
+      }
+
+      // Belt and braces: if our own check above could not reach the server but
+      // the server itself knows about a decision, it answers 403 PERSON_EXCLUDED
+      // here. Believe it rather than blaming a missing profile.
+      if (profileRes.status === 403) {
+        const refusal = exclusionFromRefusal(await profileRes.clone().json().catch(() => null));
+        if (refusal) {
+          setExcluded(refusal);
+          setSession(null);
+          try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
+          return;
+        }
       }
 
       try {
@@ -222,8 +326,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ session, isLoading, login, logout }}>
-      {children}
+    <AuthContext.Provider value={{ session, isLoading, login, logout, excluded }}>
+      {excluded
+        ? <ExcludedScreen verdict={excluded} lang={i18n.language?.startsWith('sl') ? 'sl' : 'en'} />
+        : children}
     </AuthContext.Provider>
   );
 };

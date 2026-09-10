@@ -9,7 +9,28 @@ import { QRScanner } from "@/components/QRScanner";
 import { convertWifToIds } from "@/lib/crypto";
 import { signCustomerLanaTx } from "@/lib/transaction";
 import { useAuth } from "@/contexts/AuthContext";
+import { withCallerHex, withCallerField } from "@/lib/callerIdentity";
+import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
 import lanaIcon from "@/assets/lana-icon.png";
+
+/**
+ * The commission's refusal, said in the seller's own language.
+ *
+ * Every gated route answers 403 with code PERSON_EXCLUDED and the commission's
+ * own words in `ground`. Without this the till printed the raw English body, so
+ * the money was correctly refused and the person at the counter learned nothing.
+ */
+function excludedMessage(status: number, data: any, t: (k: string) => string): string | null {
+  if (status !== 403) return null;
+  // A refusal about the SHOP, not about anybody standing here. It carries no
+  // ground on purpose — a clean staff member must not be handed the details of
+  // their owner's sanction, and must certainly not read that they are excluded.
+  if (isMerchantUnavailable(data)) return t('purchase.merchantUnavailable');
+  const refusal = exclusionFromRefusal(data);
+  if (!refusal) return null;
+  const said = (refusal.ground || '').trim();
+  return said ? `${t('purchase.personExcluded')} ${said}` : t('purchase.personExcluded');
+}
 
 const CURRENCY_SYMBOL: Record<string, string> = {
   GBP: '£',
@@ -319,7 +340,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
 
         const previewRes = await fetch('/api/brain/purchase/preview', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withCallerHex({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             unit_id: basePurchaseBody.unit_id,
             customer_hex: basePurchaseBody.customer_hex,
@@ -330,7 +351,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         });
         const previewData = await previewRes.json();
         if (!previewRes.ok || !previewData.success) {
-          setPurchaseError(previewData.error || t('lana.purchaseFailed'));
+          setPurchaseError(excludedMessage(previewRes.status, previewData, t) || previewData.error || t('lana.purchaseFailed'));
           setStep("display");
           return;
         }
@@ -370,7 +391,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
 
         const purchaseRes = await fetch('/api/brain/purchase', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withCallerHex({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(purchaseBody),
         });
 
@@ -404,7 +425,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             // NOT hand over goods. Loud, clear, localized message.
             setPurchaseError(t('purchase.customerLanaFailed'));
           } else {
-            setPurchaseError(brainData.error || t('lana.purchaseFailed'));
+            setPurchaseError(excludedMessage(purchaseRes.status, brainData, t) || brainData.error || t('lana.purchaseFailed'));
           }
           setStep("display");
           return;
@@ -469,7 +490,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
     try {
       const formData = new FormData();
       formData.append('receipt', file, file.name);
-      const res = await fetch('/api/receipt/upload', { method: 'POST', body: formData });
+      const res = await fetch('/api/receipt/upload', { method: 'POST', body: withCallerField(formData) });
       const data = await res.json();
       if (data.success && data.url) {
         setReceiptUrl(data.url);
@@ -492,7 +513,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       analyzeForm.append('receipt', file, file.name);
       analyzeForm.append('currency', currency);
       analyzeForm.append('lang', i18n.language || 'en');
-      const analyzeRes = await fetch('/api/receipt/analyze', { method: 'POST', body: analyzeForm });
+      const analyzeRes = await fetch('/api/receipt/analyze', { method: 'POST', body: withCallerField(analyzeForm) });
       const analysis = await analyzeRes.json();
       if (analysis.isReceipt) {
         setReceiptType('receipt');
@@ -533,7 +554,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
       try {
         const dedupRes = await fetch('/api/brain/purchase/check-dedup', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withCallerHex({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             unit_id: unit,
             receipt_hash: localHash || undefined,

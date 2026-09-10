@@ -19,7 +19,15 @@ const LANA_RELAYS = relayOverride.length
 
 const pubkeyOverride = devKind38888Signer;
 
-const KIND_38888_PUBKEY = pubkeyOverride || '9eb71bf1e9c3189c78800e4c3831c1c1a93ab43b61118818c32e4490891a35b3';
+/**
+ * The ONE key whose KIND 38888 this app treats as the system parameters.
+ *
+ * Exported because the KIND 87058 gate hangs off this event: it reads the
+ * LanaSelfResponsibility signer out of the cached copy, so it has to be able to
+ * check that the copy really came from this key AND that the signature holds.
+ * `pubkey` is only a JSON field — see server/lib/exclusionGate.ts.
+ */
+export const KIND_38888_PUBKEY = pubkeyOverride || '9eb71bf1e9c3189c78800e4c3831c1c1a93ab43b61118818c32e4490891a35b3';
 
 if (relayOverride.length || pubkeyOverride) {
   console.warn(
@@ -717,6 +725,84 @@ export async function fetchKind30902(relays?: string[]): Promise<Kind30902Policy
 
 export function getLanaRelays(): string[] {
   return LANA_RELAYS;
+}
+
+/**
+ * Ask every relay one arbitrary filter and return the merged, de-duplicated events.
+ *
+ * Resolves whatever came back, including nothing at all — exactly like the other
+ * fetchers in this file.
+ *
+ * It used to REJECT when no relay answered, to protect the KIND 87058 exclusion
+ * set from being emptied by an outage. That guard is gone, and deliberately: it
+ * never actually worked, because a PARTIAL answer — three relays quiet, one
+ * serving a stale page — is indistinguishable from a complete one, and it counted
+ * as "answered". The protection lives in the right place now: personExclusion.ts
+ * MERGES what the relays served into the standing set and never replaces it, so
+ * an absence lifts nothing and only a later event that says `status != active`
+ * can. Silence is safe here because nothing downstream reads silence as consent.
+ */
+export async function fetchEventsFromRelays(
+  filter: Record<string, unknown>,
+  relays?: string[],
+  timeout = 15000,
+): Promise<NostrEvent[]> {
+  const useRelays = relays && relays.length > 0 ? relays : LANA_RELAYS;
+  if (useRelays.length === 0) throw new Error('no relays to query');
+
+  const askOne = (relayUrl: string): Promise<NostrEvent[]> =>
+    new Promise((resolve) => {
+      const events: NostrEvent[] = [];
+      let settled = false;
+
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        try { ws.close(); } catch { /* socket may not exist yet */ }
+        resolve(events);
+      };
+
+      const timeoutId = setTimeout(finish, timeout);
+
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(relayUrl);
+      } catch {
+        clearTimeout(timeoutId);
+        settled = true;
+        resolve([]);
+        return;
+      }
+
+      const subId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+      ws.on('open', () => { ws.send(JSON.stringify(['REQ', subId, filter])); });
+
+      ws.on('message', (data: Buffer) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg[0] === 'EVENT' && msg[1] === subId) {
+            events.push(msg[2] as NostrEvent);
+          } else if (msg[0] === 'EOSE' && msg[1] === subId) {
+            finish();
+          } else if (msg[0] === 'CLOSED' && msg[1] === subId) {
+            finish();
+          }
+        } catch { /* ignore one unreadable frame */ }
+      });
+
+      ws.on('error', () => finish());
+      ws.on('close', () => finish());
+    });
+
+  const results = await Promise.all(useRelays.map(askOne));
+
+  const byId = new Map<string, NostrEvent>();
+  for (const evs of results) {
+    for (const e of evs) if (e?.id) byId.set(e.id, e);
+  }
+  return [...byId.values()];
 }
 
 /**
