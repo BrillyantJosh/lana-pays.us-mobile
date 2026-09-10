@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from 'react-i18next';
-import { Search, Loader2, AlertCircle, ShieldCheck, ExternalLink, Snowflake, Banknote, Camera } from "lucide-react";
+import { Search, Loader2, AlertCircle, ShieldCheck, Snowflake, Banknote, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { QRScanner } from "@/components/QRScanner";
 import { convertWifToIds } from "@/lib/crypto";
@@ -126,15 +126,6 @@ const WalletsTab = ({ onPayWithCash, onPayWithLana }: WalletsTabProps) => {
       <p className="text-xs text-muted-foreground">
         {t('wallets.frozenDescription')}
       </p>
-      <a
-        href="https://unfreeze.lanapays.us"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center justify-center gap-2 w-full h-11 rounded-xl bg-blue-100 text-blue-700 text-sm font-semibold hover:bg-blue-200 transition-colors dark:bg-blue-900/40 dark:text-blue-400 dark:hover:bg-blue-900/60"
-      >
-        <ExternalLink className="w-4 h-4" />
-        {t('lana.goToUnfreeze')}
-      </a>
     </div>
   );
 
