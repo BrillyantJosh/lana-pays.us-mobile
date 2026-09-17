@@ -22,7 +22,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { initializeSchema } from './db/schema.js';
-import { mirrorMerchantUsageFromBrain } from './heartbeat.js';
+import { mirrorMerchantUsageFromBrain, quotaSnapshotForThisMonth } from './heartbeat.js';
 
 const KEY = 'peer-key-for-the-pos';
 const UNIT = 'd652671a2c374bac9cc2cdf162115f22';
@@ -111,5 +111,100 @@ describe('mirrorMerchantUsageFromBrain — the credential', () => {
     process.env.BRAIN_PEER_KEY = 'wrong';
     globalThis.fetch = (async () => ({ ok: false, status: 401, json: async () => ({}) })) as any;
     expect(await mirrorMerchantUsageFromBrain(db, '2026-09')).toBe(0);
+  });
+});
+
+// ─── A snapshot is not this month's usage ───────────────────────────────────
+//
+// 16 Sept 2026: the till showed a shop "Approaching limit" with August's
+// 4 080.66 of 5 000 while its September cash stood at 1 609.44, and clamped and
+// refused cash on those numbers. KIND 30903's quota_*_used is a snapshot,
+// rewritten only when a status event is published.
+
+const OTHER = 'ffe2b18bf541aefbb7db6858114ea68b';
+
+function seedSnapshot(unitId: string, over: Record<string, any> = {}) {
+  const row = {
+    unit_id: unitId, suspension_status: 'quota_warning_80', quota_volume_used: 4080.66, quota_volume_limit: 5000,
+    quota_tx_used: 89, quota_tx_limit: 200, quota_currency: 'EUR', quota_period: '2026-08', ...over,
+  };
+  db.prepare(`
+    INSERT INTO business_units (unit_id, pubkey, event_id, created_at, name, owner_hex, currency,
+      suspension_status, quota_volume_used, quota_volume_limit, quota_tx_used, quota_tx_limit, quota_currency, quota_period)
+    VALUES (@unit_id, 'pk', 'ev', 1, 'A merchant', 'owner', 'EUR',
+      @suspension_status, @quota_volume_used, @quota_volume_limit, @quota_tx_used, @quota_tx_limit, @quota_currency, @quota_period)
+  `).run(row);
+}
+const unitRow = (unitId: string) => db.prepare('SELECT * FROM business_units WHERE unit_id = ?').get(unitId) as any;
+
+describe('mirrorMerchantUsageFromBrain — the answer covers the whole month', () => {
+  it("a unit brain reports nothing for has sold nothing for cash: the old snapshot does not survive", async () => {
+    seedSnapshot(UNIT, { suspension_status: 'active', quota_period: '2026-09', quota_volume_used: 769, quota_tx_used: 3 });
+    seedSnapshot(OTHER);
+    process.env.BRAIN_PEER_KEY = KEY;
+    globalThis.fetch = (async () => ({
+      ok: true, status: 200,
+      json: async () => ({ period: '2026-09', usage: [{ unit_id: OTHER, tx_count: 57, volume_native: 1682, tx_count_cash: 53, volume_native_cash: 1609.44 }] }),
+    })) as any;
+
+    expect(await mirrorMerchantUsageFromBrain(db, '2026-09')).toBe(1);
+    expect(unitRow(UNIT)).toMatchObject({ quota_volume_used: 0, quota_tx_used: 0, quota_period: '2026-09', quota_volume_limit: 5000 });
+    expect(unitRow(OTHER)).toMatchObject({ quota_volume_used: 1609.44, quota_tx_used: 53, quota_period: '2026-09' });
+  });
+
+  it('a malformed answer changes nothing', async () => {
+    seedSnapshot(UNIT, { quota_period: '2026-09', quota_volume_used: 300, quota_tx_used: 3 });
+    process.env.BRAIN_PEER_KEY = KEY;
+    globalThis.fetch = (async () => ({ ok: true, status: 200, json: async () => ({ error: 'something' }) })) as any;
+
+    expect(await mirrorMerchantUsageFromBrain(db, '2026-09')).toBe(0);
+    expect(unitRow(UNIT)).toMatchObject({ quota_volume_used: 300, quota_tx_used: 3, quota_period: '2026-09' });
+  });
+
+  it('a unit carrying no quota snapshot at all is left as it is', async () => {
+    seedSnapshot(UNIT, { suspension_status: 'active', quota_period: '', quota_volume_used: 0, quota_tx_used: 0, quota_volume_limit: 0, quota_tx_limit: 0 });
+    process.env.BRAIN_PEER_KEY = KEY;
+    await mirrorMerchantUsageFromBrain(db, '2026-09');
+    expect(unitRow(UNIT).quota_period).toBe('');
+  });
+});
+
+describe('quotaSnapshotForThisMonth', () => {
+  const SEPT = '2026-09';
+  const august = { quota_period: '2026-08', quota_volume_used: 4080.66, quota_tx_used: 89 };
+
+  it("last month's warning → nothing used this month, this month's period, no badge", () => {
+    expect(quotaSnapshotForThisMonth(august, 'quota_warning_80', SEPT))
+      .toEqual({ status: 'active', volumeUsed: 0, txUsed: 0, period: SEPT });
+    expect(quotaSnapshotForThisMonth(august, 'active', SEPT))
+      .toEqual({ status: 'active', volumeUsed: 0, txUsed: 0, period: SEPT });
+  });
+
+  it("this month's snapshot is kept exactly as published", () => {
+    const sept = { quota_period: SEPT, quota_volume_used: 414, quota_tx_used: 8 };
+    expect(quotaSnapshotForThisMonth(sept, 'quota_warning_80', SEPT))
+      .toEqual({ status: 'quota_warning_80', volumeUsed: 414, txUsed: 8, period: SEPT });
+  });
+
+  it("last month's quota_blocked is kept — brain refuses cash on it until the unit is republished", () => {
+    expect(quotaSnapshotForThisMonth(august, 'quota_blocked', SEPT))
+      .toEqual({ status: 'quota_blocked', volumeUsed: 4080.66, txUsed: 89, period: '2026-08' });
+  });
+
+  it('suspended, rejected and pending are kept, whatever their month', () => {
+    for (const status of ['suspended', 'rejected', 'pending']) {
+      expect(quotaSnapshotForThisMonth(august, status, SEPT).status).toBe(status);
+      expect(quotaSnapshotForThisMonth(august, status, SEPT).period).toBe('2026-08');
+    }
+  });
+
+  it('an event without quota tags stays without them', () => {
+    expect(quotaSnapshotForThisMonth({}, 'active', SEPT))
+      .toEqual({ status: 'active', volumeUsed: 0, txUsed: 0, period: '' });
+  });
+
+  it("defaults to the current UTC month, as brain counts purchases", () => {
+    const now = new Date().toISOString().slice(0, 7);
+    expect(quotaSnapshotForThisMonth({ ...august, quota_period: '2000-01' }, 'active').period).toBe(now);
   });
 });

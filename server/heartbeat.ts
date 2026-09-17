@@ -5,7 +5,7 @@
 
 import Database from 'better-sqlite3';
 import { bech32 } from 'bech32';
-import { fetchKind38888, fetchKind30901, fetchKind30902, fetchKind30903, fetchKind0Profile, type Kind38888Data, type Kind30901Event, type Kind30902Policy } from './lib/nostr.js';
+import { fetchKind38888, fetchKind30901, fetchKind30902, fetchKind30903, fetchKind0Profile, type Kind38888Data, type Kind30901Event, type Kind30902Policy, type Kind30903Event } from './lib/nostr.js';
 import { readUnitOrigin } from './lib/unitOrigin.js';
 import { syncShopOrders } from './lib/orderSync.js';
 import { refreshPersonExclusions } from './lib/exclusionGate.js';
@@ -89,7 +89,13 @@ export async function mirrorMerchantUsageFromBrain(
       return 0;
     }
     const data = await usageRes.json() as any;
-    const rows = (data.usage || []) as Array<{
+    if (!Array.isArray(data?.usage)) {
+      // Not an answer about the period at all — and the step below treats an
+      // answer as covering every unit, so a malformed body must change nothing.
+      console.warn('merchant-usage response carried no usage list — counters left as they were');
+      return 0;
+    }
+    const rows = data.usage as Array<{
       unit_id: string; tx_count: number; volume_native: number;
       tx_count_cash?: number; volume_native_cash?: number;
     }>;
@@ -100,10 +106,21 @@ export async function mirrorMerchantUsageFromBrain(
         quota_period = ?
       WHERE unit_id = ?
     `);
+    // Brain's answer covers the WHOLE period: a unit with no row in it has sold
+    // nothing for cash this period, which is 0 — the rule brain's own purchase
+    // gate applies — and not "keep whatever KIND 30903 snapshot was there". A
+    // snapshot is only rewritten when a status event is published, so it can be
+    // a past month's, or the cash+LANA totals the shop publishes on approval.
+    const clearUnreported = db.prepare(`
+      UPDATE business_units SET quota_volume_used = 0, quota_tx_used = 0, quota_period = ?
+      WHERE quota_period <> ''
+    `);
     // The monthly limit is CASH-only (LANA is uncapped), so the POS gates on
     // CASH usage — mirror the *_cash counters into quota_*_used (fall back to
-    // 0 for an older brain that doesn't yet return the cash columns).
+    // 0 for an older brain that doesn't yet return the cash columns). One
+    // transaction, so nothing ever reads the cleared state in between.
     const txn = db.transaction(() => {
+      clearUnreported.run(period);
       for (const r of rows) upd.run(r.volume_native_cash ?? 0, r.tx_count_cash ?? 0, period, r.unit_id);
     });
     txn();
@@ -113,6 +130,34 @@ export async function mirrorMerchantUsageFromBrain(
     console.warn('merchant_quota_usage sync failed (non-fatal):', e.message);
     return 0;
   }
+}
+
+/**
+ * What the till holds for one unit's KIND 30903 quota snapshot.
+ *
+ * quota_volume_used / quota_tx_used on a KIND 30903 are a SNAPSHOT, rewritten
+ * only when a status event is published. One from a PAST month says nothing
+ * about this month — yet the POS showed it as "Volume this month", clamped cash
+ * invoices to the limit minus it and refused cash on it (16 Sept 2026: August's
+ * 4 080.66 of 5 000 and an "Approaching limit" badge on a shop at 1 609.44 in
+ * September). Brain republishes every trading unit for the new month, but until
+ * that lands, and whenever it cannot, a past month's snapshot counts as nothing
+ * used this month and its "approaching" badge as that month's. The usage mirror
+ * overwrites the numbers with brain's live cash counters whenever it runs.
+ *
+ * quota_blocked is kept exactly as published: brain refuses cash on it until
+ * its rollover republishes the unit, and the till must say the same thing.
+ */
+export function quotaSnapshotForThisMonth(
+  s: Pick<Kind30903Event, 'quota_period' | 'quota_volume_used' | 'quota_tx_used'>,
+  status: string,
+  thisMonth: string = new Date().toISOString().slice(0, 7),
+): { status: string; volumeUsed: number; txUsed: number; period: string } {
+  const period = s.quota_period ?? '';
+  const pastMonth = period !== '' && period !== thisMonth
+    && (status === 'active' || status === 'quota_warning_80');
+  if (pastMonth) return { status: 'active', volumeUsed: 0, txUsed: 0, period: thisMonth };
+  return { status, volumeUsed: s.quota_volume_used ?? 0, txUsed: s.quota_tx_used ?? 0, period };
 }
 
 export async function runHeartbeat(db: Database.Database): Promise<void> {
@@ -298,7 +343,9 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
       }
 
       // Persist gateway status (overloaded onto suspension_status column) + quota fields.
-      const knownStatus = NEW_STATUSES.has(effectiveStatus) ? effectiveStatus : 'active';
+      // A past month's quota snapshot is not this month's (quotaSnapshotForThisMonth).
+      const snapshot = quotaSnapshotForThisMonth(s, NEW_STATUSES.has(effectiveStatus) ? effectiveStatus : 'active');
+      const knownStatus = snapshot.status;
 
       db.prepare(`
         UPDATE business_units SET
@@ -318,12 +365,12 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
         s.reason,
         s.active_until || null,
         s.content,
-        s.quota_volume_used ?? 0,
+        snapshot.volumeUsed,
         s.quota_volume_limit ?? 0,
-        s.quota_tx_used ?? 0,
+        snapshot.txUsed,
         s.quota_tx_limit ?? 0,
         s.quota_currency ?? '',
-        s.quota_period ?? '',
+        snapshot.period,
         s.unit_id,
       );
 
