@@ -12,10 +12,19 @@
  *   - it WRITES NOTHING — the payment_requests table is byte-identical after a
  *     GET, even though an overdue pending request is shown as expired;
  *   - the row carries none of the capability, key or brain fields;
- *   - paid without a brain transaction is "unverified" and its investor
- *     status "unknown"; a brain that answers HTML (not deployed yet) makes every
- *     investor status "unknown", never "paid".
+ *   - paid without a brain transaction is "paid_unconfirmed"; a payment in
+ *     flight is "processing"; a request the watchdog re-opened is "unverified"
+ *     even after it expires or is cancelled — never "waiting"; the investor
+ *     status of all three is "unknown" or not applicable, never asked;
+ *   - a brain that answers HTML (not deployed yet) makes every investor status
+ *     "unknown", never "paid", and says so once: investor_available=false;
+ *   - staff see the customer side of their unit's requests but no investor
+ *     status (investor: null), and the brain is not asked about their rows;
+ *   - no page-wide "checked at": only the per-row time of a real brain read.
  */
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import path from 'path';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import express from 'express';
@@ -23,7 +32,7 @@ import crypto from 'crypto';
 import type { AddressInfo } from 'net';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { initializeSchema } from './db/schema.js';
-import { registerPaymentRequestRoutes } from './paymentRequests.js';
+import { registerPaymentRequestRoutes, WATCHDOG_RESET_ERROR } from './paymentRequests.js';
 import { brainPayoutReader } from './lib/brainPayouts.js';
 import { forgetSpentTokens } from './lib/nip98.js';
 import { ensureExclusionTables, mergeReports } from './lib/personExclusion.js';
@@ -59,7 +68,7 @@ function insertUnit(unitId: string, name: string, authorized: string[], opts: { 
 
 function insertRequest(r: {
   id: string; unit: string; status: string; created: string; invoice: string;
-  expires?: string | null; brainTx?: string | null; paidAt?: string | null; txHash?: string | null;
+  expires?: string | null; brainTx?: string | null; paidAt?: string | null; txHash?: string | null; lastError?: string | null;
 }) {
   db.prepare(`
     INSERT INTO payment_requests (
@@ -72,7 +81,8 @@ function insertRequest(r: {
     r.status, r.created, r.expires ?? null, r.paidAt ?? null, r.brainTx ?? null, r.txHash ?? null,
     r.status === 'paid' ? 976543210 : null,
     r.status === 'paid' ? 'f'.repeat(64) : null, r.status === 'paid' ? 'LcustomerWallet' : null,
-    r.status === 'paid' ? 'A Customer' : null, '{"recipients":[]}', r.status === 'paid' && !r.brainTx ? 'assumed paid via brain dedup' : null,
+    r.status === 'paid' ? 'A Customer' : null, '{"recipients":[]}',
+    r.lastError !== undefined ? r.lastError : (r.status === 'paid' && !r.brainTx ? 'assumed paid via brain dedup' : null),
   );
 }
 
@@ -202,7 +212,8 @@ describe('which requests a signer sees', () => {
     expect(r.json.units).toEqual([{ unit_id: UNIT_A, name: 'Alpha' }, { unit_id: UNIT_B, name: 'Beta' }]);
     expect(r.json.total).toBe(7);
     expect(r.json.requests.map((x: any) => x.id)).toEqual(['a1', 'b1', 'a2', 'b2', 'a3', 'b3', 'a4']);
-    expect(r.json.checked_at).toMatch(/^\d{4}-\d\d-\d\dT/);
+    // No page-wide stamp: it claimed a check even when none was made.
+    expect(r.json).not.toHaveProperty('checked_at');
   });
 
   it('staff see the unit they are listed on, and only that one', async () => {
@@ -244,14 +255,49 @@ describe('what a row says', () => {
     return Object.fromEntries(r.json.requests.map((x: any) => [x.id, x]));
   };
 
-  it('the customer side: waiting, expired (shown, not written), paid, unverified, cancelled', async () => {
+  it('the customer side: waiting, expired (shown, not written), paid, paid_unconfirmed, cancelled, processing', async () => {
     const rows = await byId();
     expect(rows.a1.customer_status).toBe('waiting');
     expect(rows.a2.customer_status).toBe('expired');
     expect(rows.a3.customer_status).toBe('paid');
-    expect(rows.a4.customer_status).toBe('unverified');
+    expect(rows.a4.customer_status).toBe('paid_unconfirmed'); // the tab and the toast say "paid" too
+    expect(rows.a4.paid_at).toBe('2026-09-15 11:00:00');
     expect(rows.b1.customer_status).toBe('cancelled');
-    expect(rows.b2.customer_status).toBe('waiting'); // 'paying' is internal
+    // 'paying': the customer submitted and the brain may already have charged —
+    // never "waiting for payment".
+    expect(rows.b2.customer_status).toBe('processing');
+    expect(rows.b2.investor.invoice.state).toBe('not_applicable');
+  });
+
+  it('a request the watchdog re-opened is "unverified" — pending, expired or cancelled — and never "waiting"', async () => {
+    const extra = [
+      { id: 'w1', status: 'pending', expires: '2099-01-01 00:00:00' },
+      { id: 'w2', status: 'pending', expires: '2026-09-01 00:00:00' }, // overdue, not yet swept
+      { id: 'w3', status: 'expired', expires: '2026-09-01 00:00:00' },
+      { id: 'w4', status: 'cancelled', expires: '2099-01-01 00:00:00' },
+    ];
+    for (const [i, w] of extra.entries()) {
+      insertRequest({ id: w.id, unit: UNIT_B, status: w.status, created: `2026-09-10 0${i}:00:00`, invoice: `INV-${w.id}`, expires: w.expires, lastError: WATCHDOG_RESET_ERROR });
+    }
+    // A brain refusal on a later attempt is a known failure, not a lost one.
+    insertRequest({ id: 'w5', unit: UNIT_B, status: 'pending', created: '2026-09-10 05:00:00', invoice: 'INV-w5', expires: '2099-01-01 00:00:00', lastError: 'brain 409: SELF_PURCHASE' });
+    try {
+      const r = await get(`?unit_id=${UNIT_B}`, owner);
+      const rows = Object.fromEntries(r.json.requests.map((x: any) => [x.id, x]));
+      for (const id of ['w1', 'w2', 'w3', 'w4']) {
+        expect(rows[id].customer_status, id).toBe('unverified');
+        expect(rows[id].investor.invoice.state, id).toBe('unknown');
+      }
+      expect(rows.w5.customer_status).toBe('waiting');
+    } finally {
+      db.prepare("DELETE FROM payment_requests WHERE id IN ('w1','w2','w3','w4','w5')").run();
+    }
+  });
+
+  it('the watchdog marker this page reads is the one the heartbeat writes', () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const heartbeat = readFileSync(path.join(here, 'heartbeat.ts'), 'utf8');
+    expect(heartbeat).toContain(`last_error = '${WATCHDOG_RESET_ERROR}'`);
   });
 
   it('the investor side: not applicable until the customer paid; the brain\'s answer after', async () => {
@@ -265,20 +311,44 @@ describe('what a row says', () => {
     expect(rows.a3.customer_name).toBe('A Customer');
   });
 
-  it('paid without a brain transaction → unverified, and the investor is unknown — never asked', async () => {
+  it('paid without a brain transaction → paid_unconfirmed, and the investor is unknown — never asked', async () => {
     const rows = await byId();
     expect(rows.a4.investor.invoice.state).toBe('unknown');
     expect(brainCalls).toHaveLength(1);
     expect(brainCalls[0].split(',').sort()).toEqual([TX_A3, TX_B3].sort());
   });
 
-  it('a brain that answers its HTML shell (route not deployed yet) → every investor status unknown', async () => {
+  it('a brain that answers its HTML shell (route not deployed yet) → every investor status unknown, said once', async () => {
     brainMode = 'html';
-    const rows = await byId();
+    const r = await get('', owner);
+    const rows = Object.fromEntries(r.json.requests.map((x: any) => [x.id, x]));
     expect(rows.a3.investor.invoice.state).toBe('unknown');
     expect(rows.b3.investor.invoice.state).toBe('unknown');
     expect(rows.b3.investor.reward).toBeNull();
+    expect(rows.a3.investor.checked_at).toBeNull();
     expect(rows.a3.customer_status).toBe('paid'); // the customer side does not depend on the brain
+    expect(r.json.investor_available).toBe(false);
+  });
+
+  it('a brain that answers → investor_available, and each status carries the time it was read', async () => {
+    const r = await get('', owner);
+    expect(r.json.investor_available).toBe(true);
+    const a3 = r.json.requests.find((x: any) => x.id === 'a3');
+    expect(a3.investor.checked_at).toMatch(/^\d{4}-\d\d-\d\dT/);
+  });
+
+  it('staff see the customer side but not the owner\'s investor payouts or reward — and the brain is not asked', async () => {
+    const r = await get('', staff);
+    expect(r.status).toBe(200);
+    expect(r.json.requests.map((x: any) => x.id)).toEqual(['a1', 'a2', 'a3', 'a4']);
+    for (const row of r.json.requests) expect(row.investor, row.id).toBeNull();
+    expect(r.json.requests.find((x: any) => x.id === 'a3').customer_status).toBe('paid');
+    expect(r.json.investor_owner_only).toBe(true);
+    expect(brainCalls).toHaveLength(0);
+
+    const o = await get('', owner);
+    expect(o.json.investor_owner_only).toBe(false);
+    expect(o.json.requests.every((x: any) => x.investor !== null)).toBe(true);
   });
 
   it('carries none of the capability, key or brain fields', async () => {

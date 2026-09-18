@@ -7,6 +7,13 @@
  *   - "the investor MARKED it paid" is all anybody knows — the investor ticks a
  *     box on direct.lana.fund and no bank statement is checked. No investor
  *     string and not the explanatory note may say the bank confirmed anything.
+ *     The NEGATIVE side is worded the same way: "has not marked it paid yet",
+ *     never "has not paid" — an investor who wired the money but has not
+ *     ticked the box yet has paid.
+ *   - the page lists every request on the signer's units, whoever created it,
+ *     so no string may say "you created".
+ *   - the dedup self-heal case says "paid" (as the Lana-online tab and the
+ *     toast do) AND that the system has not confirmed it.
  *   - the menu entry must differ from every other entry in the drawer, which
  *     renders them with key={label}; two equal labels would collide.
  */
@@ -30,8 +37,10 @@ const EN = en as Record<string, string>;
 const KEYS = [
   'menu.onlinePayments',
   ...['title', 'subtitle', 'allUnits', 'customer', 'investor',
-    'customerWaiting', 'customerPaid', 'customerCancelled', 'customerExpired', 'customerUnverified',
+    'customerWaiting', 'customerProcessing', 'customerPaid', 'customerPaidUnconfirmed', 'customerCancelled',
+    'customerExpired', 'customerUnverified',
     'investorNotApplicable', 'investorWaiting', 'investorMarkedPaid', 'investorPartly', 'investorUnknown',
+    'investorUnavailable', 'investorOwnerOnly',
     'invoiceLeg', 'rewardLeg', 'markedPaidNote', 'checkedAt', 'refresh', 'empty',
     'sigClock', 'sigRelogin', 'loadError'].map((k) => `onlinePayments.${k}`),
 ];
@@ -80,6 +89,27 @@ describe('online payments i18n keys', () => {
       expect(EN[k].toLowerCase(), `en:${k}`).not.toMatch(/bank (has )?confirmed/);
       expect((sl as Record<string, string>)[k].toLowerCase(), `sl:${k}`).not.toContain('banka je potrdila');
     }
+  });
+
+  it('"not paid yet" on the investor side says NOT MARKED, in English and in Slovenian', () => {
+    expect(EN['onlinePayments.investorWaiting']).toContain('marked');
+    expect(EN['onlinePayments.investorWaiting']).not.toMatch(/has not paid/);
+    expect((sl as Record<string, string>)['onlinePayments.investorWaiting']).toContain('označil');
+    expect((sl as Record<string, string>)['onlinePayments.investorWaiting']).not.toMatch(/ni plačal/);
+  });
+
+  it('no string says "you created" — the list is every request on the signer\'s units', () => {
+    for (const k of ['onlinePayments.subtitle', 'onlinePayments.empty']) {
+      expect(EN[k].toLowerCase(), `en:${k}`).not.toContain('created');
+      expect((sl as Record<string, string>)[k].toLowerCase(), `sl:${k}`).not.toContain('ustvaril');
+    }
+  });
+
+  it('the dedup self-heal says paid, and that the system has not confirmed it', () => {
+    expect(EN['onlinePayments.customerPaidUnconfirmed']).toMatch(/^Paid/);
+    expect(EN['onlinePayments.customerPaidUnconfirmed']).toContain('not confirmed');
+    expect((sl as Record<string, string>)['onlinePayments.customerPaidUnconfirmed']).toMatch(/^Plačano/);
+    expect((sl as Record<string, string>)['onlinePayments.customerPaidUnconfirmed']).toContain('brez potrdila');
   });
 
   it('"marked paid" says MARKED, in English and in Slovenian', () => {

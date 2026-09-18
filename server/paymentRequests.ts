@@ -92,25 +92,44 @@ const merchantRequestView = (r: any) => ({
   seen_by_merchant: r.seen_by_merchant,
 });
 
+/** What the heartbeat watchdog writes when it re-opens a stuck 'paying' row
+ *  (heartbeat.ts). Cancel and expiry leave last_error as it was. */
+export const WATCHDOG_RESET_ERROR = 'paying watchdog reset';
+
 /**
  * The customer's side of a request, computed in SQL WITHOUT writing: the
  * overview is read-only, so an overdue pending request is SHOWN as expired and
- * left for the heartbeat sweep to flip. 'paid' with no brain transaction is the
- * dedup self-heal path, where no money may have moved — it is 'unverified'.
+ * left for the heartbeat sweep to flip.
+ *
+ *   processing       — 'paying': the customer submitted, the brain has not
+ *                      answered yet. Not "waiting": the brain may already have
+ *                      charged.
+ *   paid             — paid, with the brain transaction it made.
+ *   paid_unconfirmed — the dedup self-heal: the brain refused a second submit
+ *                      as a duplicate, so this app marked it paid without a
+ *                      transaction id. The Lana-online tab and the toast say
+ *                      "paid"; this page says "paid, not confirmed by the
+ *                      system", so the two never contradict each other.
+ *   unverified       — a payment attempt died mid-flight and the watchdog
+ *                      re-opened the request. The brain may have charged, so
+ *                      nothing here may say the customer did not pay — also
+ *                      after the request later expires or is cancelled.
  */
 const CUSTOMER_STATUS_SQL = `
   CASE
-    WHEN status = 'pending' AND expires_at IS NOT NULL AND expires_at < datetime('now') THEN 'expired'
-    WHEN status IN ('pending', 'paying') THEN 'waiting'
+    WHEN status = 'paying' THEN 'processing'
     WHEN status = 'paid' AND brain_transaction_id IS NOT NULL AND brain_transaction_id <> '' THEN 'paid'
-    WHEN status = 'paid' THEN 'unverified'
+    WHEN status = 'paid' THEN 'paid_unconfirmed'
+    WHEN last_error = '${WATCHDOG_RESET_ERROR}' THEN 'unverified'
+    WHEN status = 'pending' AND expires_at IS NOT NULL AND expires_at < datetime('now') THEN 'expired'
+    WHEN status = 'pending' THEN 'waiting'
     ELSE status
   END`;
 
 /** Narrower than merchantRequestView: no token, receipt, customer keys/wallet,
  *  brain id, errors or LANA snapshot (paid_lana_lanoshis is only the investors'
  *  share, so showing it as the customer's payment would be wrong). */
-const overviewView = (r: any, investor: InvestorStatus) => ({
+const overviewView = (r: any, investor: InvestorStatus | null) => ({
   id: r.id,
   unit_id: r.unit_id,
   unit_name: r.unit_name,
@@ -119,9 +138,10 @@ const overviewView = (r: any, investor: InvestorStatus) => ({
   amount_fiat: r.amount_fiat,
   currency: r.currency,
   customer_status: r.customer_status,
-  paid_at: r.customer_status === 'paid' || r.customer_status === 'unverified' ? r.paid_at : null,
+  paid_at: r.customer_status === 'paid' || r.customer_status === 'paid_unconfirmed' ? r.paid_at : null,
   tx_hash: r.customer_status === 'paid' ? r.tx_hash : null,
   customer_name: r.customer_name,
+  /** null = the signer is staff on this unit, not its owner (see the route). */
   investor,
 });
 
@@ -293,13 +313,19 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
     res.json({ success: true, updated: changed.changes });
   });
 
-  /** Online payments overview (menu → "Online payments"): every request the
-   *  merchant can see, whether the customer paid, and whether the investor
-   *  MARKED the payout paid on direct.lana.fund (see lib/brainPayouts.ts).
+  /** Online payments overview (menu → "Online payments"): every request on the
+   *  signer's units, whether the customer paid, and — for the units the signer
+   *  OWNS — whether the investor MARKED the payout paid on direct.lana.fund
+   *  (see lib/brainPayouts.ts).
    *
    *  SIGNED (NIP-98 kind 27235) — no hex is read from the query or body at all;
    *  the signature is the only way to say who is asking. Read-only: it writes
-   *  nothing, not even the lazy expiry or seen_by_merchant. */
+   *  nothing, not even the lazy expiry or seen_by_merchant.
+   *
+   *  The investor's payout to the owner's bank, and the owner's reward, are the
+   *  OWNER's business. Staff listed on a unit see its requests and whether the
+   *  customer paid (as in the Lana-online tab), but `investor: null` — and the
+   *  brain is not asked about their rows at all. */
   app.get('/api/payment-requests/overview', requireSignedMerchant, gate(db, req => req.signedHex), async (req, res) => {
     try {
       const hex = String((req as any).signedHex || '');
@@ -309,16 +335,16 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
 
       const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '20'), 10) || 20));
       const offset = Math.max(0, parseInt(String(req.query.offset || '0'), 10) || 0);
-      const checkedAt = new Date().toISOString();
 
       if (allowed.length === 0) {
-        return res.json({ success: true, checked_at: checkedAt, total: 0, limit, offset, units: [], requests: [] });
+        return res.json({ success: true, total: 0, limit, offset, units: [], requests: [], investor_available: true, investor_owner_only: false });
       }
 
       const units = db.prepare(`
-        SELECT unit_id, name FROM business_units WHERE unit_id IN (${allowed.map(() => '?').join(',')})
+        SELECT unit_id, name, owner_hex FROM business_units WHERE unit_id IN (${allowed.map(() => '?').join(',')})
         ORDER BY name COLLATE NOCASE, unit_id
-      `).all(...allowed) as Array<{ unit_id: string; name: string | null }>;
+      `).all(...allowed) as Array<{ unit_id: string; name: string | null; owner_hex: string | null }>;
+      const owned = new Set(units.filter(u => u.owner_hex === hex).map(u => u.unit_id));
 
       const unitIds = scope ? [scope] : allowed;
       const ph = unitIds.map(() => '?').join(',');
@@ -330,21 +356,28 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
         ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?
       `).all(...unitIds, limit, offset) as any[];
 
-      const investors = await brainPayoutReader.statuses(rows.map(r => ({
+      // The brain is asked only about the owner's rows.
+      const ownerRows = rows.filter(r => owned.has(r.unit_id));
+      const read = await brainPayoutReader.read(ownerRows.map(r => ({
         customer_status: r.customer_status,
         brain_transaction_id: r.brain_transaction_id,
         unit_id: r.unit_id,
         invoice_number: r.invoice_number,
       })));
+      const investorOf = new Map<any, InvestorStatus>(ownerRows.map((r, i) => [r, read.statuses[i]]));
 
+      // No page-wide "checked at": each investor status carries the time it was
+      // really read from the brain (investor.checked_at), and the page shows
+      // that — a time stamped here would claim a check that did not happen.
       res.json({
         success: true,
-        checked_at: checkedAt,
         total,
         limit,
         offset,
         units: units.map(u => ({ unit_id: u.unit_id, name: u.name || u.unit_id })),
-        requests: rows.map((r, i) => overviewView(r, investors[i])),
+        requests: rows.map(r => overviewView(r, investorOf.get(r) ?? null)),
+        investor_available: read.available,
+        investor_owner_only: rows.some(r => !owned.has(r.unit_id)),
       });
     } catch (e: any) {
       console.error('[lana-online] overview failed:', e?.message || e);

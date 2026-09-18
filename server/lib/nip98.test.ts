@@ -65,6 +65,17 @@ describe('verifyNip98', () => {
     expect(verifyNip98(h, 'GET', PATH)).toEqual({ ok: false, reason: 'REPLAYED' });
   });
 
+  it('a spent token stays spent through the last second it is fresh (default store)', () => {
+    // The freshness check accepts created_at + 60; the spent entry must still
+    // be there in that second, or the same token is accepted a second time.
+    const t0 = nowSec();
+    const h = header(token({ createdAt: t0 }));
+    expect(verifyNip98(h, 'GET', PATH, { nowSec: t0 + 1 }).ok).toBe(true);
+    expect(verifyNip98(h, 'GET', PATH, { nowSec: t0 + 30 })).toEqual({ ok: false, reason: 'REPLAYED' });
+    expect(verifyNip98(h, 'GET', PATH, { nowSec: t0 + MAX_SKEW_SEC })).toEqual({ ok: false, reason: 'REPLAYED' });
+    expect(verifyNip98(h, 'GET', PATH, { nowSec: t0 + MAX_SKEW_SEC + 1 })).toEqual({ ok: false, reason: 'STALE' });
+  });
+
   it('two tokens in the same second with different nonces both pass', () => {
     const at = nowSec();
     const a = token({ createdAt: at, nonce: 'aa' });

@@ -25,6 +25,16 @@
  * mismatched unit or invoice, or a status this file does not know — all of it
  * is `unknown`, never `waiting` and never `marked_paid`. An expired cache entry
  * is dropped on a failed refresh rather than served stale.
+ *
+ * A "marked paid" is cached for FINAL_TTL_MS only (minutes, not hours): an
+ * admin can revert a payout on the brain, and a green line must not outlive
+ * that by long. Every status carries the time it was really read, and the page
+ * shows that time, never the time the page was served.
+ *
+ * `read()` also says whether the brain answered at all for the requests that
+ * needed it (`available`). When it did not — the route is not deployed yet, the
+ * key is missing, the brain is down — the page shows ONE line saying investor
+ * status cannot be checked right now, instead of a grey "?" on every paid row.
  */
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -64,7 +74,11 @@ export type BrainTxEntry =
   | { found: true; unit_id: string; invoice_number: string; payment_type: string; payouts: PayoutRow[] }
   | { found: false };
 
-/** What the overview route knows about one request, before asking the brain. */
+/**
+ * What the overview route knows about one request, before asking the brain.
+ * `customer_status` is the overview's own: waiting | processing | paid |
+ * paid_unconfirmed | unverified | expired | cancelled (paymentRequests.ts).
+ */
 export interface RequestForInvestor {
   customer_status: string;
   brain_transaction_id: string | null;
@@ -184,8 +198,12 @@ export function validEntry(raw: unknown, txId: string): BrainTxEntry | null {
 
 // ── Reader: fetch + cache ────────────────────────────────────────────────
 
-export const FINAL_TTL_MS = 6 * 60 * 60 * 1000;
+/** How long a "marked paid" is believed without asking again. Short on purpose:
+ *  a payout reverted on the brain must not stay green here for hours. */
+export const FINAL_TTL_MS = 10 * 60 * 1000;
 export const OPEN_TTL_MS = 60 * 1000;
+/** The same warning (e.g. "brain route not deployed") at most this often. */
+export const WARN_EVERY_MS = 10 * 60 * 1000;
 export const CACHE_MAX = 5000;
 export const FETCH_TIMEOUT_MS = 4000;
 export const MAX_IDS_PER_CALL = 50;
@@ -207,6 +225,23 @@ const defaultEnv = () => ({
   key: String(process.env.BRAIN_PEER_KEY || '') || String(process.env.BRAIN_PURCHASE_KEY || ''),
 });
 
+/**
+ * Customer states for which the investor side does not apply yet (or any
+ * more): nothing is owed on a request that has not been paid through it.
+ */
+const INVESTOR_NOT_APPLICABLE = new Set(['waiting', 'processing', 'expired', 'cancelled']);
+
+export interface InvestorRead {
+  statuses: InvestorStatus[];
+  /**
+   * False when at least one paid request needed the brain and NONE got an
+   * answer (fresh or cached) — the brain route is missing, unconfigured,
+   * unreachable or answered nonsense. True otherwise, including when no
+   * request needed the brain at all.
+   */
+  available: boolean;
+}
+
 /** Final when every leg that will be shown is marked paid. */
 function isFinal(v: { invoice: Leg; reward: RewardLeg | null }): boolean {
   return v.invoice.state === 'marked_paid' && (v.reward === null || v.reward.state === 'marked_paid');
@@ -220,7 +255,16 @@ export function createBrainPayoutReader(deps: BrainPayoutDeps = {}) {
   const log = deps.log ?? console;
 
   const cache = new Map<string, CacheEntry>();
-  let warnedUnconfigured = false;
+  /** Warning kind → when it was last logged. One line per page load would
+   *  flood the log for as long as the brain route is missing. */
+  const lastWarn = new Map<string, number>();
+  const warnEvery = (kind: string, msg: string) => {
+    const t = now();
+    const last = lastWarn.get(kind);
+    if (last !== undefined && t - last < WARN_EVERY_MS) return;
+    lastWarn.set(kind, t);
+    log.warn(msg);
+  };
 
   const remember = (id: string, value: CacheEntry) => {
     cache.delete(id);
@@ -236,10 +280,7 @@ export function createBrainPayoutReader(deps: BrainPayoutDeps = {}) {
   async function fetchEntries(ids: string[]): Promise<Record<string, unknown> | null> {
     const { url, key } = env();
     if (!url || !key) {
-      if (!warnedUnconfigured) {
-        warnedUnconfigured = true;
-        log.warn(`[online-payments] investor status unavailable: ${!url ? 'BRAIN_API_URL' : 'BRAIN_PEER_KEY (or BRAIN_PURCHASE_KEY)'} is not set — every investor status shows as unknown`);
-      }
+      warnEvery('unconfigured', `[online-payments] investor status unavailable: ${!url ? 'BRAIN_API_URL' : 'BRAIN_PEER_KEY (or BRAIN_PURCHASE_KEY)'} is not set — every investor status shows as unknown`);
       return null;
     }
     const ctrl = new AbortController();
@@ -251,23 +292,23 @@ export function createBrainPayoutReader(deps: BrainPayoutDeps = {}) {
         signal: ctrl.signal,
       });
       if (res.status !== 200) {
-        log.warn(`[online-payments] brain purchase-payouts answered HTTP ${res.status} — investor status unknown`);
+        warnEvery(`http-${res.status}`, `[online-payments] brain purchase-payouts answered HTTP ${res.status} — investor status unknown`);
         return null;
       }
       const ct = String(res.headers.get('content-type') || '').toLowerCase();
       if (!ct.includes('application/json')) {
         // The brain without this route answers its SPA shell with 200.
-        log.warn(`[online-payments] brain purchase-payouts answered ${ct || 'no content-type'}, not JSON — is the brain route deployed?`);
+        warnEvery('not-json', `[online-payments] brain purchase-payouts answered ${ct || 'no content-type'}, not JSON — is the brain route deployed?`);
         return null;
       }
       const body: any = await res.json();
       if (!isObj(body) || !isObj(body.transactions)) {
-        log.warn('[online-payments] brain purchase-payouts answered an unexpected shape — investor status unknown');
+        warnEvery('shape', '[online-payments] brain purchase-payouts answered an unexpected shape — investor status unknown');
         return null;
       }
       return body.transactions;
     } catch (e: any) {
-      log.warn(`[online-payments] brain purchase-payouts unreachable (${e?.name === 'AbortError' ? 'timeout' : e?.message || 'error'}) — investor status unknown`);
+      warnEvery('unreachable', `[online-payments] brain purchase-payouts unreachable (${e?.name === 'AbortError' ? 'timeout' : e?.message || 'error'}) — investor status unknown`);
       return null;
     } finally {
       clearTimeout(timer);
@@ -275,10 +316,11 @@ export function createBrainPayoutReader(deps: BrainPayoutDeps = {}) {
   }
 
   /**
-   * The investor status of each request, in the same order. At most ONE brain
-   * call, for the paid requests that are not fresh in the cache.
+   * The investor status of each request, in the same order, and whether the
+   * brain answered at all. At most ONE brain call, for the paid requests that
+   * are not fresh in the cache.
    */
-  async function statuses(requests: RequestForInvestor[]): Promise<InvestorStatus[]> {
+  async function read(requests: RequestForInvestor[]): Promise<InvestorRead> {
     const t = now();
     const need: string[] = [];
 
@@ -308,22 +350,35 @@ export function createBrainPayoutReader(deps: BrainPayoutDeps = {}) {
     }
 
     const t2 = now();
-    return requests.map((r): InvestorStatus => {
-      if (r.customer_status === 'waiting' || r.customer_status === 'expired' || r.customer_status === 'cancelled') {
+    let askable = 0;
+    let answered = 0;
+    const out = requests.map((r): InvestorStatus => {
+      if (INVESTOR_NOT_APPLICABLE.has(r.customer_status)) {
         return { invoice: { ...NOT_APPLICABLE }, reward: null, checked_at: null };
       }
+      // paid_unconfirmed, unverified, or anything this file does not know.
       if (r.customer_status !== 'paid') return { invoice: { ...UNKNOWN }, reward: null, checked_at: null };
       const id = String(r.brain_transaction_id || '').toLowerCase();
-      const hit = UUID.test(id) ? cache.get(id) : undefined;
+      if (!UUID.test(id)) return { invoice: { ...UNKNOWN }, reward: null, checked_at: null };
+      askable++;
+      const hit = cache.get(id);
       if (!hit || hit.expiresAt <= t2) return { invoice: { ...UNKNOWN }, reward: null, checked_at: null };
+      answered++;
       return { ...investorFromEntry(hit.entry, r), checked_at: new Date(hit.fetchedAt).toISOString() };
     });
+    return { statuses: out, available: askable === 0 || answered > 0 };
+  }
+
+  /** Just the statuses — see read(). */
+  async function statuses(requests: RequestForInvestor[]): Promise<InvestorStatus[]> {
+    return (await read(requests)).statuses;
   }
 
   return {
+    read,
     statuses,
     /** Test seam. */
-    reset() { cache.clear(); warnedUnconfigured = false; },
+    reset() { cache.clear(); lastWarn.clear(); },
     /** Test seam. */
     cacheSize() { return cache.size; },
   };

@@ -10,6 +10,11 @@
  * reads no hex from the URL. "Marked paid" is the investor's own statement, not
  * a bank confirmation, and the page says so. A status the server could not
  * check is grey with a "?", never green.
+ *
+ * Rows are shown only for the query they were loaded for (unit + page): while a
+ * new unit or page loads, the spinner shows, never the previous selection's
+ * rows under the new one's filter. "Checked at" is the OLDEST time an investor
+ * status on screen was really read from the brain — not when the page loaded.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -36,19 +41,26 @@ interface OverviewRow {
   invoice_number: string;
   amount_fiat: number;
   currency: string;
-  customer_status: 'waiting' | 'paid' | 'unverified' | 'cancelled' | 'expired' | string;
+  customer_status: 'waiting' | 'processing' | 'paid' | 'paid_unconfirmed' | 'unverified' | 'cancelled' | 'expired' | string;
   paid_at: string | null;
   tx_hash: string | null;
   customer_name: string | null;
-  investor: { invoice: Leg; reward: RewardLeg | null; checked_at: string | null };
+  /** null = the signer is staff on this unit; the investor side is the owner's. */
+  investor: { invoice: Leg; reward: RewardLeg | null; checked_at: string | null } | null;
 }
 
 interface Overview {
-  checked_at: string;
   total: number;
   units: Array<{ unit_id: string; name: string }>;
   requests: OverviewRow[];
+  /** False when the brain answered for none of the paid rows that needed it. */
+  investor_available?: boolean;
+  /** True when some rows carry no investor status because the signer is staff. */
+  investor_owner_only?: boolean;
 }
+
+/** Which selection a response belongs to. */
+const queryKey = (unitId: string, offset: number) => `${unitId}|${offset}`;
 
 type LoadError = 'clock' | 'relogin' | 'load';
 
@@ -96,13 +108,17 @@ const OnlinePayments = () => {
 
   const [unitId, setUnitId] = useState<string>(''); // '' = all units
   const [offset, setOffset] = useState(0);
-  const [data, setData] = useState<Overview | null>(null);
+  /** The last answer, WITH the selection it was loaded for. */
+  const [data, setData] = useState<{ key: string; body: Overview } | null>(null);
+  /** The unit list outlives a change of selection, so the selector stays put. */
+  const [units, setUnits] = useState<Overview['units']>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<LoadError | null>(null);
   const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
     const seq = ++requestSeq.current;
+    const key = queryKey(unitId, offset);
     setLoading(true);
     setError(null);
     const qs = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
@@ -118,53 +134,80 @@ const OnlinePayments = () => {
       next = { data: null, error: 'load' };
     }
     if (seq !== requestSeq.current) return; // a newer request superseded this one
-    if (next.error) setError(next.error);
-    else setData(next.data);
+    if (next.error || !next.data) setError(next.error || 'load');
+    else {
+      setData({ key, body: next.data });
+      setUnits(Array.isArray(next.data.units) ? next.data.units : []);
+    }
     setLoading(false);
   }, [privateKeyHex, unitId, offset]);
 
   useEffect(() => { load(); }, [load]);
 
-  const units = data?.units || [];
-  const rows = data?.requests || [];
-  const total = data?.total || 0;
+  // Only the answer for THIS selection is shown; anything else is in flight.
+  const current = data && data.key === queryKey(unitId, offset) ? data.body : null;
+  const rows = current?.requests || [];
+  const total = current?.total || 0;
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const showUnitName = !unitId && units.length > 1;
-  const checkedAt = parseServerTime(data?.checked_at);
+  const investorUnavailable = current?.investor_available === false;
+  const ownerOnly = current?.investor_owner_only === true;
+
+  // The oldest time an investor status on screen was really read — the page
+  // claims no fresher check than its stalest line. None read → no stamp.
+  const readTimes = rows
+    .map(r => parseServerTime(r.investor?.checked_at))
+    .filter((d): d is Date => d !== null)
+    .map(d => d.getTime());
+  const checkedAt = readTimes.length ? new Date(Math.min(...readTimes)) : null;
 
   const customerPill = (row: OverviewRow) => {
     switch (row.customer_status) {
       case 'waiting': return <Pill tone={AMBER} text={t('onlinePayments.customerWaiting')} />;
+      case 'processing': return <Pill tone={AMBER} text={t('onlinePayments.customerProcessing')} />;
       case 'paid': return <Pill tone={GREEN} text={t('onlinePayments.customerPaid', { date: formatDateTime(row.paid_at, lng) })} />;
+      // Paid per this app (the tab and the toast say so too), but with no
+      // transaction from the brain behind it — never green.
+      case 'paid_unconfirmed': return <Pill tone={GREY} unknown text={t('onlinePayments.customerPaidUnconfirmed')} />;
       case 'cancelled': return <Pill tone={GREY} text={t('onlinePayments.customerCancelled')} />;
       case 'expired': return <Pill tone={GREY} text={t('onlinePayments.customerExpired')} />;
       default: return <Pill tone={GREY} unknown text={t('onlinePayments.customerUnverified')} />;
     }
   };
 
-  const legPill = (leg: Leg) => {
+  const legPill = (leg: Leg, row: OverviewRow) => {
     switch (leg.state) {
       case 'marked_paid': return <Pill tone={GREEN} text={t('onlinePayments.investorMarkedPaid', { date: formatDateTime(leg.marked_paid_at, lng) })} />;
       case 'waiting': return <Pill tone={AMBER} text={t('onlinePayments.investorWaiting')} />;
       case 'partly': return <Pill tone={AMBER} text={t('onlinePayments.investorPartly')} />;
       case 'not_applicable':
-        return (
+        // "The customer has not paid yet" only while the request is open. On a
+        // cancelled or expired request (whose invoice may have been paid some
+        // other way) or one in flight, nothing is said about the customer.
+        return row.customer_status === 'waiting' ? (
           <span className="text-xs text-muted-foreground">
             <span aria-hidden="true">— </span>{t('onlinePayments.investorNotApplicable')}
           </span>
+        ) : (
+          <span className="text-xs text-muted-foreground" data-testid="investor-dash">—</span>
         );
       default: return <Pill tone={GREY} unknown text={t('onlinePayments.investorUnknown')} />;
     }
   };
 
   const investorBlock = (row: OverviewRow) => {
+    // Staff: the investor side is the owner's (one note at the top says so).
+    if (!row.investor) return null;
     const { invoice, reward } = row.investor;
+    // The brain answered for none of the paid rows: one line at the top says
+    // so, instead of a "?" on every paid row.
+    if (investorUnavailable && row.customer_status === 'paid' && invoice.state === 'unknown' && !reward) return null;
     if (!reward) {
       return (
         <div className="flex items-start gap-2 flex-wrap">
           <span className="text-xs font-medium text-muted-foreground pt-0.5 w-20 shrink-0">{t('onlinePayments.investor')}:</span>
-          {legPill(invoice)}
+          {legPill(invoice, row)}
         </div>
       );
     }
@@ -177,11 +220,11 @@ const OnlinePayments = () => {
         <div className="pl-3 space-y-1.5">
           <div className="flex items-start gap-2 flex-wrap">
             <span className="text-xs text-muted-foreground pt-0.5">{t('onlinePayments.invoiceLeg')}:</span>
-            {legPill(invoice)}
+            {legPill(invoice, row)}
           </div>
           <div className="flex items-start gap-2 flex-wrap">
             <span className="text-xs text-muted-foreground pt-0.5">{t('onlinePayments.rewardLeg')}{rewardAmount}:</span>
-            {legPill(reward)}
+            {legPill(reward, row)}
           </div>
         </div>
       </div>
@@ -214,6 +257,18 @@ const OnlinePayments = () => {
           <span>{t('onlinePayments.markedPaidNote')}</span>
         </p>
 
+        {current && (investorUnavailable || ownerOnly) && (
+          <div className="flex flex-col gap-1 text-xs text-muted-foreground" data-testid="investor-notes">
+            {investorUnavailable && (
+              <p className="flex items-start gap-2">
+                <HelpCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>{t('onlinePayments.investorUnavailable')}</span>
+              </p>
+            )}
+            {ownerOnly && <p>{t('onlinePayments.investorOwnerOnly')}</p>}
+          </div>
+        )}
+
         {units.length > 1 && (
           <select
             value={unitId}
@@ -227,7 +282,7 @@ const OnlinePayments = () => {
 
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">
-            {checkedAt && !error ? t('onlinePayments.checkedAt', { time: formatTime(checkedAt, lng) }) : ''}
+            {checkedAt && current && !error ? t('onlinePayments.checkedAt', { time: formatTime(checkedAt, lng) }) : ''}
           </span>
           <Button variant="outline" size="sm" className="rounded-xl gap-1.5" disabled={loading} onClick={() => load()}>
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -241,7 +296,7 @@ const OnlinePayments = () => {
               : error === 'relogin' ? t('onlinePayments.sigRelogin')
               : t('onlinePayments.loadError')}
           </p>
-        ) : loading && !data ? (
+        ) : !current ? (
           <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-6">{t('onlinePayments.empty')}</p>

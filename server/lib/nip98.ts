@@ -18,7 +18,14 @@
  * before signing shipped, and a new route has no such old client.
  *
  * Each token is SINGLE USE within its freshness window, so a header captured in
- * flight cannot be replayed even inside the 60 seconds.
+ * flight cannot be replayed even inside the 60 seconds. The spent id is kept
+ * THROUGH the last second the token is still fresh (created_at + 60 is accepted,
+ * so the entry must still be there then) and only dropped after it.
+ *
+ * The spent list is held in memory. A restart of the server forgets it, so a
+ * token captured in the minute before a restart could be used once more after
+ * it, inside what is left of its 60 seconds. That is accepted: the route is
+ * read-only, and the token is bound to one method and path.
  *
  * ⚠ Two identical requests in the same second produce the SAME event id — the
  * id is sha256 over [0, pubkey, created_at, kind, tags, content] and the
@@ -44,11 +51,18 @@ export interface Nip98Options {
   verify?: (ev: any) => boolean;
 }
 
-/** Spent token ids → when they expire. In memory: a token only lives 60 s anyway. */
+/** Spent token ids → the last second their token is still fresh. In memory:
+ *  a token only lives 60 s anyway (see the note on restarts at the top). */
 const spent = new Map<string, number>();
 
+/**
+ * `expiresAt` is the LAST second the token is accepted, so an entry is dropped
+ * only once that second has passed (`<`, not `<=`). With `<=` the entry
+ * vanished in exactly the second the freshness check still let the token in,
+ * and the same token was accepted twice.
+ */
 export function consumeOnce(id: string, expiresAt: number, nowSec: number): boolean {
-  for (const [k, exp] of spent) if (exp <= nowSec) spent.delete(k);
+  for (const [k, exp] of spent) if (exp < nowSec) spent.delete(k);
   if (spent.has(id)) return false;
   spent.set(id, expiresAt);
   return true;

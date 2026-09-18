@@ -12,7 +12,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   classifyLeg, investorFromEntry, validEntry, createBrainPayoutReader,
-  FINAL_TTL_MS, OPEN_TTL_MS, type PayoutRow, type BrainTxEntry, type RequestForInvestor,
+  FINAL_TTL_MS, OPEN_TTL_MS, WARN_EVERY_MS, type PayoutRow, type BrainTxEntry, type RequestForInvestor,
 } from './brainPayouts.js';
 
 const TX1 = '11111111-1111-4111-8111-111111111111';
@@ -165,9 +165,21 @@ describe('the reader', () => {
 
   it('a customer payment that cannot be verified is unknown and never asked about', async () => {
     const { reader, fetchImpl } = setup();
-    const out = await reader.statuses([req({ customer_status: 'unverified', brain_transaction_id: null })]);
+    const out = await reader.statuses([
+      req({ customer_status: 'unverified', brain_transaction_id: null }),
+      req({ customer_status: 'paid_unconfirmed', brain_transaction_id: null }),
+      // Even with a brain id, only a confirmed 'paid' is ever asked about.
+      req({ customer_status: 'unverified' }),
+    ]);
     expect(fetchImpl).not.toHaveBeenCalled();
-    expect(out[0].invoice.state).toBe('unknown');
+    expect(out.map(o => o.invoice.state)).toEqual(['unknown', 'unknown', 'unknown']);
+  });
+
+  it('a payment still in progress, like waiting, expired and cancelled, is not applicable and not asked about', async () => {
+    const { reader, fetchImpl } = setup();
+    const out = await reader.statuses(['processing', 'waiting', 'expired', 'cancelled'].map(s => req({ customer_status: s })));
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(out.map(o => o.invoice.state)).toEqual(['not_applicable', 'not_applicable', 'not_applicable', 'not_applicable']);
   });
 
   it('a brain id that is not a UUID is unknown and not sent', async () => {
@@ -217,7 +229,11 @@ describe('the reader', () => {
     expect(noUrl.fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('a final state is served from the cache for 6 h', async () => {
+  it('a "marked paid" is believed for minutes, not hours — a payout reverted on the brain must not stay green', () => {
+    expect(FINAL_TTL_MS).toBeLessThanOrEqual(10 * 60 * 1000);
+  });
+
+  it('a final state is served from the cache for FINAL_TTL_MS', async () => {
     const { reader, fetchImpl, advance } = setup();
     fetchImpl.mockResolvedValueOnce(answer({ [TX1]: entry([row('paid')]) }));
     await reader.statuses([req()]);
@@ -309,5 +325,59 @@ describe('the reader', () => {
     const { reader, fetchImpl } = setup();
     fetchImpl.mockResolvedValueOnce(jsonResponse(paidBody));
     expect((await reader.statuses([req()]))[0].invoice.state).toBe('marked_paid');
+  });
+});
+
+describe('read(): did the brain answer at all?', () => {
+  it('a brain that answers its HTML shell → not available, and every paid row unknown', async () => {
+    const { reader, fetchImpl } = setup();
+    fetchImpl.mockResolvedValueOnce(new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html' } }));
+    const r = await reader.read([req(), req({ customer_status: 'waiting', brain_transaction_id: null })]);
+    expect(r.available).toBe(false);
+    expect(r.statuses[0].invoice.state).toBe('unknown');
+  });
+
+  it('no key → not available', async () => {
+    const { reader } = setup({ env: { url: 'http://brain.test', key: '' } });
+    expect((await reader.read([req()])).available).toBe(false);
+  });
+
+  it('an answer → available; a cached answer → available without a call', async () => {
+    const { reader, fetchImpl } = setup();
+    fetchImpl.mockResolvedValueOnce(answer({ [TX1]: entry([row('paid')]) }));
+    expect((await reader.read([req()])).available).toBe(true);
+    expect((await reader.read([req()])).available).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('nothing that needed the brain → available (there is nothing to say)', async () => {
+    const { reader, fetchImpl } = setup();
+    const r = await reader.read([req({ customer_status: 'waiting', brain_transaction_id: null }), req({ customer_status: 'paid_unconfirmed', brain_transaction_id: null })]);
+    expect(r.available).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('one answered and one not → available (the other row shows its own "?")', async () => {
+    const { reader, fetchImpl } = setup();
+    fetchImpl.mockResolvedValueOnce(answer({ [TX1]: entry([row('paid')]) }));
+    const r = await reader.read([req(), req({ brain_transaction_id: TX2, invoice_number: 'INV-2' })]);
+    expect(r.available).toBe(true);
+    expect(r.statuses.map(s => s.invoice.state)).toEqual(['marked_paid', 'unknown']);
+  });
+});
+
+describe('the log', () => {
+  it('the same failure is logged once per WARN_EVERY_MS, not once per page load', async () => {
+    const { reader, fetchImpl, warn, advance } = setup();
+    fetchImpl.mockImplementation(async () => new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html' } }));
+    await reader.statuses([req()]);
+    await reader.statuses([req()]);
+    await reader.statuses([req()]);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('is the brain route deployed?');
+    advance(WARN_EVERY_MS);
+    await reader.statuses([req()]);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });
