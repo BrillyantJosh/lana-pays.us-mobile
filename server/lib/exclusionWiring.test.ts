@@ -79,6 +79,7 @@ describe('every route that acts in a person\'s name asks the gate', () => {
     ['paymentRequests.ts', paymentsTs, "app.post('/api/payment-requests/:id/cancel'"],
     ['paymentRequests.ts', paymentsTs, "app.get('/api/payment-requests/unseen-count'"],
     ['paymentRequests.ts', paymentsTs, "app.post('/api/payment-requests/mark-seen'"],
+    ['paymentRequests.ts', paymentsTs, "app.get('/api/payment-requests/overview'"],
     ['paymentRequests.ts', paymentsTs, "app.post('/api/pay/:token/preview'"],
     ['paymentRequests.ts', paymentsTs, "app.post('/api/pay/:token/submit'"],
   ];
@@ -140,6 +141,19 @@ describe('the money route gates EVERY person the sale names', () => {
     // somebody else's decision.
     expect(paymentsTs, 'the buyer is being told they are the excluded one').not.toContain('exclusionRefusal');
     expect((codeOnly(paymentsTs).match(/json\(merchantRefusal\(\)\)/g) || []).length).toBe(2);
+  });
+});
+
+describe('the online-payments overview gates the SIGNED hex, not a claimed one', () => {
+  it('the signature comes first and the gate reads what it proved', () => {
+    // The gate is only as good as the hex it is handed. Reading ?hex= here would
+    // let anybody name a merchant and read what investors owe them.
+    const line = paymentsTs.split('\n').find((l) => l.trimStart().startsWith("app.get('/api/payment-requests/overview'"));
+    expect(line, 'route not found').toBeTruthy();
+    expect(line!).toContain('requireSignedMerchant, gate(db, req => req.signedHex)');
+    const at = paymentsTs.indexOf("app.get('/api/payment-requests/overview'");
+    const block = codeOnly(paymentsTs.slice(at, paymentsTs.indexOf('app.get(', at + 10)));
+    expect(block, 'the overview reads a client-supplied hex').not.toMatch(/req\.(query|body)\??\.(hex|merchant_hex)/);
   });
 });
 

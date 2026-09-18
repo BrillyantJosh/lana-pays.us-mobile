@@ -9,6 +9,7 @@ import Login from "./pages/Login";
 import Admin from "./pages/Admin";
 import PublicPay from "./pages/PublicPay";
 import LanaOnlineHistory from "./pages/LanaOnlineHistory";
+import OnlinePayments from "./pages/OnlinePayments";
 import OrdersHistory from "./pages/OrdersHistory";
 import NotFound from "./pages/NotFound";
 
@@ -83,6 +84,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <LanaOnlineHistory />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/lana-online/payments"
+              element={
+                <ProtectedRoute>
+                  <OnlinePayments />
                 </ProtectedRoute>
               }
             />

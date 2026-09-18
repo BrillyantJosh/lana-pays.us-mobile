@@ -77,6 +77,7 @@ const MenuDrawer = ({ open, onClose, onHome, onEditProfile, onRegularCustomers, 
     { label: t('menu.editProfile'), icon: UserPen, action: handleEditProfile },
     { label: t('menu.editShop'), icon: Store, action: () => { onClose(); window.open('https://shop.lanapays.us', '_blank'); } },
     { label: t('menu.myTrades'), icon: History, action: () => { onClose(); window.open('https://brain.lanapays.us', '_blank'); } },
+    { label: t('menu.onlinePayments'), icon: Globe, action: () => { onClose(); navigate('/lana-online/payments'); } },
     ...(showOrders ? [{ label: t('orders.history'), icon: Package, action: () => { onClose(); navigate('/orders/history'); } }] : []),
     { label: t('menu.caretaker'), icon: UserCog, action: () => { onClose(); onCaretaker?.(); } },
   ];

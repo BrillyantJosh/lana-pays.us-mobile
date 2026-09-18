@@ -24,6 +24,8 @@
 import crypto from 'crypto';
 import { HEX64, unitForMerchant, unitIdsForMerchant } from './lib/merchantAuth.js';
 import { gate, gateNames, excludedMerchant, merchantRefusal } from './lib/exclusionGate.js';
+import { requireSignedMerchant } from './lib/nip98.js';
+import { brainPayoutReader, type InvestorStatus } from './lib/brainPayouts.js';
 import rateLimit from 'express-rate-limit';
 import type Database from 'better-sqlite3';
 import type { Express } from 'express';
@@ -88,6 +90,39 @@ const merchantRequestView = (r: any) => ({
   paid_exchange_rate: r.paid_exchange_rate,
   customer_name: r.customer_name,
   seen_by_merchant: r.seen_by_merchant,
+});
+
+/**
+ * The customer's side of a request, computed in SQL WITHOUT writing: the
+ * overview is read-only, so an overdue pending request is SHOWN as expired and
+ * left for the heartbeat sweep to flip. 'paid' with no brain transaction is the
+ * dedup self-heal path, where no money may have moved — it is 'unverified'.
+ */
+const CUSTOMER_STATUS_SQL = `
+  CASE
+    WHEN status = 'pending' AND expires_at IS NOT NULL AND expires_at < datetime('now') THEN 'expired'
+    WHEN status IN ('pending', 'paying') THEN 'waiting'
+    WHEN status = 'paid' AND brain_transaction_id IS NOT NULL AND brain_transaction_id <> '' THEN 'paid'
+    WHEN status = 'paid' THEN 'unverified'
+    ELSE status
+  END`;
+
+/** Narrower than merchantRequestView: no token, receipt, customer keys/wallet,
+ *  brain id, errors or LANA snapshot (paid_lana_lanoshis is only the investors'
+ *  share, so showing it as the customer's payment would be wrong). */
+const overviewView = (r: any, investor: InvestorStatus) => ({
+  id: r.id,
+  unit_id: r.unit_id,
+  unit_name: r.unit_name,
+  created_at: r.created_at,
+  invoice_number: r.invoice_number,
+  amount_fiat: r.amount_fiat,
+  currency: r.currency,
+  customer_status: r.customer_status,
+  paid_at: r.customer_status === 'paid' || r.customer_status === 'unverified' ? r.paid_at : null,
+  tx_hash: r.customer_status === 'paid' ? r.tx_hash : null,
+  customer_name: r.customer_name,
+  investor,
 });
 
 // ── Route registration ───────────────────────────────────────────────────
@@ -256,6 +291,65 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
       WHERE unit_id IN (${ph}) AND status = 'paid' AND seen_by_merchant = 0
     `).run(...unitIds);
     res.json({ success: true, updated: changed.changes });
+  });
+
+  /** Online payments overview (menu → "Online payments"): every request the
+   *  merchant can see, whether the customer paid, and whether the investor
+   *  MARKED the payout paid on direct.lana.fund (see lib/brainPayouts.ts).
+   *
+   *  SIGNED (NIP-98 kind 27235) — no hex is read from the query or body at all;
+   *  the signature is the only way to say who is asking. Read-only: it writes
+   *  nothing, not even the lazy expiry or seen_by_merchant. */
+  app.get('/api/payment-requests/overview', requireSignedMerchant, gate(db, req => req.signedHex), async (req, res) => {
+    try {
+      const hex = String((req as any).signedHex || '');
+      const allowed = unitIdsForMerchant(db, hex);
+      const scope = req.query.unit_id !== undefined ? String(req.query.unit_id) : '';
+      if (scope && !allowed.includes(scope)) return res.status(403).json({ success: false, error: 'NOT_AUTHORIZED' });
+
+      const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '20'), 10) || 20));
+      const offset = Math.max(0, parseInt(String(req.query.offset || '0'), 10) || 0);
+      const checkedAt = new Date().toISOString();
+
+      if (allowed.length === 0) {
+        return res.json({ success: true, checked_at: checkedAt, total: 0, limit, offset, units: [], requests: [] });
+      }
+
+      const units = db.prepare(`
+        SELECT unit_id, name FROM business_units WHERE unit_id IN (${allowed.map(() => '?').join(',')})
+        ORDER BY name COLLATE NOCASE, unit_id
+      `).all(...allowed) as Array<{ unit_id: string; name: string | null }>;
+
+      const unitIds = scope ? [scope] : allowed;
+      const ph = unitIds.map(() => '?').join(',');
+      const total = (db.prepare(`SELECT COUNT(*) AS c FROM payment_requests WHERE unit_id IN (${ph})`).get(...unitIds) as any).c;
+      const rows = db.prepare(`
+        SELECT id, unit_id, unit_name, created_at, invoice_number, amount_fiat, currency,
+               paid_at, tx_hash, customer_name, brain_transaction_id, ${CUSTOMER_STATUS_SQL} AS customer_status
+        FROM payment_requests WHERE unit_id IN (${ph})
+        ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?
+      `).all(...unitIds, limit, offset) as any[];
+
+      const investors = await brainPayoutReader.statuses(rows.map(r => ({
+        customer_status: r.customer_status,
+        brain_transaction_id: r.brain_transaction_id,
+        unit_id: r.unit_id,
+        invoice_number: r.invoice_number,
+      })));
+
+      res.json({
+        success: true,
+        checked_at: checkedAt,
+        total,
+        limit,
+        offset,
+        units: units.map(u => ({ unit_id: u.unit_id, name: u.name || u.unit_id })),
+        requests: rows.map((r, i) => overviewView(r, investors[i])),
+      });
+    } catch (e: any) {
+      console.error('[lana-online] overview failed:', e?.message || e);
+      res.status(500).json({ success: false, error: 'OVERVIEW_FAILED' });
+    }
   });
 
   // ═══ Public endpoints (no auth — the 192-bit token IS the capability) ═══
