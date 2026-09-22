@@ -14,6 +14,10 @@ dist-ssr
 *.local
 .env
 .env.local
+# Deploy merges .env through a temp file and keeps backups beside it; one left
+# behind by a killed deploy must never dirty the checkout and block git pull.
+.env.tmp.*
+.env.bak*
 
 # Editor directories and files
 .vscode/*

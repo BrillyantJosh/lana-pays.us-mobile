@@ -15,12 +15,40 @@ jobs:
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            set -e
             cd /opt/apps/lana-pays.us-mobile
             git pull origin main
-            cat > .env << 'ENVEOF'
+            # .env is MERGED, never rewritten.
+            #
+            # This step used to do `cat > .env`, which deleted every variable
+            # the workflow does not know about. BRAIN_PEER_KEY is set on the
+            # server and is in no GitHub secret, so each deploy silently
+            # removed it and the merchant quota mirror froze — merchants saw a
+            # stale quota bar in the app for the four days between two deploys
+            # (18–22 Sept 2026), while everything else in the container kept
+            # working. The rule now: this workflow owns exactly the three names
+            # written below and leaves every other line on the server alone.
+            #
+            # Written through a temp file in the same directory, so .env is
+            # replaced in one atomic mv and never exists half-written. The trap
+            # removes that temp file on any exit, including a failure.
+            umask 077
+            tmp=$(mktemp .env.tmp.XXXXXX)
+            trap 'rm -f "$tmp"' EXIT INT TERM HUP
+            cat > "$tmp" << 'ENVEOF'
             LANA_REGISTER_API_KEY=${{ secrets.LANA_REGISTER_API_KEY }}
             BRAIN_API_URL=https://brain.lanapays.us
             BRAIN_PURCHASE_KEY=${{ secrets.BRAIN_PURCHASE_KEY }}
             ENVEOF
+            # Keep everything this workflow does not own, exactly as it is —
+            # comments and blank lines included. The three managed names are
+            # dropped from the old file first, so none can end up written twice.
+            # grep exits 1 when nothing survives the filter, which is a normal
+            # outcome here, not an error.
+            if [ -f .env ]; then
+              grep -vE '^[[:space:]]*(LANA_REGISTER_API_KEY|BRAIN_API_URL|BRAIN_PURCHASE_KEY)=' .env >> "$tmp" || true
+            fi
+            chmod 600 "$tmp"
+            mv -f "$tmp" .env
             docker compose -f docker-compose.prod.yml build
             docker compose -f docker-compose.prod.yml up -d
