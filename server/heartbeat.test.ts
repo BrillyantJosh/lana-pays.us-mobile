@@ -11,20 +11,29 @@
  *
  * Both halves are pinned here because both fail quietly:
  *
- *  - with no key the sync must make NO request at all. The tempting shape is a
- *    fallback to "the key that used to work", which is exactly the
- *    impersonation this removed.
+ *  - with no MACHINE key at all the sync must make NO request. The forbidden
+ *    fallback is to a person — "the key that used to work" was somebody's hex,
+ *    and borrowing it is the impersonation this removed. Brain's peer door
+ *    accepts either service key, PEER_API_KEY or PURCHASE_API_KEY, so this
+ *    container reads BRAIN_PEER_KEY and falls back to BRAIN_PURCHASE_KEY, as
+ *    lib/brainPayouts.ts already did for the same door. Both name nobody.
  *  - with a key the request must carry ONLY that key. A stray x-admin-hex-id
  *    left behind in a merge, or a hex smuggled into the query string, would be
  *    refused by brain and the counters would freeze again — after a deploy that
  *    looked green, because a frozen counter still renders.
+ *
+ * 18–22 Sept 2026: BRAIN_PEER_KEY was empty in the production container while
+ * BRAIN_PURCHASE_KEY was set and valid. This file read only the first, so the
+ * sync skipped for four days, merchants saw a frozen quota bar on the phone
+ * (one read 84% against a real 98%) and the till kept stopping them correctly.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { initializeSchema } from './db/schema.js';
 import { mirrorMerchantUsageFromBrain, quotaSnapshotForThisMonth } from './heartbeat.js';
 
 const KEY = 'peer-key-for-the-pos';
+const PURCHASE_KEY = 'purchase-key-for-the-pos';
 const UNIT = 'd652671a2c374bac9cc2cdf162115f22';
 
 let db: Database.Database;
@@ -47,21 +56,93 @@ beforeEach(() => {
     calls.push({ url: String(url), init });
     return { ok: true, status: 200, json: async () => ({ period: '2026-09', count: 0, usage: [] }) } as any;
   }) as any;
+  // BOTH machine keys, or a developer's own environment decides the outcome.
   delete process.env.BRAIN_PEER_KEY;
+  delete process.env.BRAIN_PURCHASE_KEY;
   process.env.BRAIN_API_URL = 'http://brain.test';
 });
 
 afterEach(() => {
   globalThis.fetch = realFetch;
   delete process.env.BRAIN_PEER_KEY;
+  delete process.env.BRAIN_PURCHASE_KEY;
   delete process.env.BRAIN_API_URL;
   db.close();
 });
 
 describe('mirrorMerchantUsageFromBrain — the credential', () => {
-  it('makes NO request at all when BRAIN_PEER_KEY is unset', async () => {
-    expect(await mirrorMerchantUsageFromBrain(db, '2026-09')).toBe(0);
-    expect(calls).toHaveLength(0);
+  it('makes NO request at all when NEITHER machine key is set, and says so', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await mirrorMerchantUsageFromBrain(db, '2026-09')).toBe(0);
+      expect(calls).toHaveLength(0);
+      // The line has to name both, or it sends whoever reads it to check the
+      // one variable that was empty while the other sat there, set and valid.
+      const said = err.mock.calls.map(c => String(c[0])).join(' ');
+      expect(said).toContain('BRAIN_PEER_KEY');
+      expect(said).toContain('BRAIN_PURCHASE_KEY');
+    } finally {
+      err.mockRestore();
+    }
+  });
+
+  /**
+   * The four-day silence, pinned. BRAIN_PEER_KEY empty and BRAIN_PURCHASE_KEY
+   * set is the exact production shape of 18–22 Sept 2026: brain's peer door
+   * accepts that key, lib/brainPayouts.ts was already using it for the same
+   * door, and only this sync refused to try — so the counters froze while
+   * everything around them looked healthy.
+   */
+  it('falls back to BRAIN_PURCHASE_KEY when BRAIN_PEER_KEY is empty — it must NOT skip', async () => {
+    process.env.BRAIN_PEER_KEY = '';
+    process.env.BRAIN_PURCHASE_KEY = PURCHASE_KEY;
+
+    await mirrorMerchantUsageFromBrain(db, '2026-09');
+
+    expect(calls).toHaveLength(1);
+    const { url, init } = calls[0];
+    expect(url).toContain('/api/peer/merchant-usage');
+    const headers = init.headers as Record<string, string>;
+    expect(headers.authorization).toBe(`Bearer ${PURCHASE_KEY}`);
+    // Still a service key, still naming nobody: the fallback that is forbidden
+    // is the one to a person's hex, not the one to the other machine key.
+    expect(url + ' ' + JSON.stringify(headers)).not.toMatch(/[0-9a-f]{64}/i);
+  });
+
+  it('prefers BRAIN_PEER_KEY when both are set', async () => {
+    process.env.BRAIN_PEER_KEY = KEY;
+    process.env.BRAIN_PURCHASE_KEY = PURCHASE_KEY;
+
+    await mirrorMerchantUsageFromBrain(db, '2026-09');
+
+    expect(calls).toHaveLength(1);
+    expect((calls[0].init.headers as Record<string, string>).authorization).toBe(`Bearer ${KEY}`);
+  });
+
+  it('a whitespace-only key is no key — it does not go on the wire as one', async () => {
+    process.env.BRAIN_PEER_KEY = '   ';
+    process.env.BRAIN_PURCHASE_KEY = PURCHASE_KEY;
+
+    await mirrorMerchantUsageFromBrain(db, '2026-09');
+
+    expect(calls).toHaveLength(1);
+    expect((calls[0].init.headers as Record<string, string>).authorization).toBe(`Bearer ${PURCHASE_KEY}`);
+  });
+
+  /**
+   * A standing failure must not read like a blip. The outage printed the same
+   * single line every minute for four days, so the log looked identical on day
+   * one and on day four. Counting is all this asks for — same line, same place.
+   */
+  it('a repeated failure says it is repeating', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await mirrorMerchantUsageFromBrain(db, '2026-09');
+      await mirrorMerchantUsageFromBrain(db, '2026-09');
+      expect(String(err.mock.calls.at(-1)?.[0])).toContain('in a row');
+    } finally {
+      err.mockRestore();
+    }
   });
 
   it("asks brain's PEER door with a Bearer key, and names nobody", async () => {

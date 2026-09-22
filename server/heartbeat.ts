@@ -25,6 +25,20 @@ let heartbeatStartedAt = 0;
 const MAX_HEARTBEAT_DURATION = 120_000; // 2 minutes safety timeout
 
 /**
+ * Ticks in a row this sync has come back with nothing, cleared by the first one
+ * that works. Every line below was already printed on every tick, so the Sept
+ * 2026 outage said the same thing once a minute for four days and the log read
+ * identically on day one and on day four. Counting is all this adds: same
+ * lines, same place, no new channel to watch.
+ */
+let failedTicks = 0;
+/** Bump the streak and render it for the end of a failure line. */
+function noteFailedTick(): string {
+  failedTicks += 1;
+  return failedTicks > 1 ? ` (${failedTicks} heartbeats in a row)` : '';
+}
+
+/**
  * A MACHINE MUST NOT AUTHENTICATE AS A PERSON.
  *
  * Brain owns the canonical write — its orchestrator increments
@@ -43,10 +57,21 @@ const MAX_HEARTBEAT_DURATION = 120_000; // 2 minutes safety timeout
  *
  * Brain now has a door for machines: GET /api/peer/merchant-usage, read-only,
  * authorised by a service key in an `Authorization: Bearer` header, naming
- * nobody. BRAIN_PEER_KEY is this container's copy of that key and is the only
- * credential this sync has. Unset means it does not run and says so — the same
- * frozen counters a 403 produced, minus the impersonation. There is no fallback
- * to somebody's hex, deliberately: that fallback is the bug.
+ * nobody. That door accepts either of brain's two service keys, PEER_API_KEY or
+ * PURCHASE_API_KEY, so this container reads BRAIN_PEER_KEY and falls back to
+ * BRAIN_PURCHASE_KEY — the same pair, in the same order, that
+ * lib/brainPayouts.ts already reads for the same door. There is still no
+ * fallback to somebody's hex, deliberately: THAT fallback is the bug. A second
+ * machine key is not a person.
+ *
+ * 18–22 Sept 2026, why the fallback is here: BRAIN_PEER_KEY was empty in the
+ * production container while BRAIN_PURCHASE_KEY was set and valid. This
+ * function read only the first and skipped, silently as far as anyone looking
+ * at the app could tell, for four days — merchants saw a frozen quota bar on
+ * their phone (one showed 84% against a real 98%) while the till went on
+ * stopping them correctly, because the till asks brain and only the mirror had
+ * frozen. Every neighbouring call kept working, which is what made it invisible.
+ * With neither key set it still does not run, and says so naming both.
  *
  * Exported so the credential can be tested directly. Swallows its own errors;
  * returns the number of rows mirrored (0 on failure or skip).
@@ -56,13 +81,15 @@ export async function mirrorMerchantUsageFromBrain(
   period: string = new Date().toISOString().slice(0, 7)
 ): Promise<number> {
   const BRAIN_URL = process.env.BRAIN_API_URL || 'http://lana-brain-web:3007';
-  const peerKey = String(process.env.BRAIN_PEER_KEY || '').trim();
+  const peerKey = String(process.env.BRAIN_PEER_KEY || '').trim()
+    || String(process.env.BRAIN_PURCHASE_KEY || '').trim();
   if (!peerKey) {
     console.error(
-      'merchant-usage sync SKIPPED — BRAIN_PEER_KEY is not set, so business_units.quota_volume_used / ' +
-      'quota_tx_used are NOT being refreshed and every CASH pre-flight in index.ts is judging merchants on ' +
-      "the last numbers it managed to fetch. FIX: put BRAIN_PEER_KEY in this container's .env, matching " +
-      "PEER_API_KEY in lana-brain's .env. This container will NOT borrow a person's key instead."
+      'merchant-usage sync SKIPPED — NEITHER BRAIN_PEER_KEY NOR BRAIN_PURCHASE_KEY is set, so ' +
+      'business_units.quota_volume_used / quota_tx_used are NOT being refreshed and every CASH pre-flight ' +
+      "in index.ts is judging merchants on the last numbers it managed to fetch. FIX: put BRAIN_PEER_KEY in " +
+      "this container's .env, matching PEER_API_KEY in lana-brain's .env. This container will NOT borrow a " +
+      "person's key instead." + noteFailedTick()
     );
     return 0;
   }
@@ -81,10 +108,10 @@ export async function mirrorMerchantUsageFromBrain(
         console.error(
           `merchant-usage REFUSED (HTTP ${usageRes.status}) — quota_volume_used/quota_tx_used are now FROZEN and ` +
           `every cash pre-flight is judging merchants on stale numbers. BRAIN_PEER_KEY here must equal ` +
-          `PEER_API_KEY (or PURCHASE_API_KEY) in lana-brain's .env.`
+          `PEER_API_KEY (or PURCHASE_API_KEY) in lana-brain's .env.` + noteFailedTick()
         );
       } else {
-        console.warn(`merchant-usage fetch returned HTTP ${usageRes.status}`);
+        console.warn(`merchant-usage fetch returned HTTP ${usageRes.status}${noteFailedTick()}`);
       }
       return 0;
     }
@@ -92,7 +119,7 @@ export async function mirrorMerchantUsageFromBrain(
     if (!Array.isArray(data?.usage)) {
       // Not an answer about the period at all — and the step below treats an
       // answer as covering every unit, so a malformed body must change nothing.
-      console.warn('merchant-usage response carried no usage list — counters left as they were');
+      console.warn(`merchant-usage response carried no usage list — counters left as they were${noteFailedTick()}`);
       return 0;
     }
     const rows = data.usage as Array<{
@@ -124,10 +151,11 @@ export async function mirrorMerchantUsageFromBrain(
       for (const r of rows) upd.run(r.volume_native_cash ?? 0, r.tx_count_cash ?? 0, period, r.unit_id);
     });
     txn();
+    failedTicks = 0;
     console.log(`merchant_quota_usage: synced ${rows.length} usage rows from brain`);
     return rows.length;
   } catch (e: any) {
-    console.warn('merchant_quota_usage sync failed (non-fatal):', e.message);
+    console.warn(`merchant_quota_usage sync failed (non-fatal)${noteFailedTick()}:`, e.message);
     return 0;
   }
 }
