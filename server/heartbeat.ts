@@ -57,12 +57,20 @@ function noteFailedTick(): string {
  *
  * Brain now has a door for machines: GET /api/peer/merchant-usage, read-only,
  * authorised by a service key in an `Authorization: Bearer` header, naming
- * nobody. That door accepts either of brain's two service keys, PEER_API_KEY or
- * PURCHASE_API_KEY, so this container reads BRAIN_PEER_KEY and falls back to
+ * nobody. This container reads BRAIN_PEER_KEY and falls back to
  * BRAIN_PURCHASE_KEY — the same pair, in the same order, that
  * lib/brainPayouts.ts already reads for the same door. There is still no
  * fallback to somebody's hex, deliberately: THAT fallback is the bug. A second
  * machine key is not a person.
+ *
+ * KNOW WHAT THE FALLBACK IS AND IS NOT WORTH. Brain's peer router does not
+ * accept both keys. It computes ONE expected value,
+ * `PEER_API_KEY || PURCHASE_API_KEY` (lana-brain server/routes/peer.ts), so the
+ * moment brain has a PEER_API_KEY of its own, the purchase key is refused with
+ * 401. The fallback here therefore rescues exactly one case — neither side has
+ * a peer key and both land on the purchase key — and is otherwise only a
+ * defence against this container being the one that is misconfigured. It is
+ * not a way to run without BRAIN_PEER_KEY.
  *
  * 18–22 Sept 2026, why the fallback is here: BRAIN_PEER_KEY was empty in the
  * production container while BRAIN_PURCHASE_KEY was set and valid. This
@@ -117,7 +125,10 @@ export async function mirrorMerchantUsageFromBrain(
           `quota_volume_used/quota_tx_used are now FROZEN and every cash pre-flight is judging merchants on ` +
           `stale numbers. That variable must hold PEER_API_KEY (or PURCHASE_API_KEY) from lana-brain's .env.` +
           (keyFrom === 'BRAIN_PURCHASE_KEY'
-            ? ' NOTE: BRAIN_PEER_KEY is empty here, so this was the fallback — check that one first.'
+            ? ' NOTE: BRAIN_PEER_KEY is empty here, so this was the fallback — and brain accepts the ' +
+              'fallback ONLY while it has no PEER_API_KEY of its own. A 401 on it almost always means ' +
+              'BRAIN_PEER_KEY is simply missing on this container. Set that one; the fallback will not ' +
+              'stand in for it.'
             : '') + noteFailedTick()
         );
       } else {

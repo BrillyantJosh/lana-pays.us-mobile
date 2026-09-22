@@ -13,10 +13,12 @@
  *
  *  - with no MACHINE key at all the sync must make NO request. The forbidden
  *    fallback is to a person — "the key that used to work" was somebody's hex,
- *    and borrowing it is the impersonation this removed. Brain's peer door
- *    accepts either service key, PEER_API_KEY or PURCHASE_API_KEY, so this
- *    container reads BRAIN_PEER_KEY and falls back to BRAIN_PURCHASE_KEY, as
- *    lib/brainPayouts.ts already did for the same door. Both name nobody.
+ *    and borrowing it is the impersonation this removed. Falling back to the
+ *    other MACHINE key is allowed: this container reads BRAIN_PEER_KEY and then
+ *    BRAIN_PURCHASE_KEY, as lib/brainPayouts.ts already did for the same door,
+ *    and both name nobody. What that fallback is worth is a separate question —
+ *    brain expects ONE value, `PEER_API_KEY || PURCHASE_API_KEY`, so it refuses
+ *    the purchase key as soon as it has a peer key of its own.
  *  - with a key the request must carry ONLY that key. A stray x-admin-hex-id
  *    left behind in a merge, or a hex smuggled into the query string, would be
  *    refused by brain and the counters would freeze again — after a deploy that
@@ -212,6 +214,11 @@ describe('mirrorMerchantUsageFromBrain — the credential', () => {
       const said = String(err.mock.calls.at(-1)?.[0]);
       expect(said).toContain('from BRAIN_PURCHASE_KEY');
       expect(said).toContain('BRAIN_PEER_KEY is empty here');
+      // And that the fallback is not a way to run without the peer key: brain
+      // expects PEER_API_KEY || PURCHASE_API_KEY, one value, so it refuses the
+      // purchase key the moment it has a peer key. Reading this line must not
+      // send anyone off to re-check the purchase key.
+      expect(said).toContain('will not stand in for it');
       // The name, never the key itself.
       expect(said).not.toContain(PURCHASE_KEY);
     } finally {
