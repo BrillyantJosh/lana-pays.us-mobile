@@ -83,6 +83,13 @@ export async function mirrorMerchantUsageFromBrain(
   const BRAIN_URL = process.env.BRAIN_API_URL || 'http://lana-brain-web:3007';
   const peerKey = String(process.env.BRAIN_PEER_KEY || '').trim()
     || String(process.env.BRAIN_PURCHASE_KEY || '').trim();
+  /**
+   * WHICH variable supplied it — the name, never the value. Without this a 401
+   * on the fallback reads as "the peer key is wrong" when the truth is "the
+   * peer key is empty and the other one was refused", which are different
+   * repairs. Exactly that happened on 22 Sept 2026, minutes after deploy.
+   */
+  const keyFrom = String(process.env.BRAIN_PEER_KEY || '').trim() ? 'BRAIN_PEER_KEY' : 'BRAIN_PURCHASE_KEY';
   if (!peerKey) {
     console.error(
       'merchant-usage sync SKIPPED — NEITHER BRAIN_PEER_KEY NOR BRAIN_PURCHASE_KEY is set, so ' +
@@ -106,9 +113,12 @@ export async function mirrorMerchantUsageFromBrain(
       // anywhere reported it.
       if (usageRes.status === 401 || usageRes.status === 403 || usageRes.status === 503) {
         console.error(
-          `merchant-usage REFUSED (HTTP ${usageRes.status}) — quota_volume_used/quota_tx_used are now FROZEN and ` +
-          `every cash pre-flight is judging merchants on stale numbers. BRAIN_PEER_KEY here must equal ` +
-          `PEER_API_KEY (or PURCHASE_API_KEY) in lana-brain's .env.` + noteFailedTick()
+          `merchant-usage REFUSED (HTTP ${usageRes.status}) using the key from ${keyFrom} — ` +
+          `quota_volume_used/quota_tx_used are now FROZEN and every cash pre-flight is judging merchants on ` +
+          `stale numbers. That variable must hold PEER_API_KEY (or PURCHASE_API_KEY) from lana-brain's .env.` +
+          (keyFrom === 'BRAIN_PURCHASE_KEY'
+            ? ' NOTE: BRAIN_PEER_KEY is empty here, so this was the fallback — check that one first.'
+            : '') + noteFailedTick()
         );
       } else {
         console.warn(`merchant-usage fetch returned HTTP ${usageRes.status}${noteFailedTick()}`);

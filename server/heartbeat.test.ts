@@ -193,6 +193,49 @@ describe('mirrorMerchantUsageFromBrain — the credential', () => {
     globalThis.fetch = (async () => ({ ok: false, status: 401, json: async () => ({}) })) as any;
     expect(await mirrorMerchantUsageFromBrain(db, '2026-09')).toBe(0);
   });
+
+  /**
+   * 22 Sept 2026, minutes after a deploy: the peer key was empty, the fallback
+   * went out and brain answered 401. The line named BRAIN_PEER_KEY as the thing
+   * to correct, which was the wrong repair — that variable was not wrong, it
+   * was absent. A refusal has to say which of the two it actually sent.
+   */
+  it('a refusal names the variable the key came from, and flags a refused fallback', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      process.env.BRAIN_PEER_KEY = '';
+      process.env.BRAIN_PURCHASE_KEY = PURCHASE_KEY;
+      globalThis.fetch = (async () => ({ ok: false, status: 401, json: async () => ({}) })) as any;
+
+      await mirrorMerchantUsageFromBrain(db, '2026-09');
+
+      const said = String(err.mock.calls.at(-1)?.[0]);
+      expect(said).toContain('from BRAIN_PURCHASE_KEY');
+      expect(said).toContain('BRAIN_PEER_KEY is empty here');
+      // The name, never the key itself.
+      expect(said).not.toContain(PURCHASE_KEY);
+    } finally {
+      err.mockRestore();
+    }
+  });
+
+  it('a refusal on the primary key does not blame the fallback', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      process.env.BRAIN_PEER_KEY = KEY;
+      process.env.BRAIN_PURCHASE_KEY = PURCHASE_KEY;
+      globalThis.fetch = (async () => ({ ok: false, status: 403, json: async () => ({}) })) as any;
+
+      await mirrorMerchantUsageFromBrain(db, '2026-09');
+
+      const said = String(err.mock.calls.at(-1)?.[0]);
+      expect(said).toContain('from BRAIN_PEER_KEY');
+      expect(said).not.toContain('is empty here');
+      expect(said).not.toContain(KEY);
+    } finally {
+      err.mockRestore();
+    }
+  });
 });
 
 // ─── A snapshot is not this month's usage ───────────────────────────────────
