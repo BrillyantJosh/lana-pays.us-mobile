@@ -656,6 +656,9 @@
   "onlinePayments.checkedAt": "Investor status checked at {{time}}",
   "onlinePayments.refresh": "Refresh",
   "onlinePayments.empty": "No online payments to show.",
+  "onlinePayments.scopeNote": "This list holds only the remote payment links made in this app. A payment taken with Lana at the till is not shown here.",
+  "onlinePayments.emptyHint": "For these units no such link has been made yet.",
+  "onlinePayments.listReadAt": "List read at {{time}}",
   "onlinePayments.sigClock": "This device's clock is more than a minute off. Fix the date and time, then try again.",
   "onlinePayments.sigRelogin": "Log out and sign in again, then try once more.",
   "onlinePayments.loadError": "The list could not be loaded. Try again."

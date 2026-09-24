@@ -437,6 +437,9 @@
   "onlinePayments.checkedAt": "Estado del inversor comprobado a las {{time}}",
   "onlinePayments.refresh": "Actualizar",
   "onlinePayments.empty": "No hay pagos en línea que mostrar.",
+  "onlinePayments.scopeNote": "En esta lista solo están los enlaces de pago a distancia hechos en esta aplicación. Un pago cobrado con Lana en la caja no aparece aquí.",
+  "onlinePayments.emptyHint": "Para estas unidades todavía no hay ningún enlace de este tipo.",
+  "onlinePayments.listReadAt": "Lista leída a las {{time}}",
   "onlinePayments.sigClock": "El reloj de este dispositivo tiene un desfase de más de un minuto. Corrige la fecha y la hora y vuelve a intentarlo.",
   "onlinePayments.sigRelogin": "Cierra sesión y vuelve a iniciarla; luego inténtalo otra vez.",
   "onlinePayments.loadError": "No se pudo cargar la lista. Inténtalo de nuevo."

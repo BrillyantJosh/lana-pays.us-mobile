@@ -437,6 +437,9 @@
   "onlinePayments.checkedAt": "Befektetői állapot ellenőrizve: {{time}}",
   "onlinePayments.refresh": "Frissítés",
   "onlinePayments.empty": "Nincs megjeleníthető online fizetés.",
+  "onlinePayments.scopeNote": "Ezen a listán csak az ebben az alkalmazásban készült távoli fizetési hivatkozások szerepelnek. A pénztárnál Lanával fogadott fizetés itt nem jelenik meg.",
+  "onlinePayments.emptyHint": "Ezekhez az egységekhez még nincs ilyen hivatkozás.",
+  "onlinePayments.listReadAt": "Lista beolvasva: {{time}}",
   "onlinePayments.sigClock": "Az eszköz órája több mint egy perccel eltér. Állítsa be a dátumot és az időt, majd próbálja újra.",
   "onlinePayments.sigRelogin": "Jelentkezzen ki, majd jelentkezzen be újra, és próbálja meg még egyszer.",
   "onlinePayments.loadError": "A listát nem sikerült betölteni. Próbálja újra."

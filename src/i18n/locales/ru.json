@@ -437,6 +437,9 @@
   "onlinePayments.checkedAt": "Статус инвестора проверен в {{time}}",
   "onlinePayments.refresh": "Обновить",
   "onlinePayments.empty": "Нет онлайн-платежей для отображения.",
+  "onlinePayments.scopeNote": "В этом списке только ссылки на удалённую оплату, сделанные в этом приложении. Оплата Lana на кассе здесь не показывается.",
+  "onlinePayments.emptyHint": "Для этих подразделений такой ссылки пока нет.",
+  "onlinePayments.listReadAt": "Список прочитан в {{time}}",
   "onlinePayments.sigClock": "Часы на этом устройстве отличаются более чем на минуту. Исправьте дату и время, затем повторите попытку.",
   "onlinePayments.sigRelogin": "Выйдите и войдите снова, затем попробуйте ещё раз.",
   "onlinePayments.loadError": "Не удалось загрузить список. Попробуйте ещё раз."

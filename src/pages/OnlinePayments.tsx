@@ -13,8 +13,20 @@
  *
  * Rows are shown only for the query they were loaded for (unit + page): while a
  * new unit or page loads, the spinner shows, never the previous selection's
- * rows under the new one's filter. "Checked at" is the OLDEST time an investor
- * status on screen was really read from the brain — not when the page loaded.
+ * rows under the new one's filter.
+ *
+ * TWO clocks, and they say different things:
+ *   - "List read at" is THIS page's own stamp, set on every successful read of
+ *     the list. It is the answer to "is this still refreshing?" — a merchant
+ *     whose unit has had no new request for days must be able to tell "nothing
+ *     new" from "stuck". It moves on every read, manual or automatic.
+ *   - "Investor status checked at" is the OLDEST time an investor status on
+ *     screen was really read from the brain (the server caches it: a minute for
+ *     an open leg, ten for a settled one), so it may sit still while the list
+ *     stamp moves. It is about the investor column only, and staff never see
+ *     it, because they get no investor column.
+ *
+ * The page re-reads itself while it is open and once when it is returned to.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -28,6 +40,14 @@ import { formatTime } from '@/lib/splitBlock';
 import { currencySymbol } from '@/lib/format';
 
 const PAGE_SIZE = 20;
+
+/** How often an open page re-reads the list. A minute, like the balance in the
+ *  top bar (TopBar.tsx) — and the server caches an open investor leg for a
+ *  minute too (brainPayouts OPEN_TTL_MS), so a faster poll could not come back
+ *  with anything fresher. The 15s polls in the app are the live checkout tabs
+ *  (Lana-online, Orders), where a cashier is waiting for one payment; this is a
+ *  read-only overview of a list that grows every few days. */
+const REFRESH_MS = 60_000;
 
 type LegState = 'marked_paid' | 'waiting' | 'partly' | 'unknown' | 'not_applicable';
 interface Leg { state: LegState; marked_paid_at: string | null }
@@ -114,13 +134,23 @@ const OnlinePayments = () => {
   const [units, setUnits] = useState<Overview['units']>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<LoadError | null>(null);
+  /** When the list itself was last read successfully — this page's own clock. */
+  const [listReadAt, setListReadAt] = useState<Date | null>(null);
   const requestSeq = useRef(0);
 
-  const load = useCallback(async () => {
+  /** `quiet`: a read nobody asked for (the timer, or coming back to the page).
+   *  It never touches the spinner and never turns a blip into an error screen —
+   *  it keeps the rows that are already there, exactly as the Lana-online and
+   *  Orders tabs keep theirs. A quiet read that fails moves nothing — neither
+   *  the rows nor the list stamp — so a refresh that has quietly stopped
+   *  working shows up as a list stamp that has stopped moving. */
+  const load = useCallback(async ({ quiet = false }: { quiet?: boolean } = {}) => {
     const seq = ++requestSeq.current;
     const key = queryKey(unitId, offset);
-    setLoading(true);
-    setError(null);
+    if (!quiet) {
+      setLoading(true);
+      setError(null);
+    }
     const qs = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
     if (unitId) qs.set('unit_id', unitId);
     let next: { data: Overview | null; error: LoadError | null };
@@ -134,15 +164,47 @@ const OnlinePayments = () => {
       next = { data: null, error: 'load' };
     }
     if (seq !== requestSeq.current) return; // a newer request superseded this one
-    if (next.error || !next.data) setError(next.error || 'load');
-    else {
+    if (next.error || !next.data) {
+      if (!quiet) setError(next.error || 'load');
+    } else {
+      setError(null);
       setData({ key, body: next.data });
       setUnits(Array.isArray(next.data.units) ? next.data.units : []);
+      setListReadAt(new Date());
     }
-    setLoading(false);
+    setLoading(false); // also rescues a manual read that a quiet one overtook
   }, [privateKeyHex, unitId, offset]);
 
-  useEffect(() => { load(); }, [load]);
+  // The page used to be read once, when it was opened, and never again: a unit
+  // with no new request for days looked exactly like a page that had stopped
+  // refreshing. It now polls while it is open (paused while the page is out of
+  // sight, so a phone in a pocket asks nothing) and reads once more the moment
+  // it is looked at again. `visibilitychange` covers a backgrounded tab or a
+  // locked phone, focus/blur the case of another window on top on a desktop,
+  // where no visibility change is fired. Both fire on the same return, so one
+  // flag makes that one read, not two.
+  useEffect(() => {
+    load();
+    let away = false;
+    const tick = () => { if (document.visibilityState !== 'hidden') load({ quiet: true }); };
+    const left = () => { away = true; };
+    const returned = () => {
+      if (!away || document.visibilityState === 'hidden') return;
+      away = false;
+      load({ quiet: true });
+    };
+    const onVisibility = () => (document.visibilityState === 'hidden' ? left() : returned());
+    const timer = setInterval(tick, REFRESH_MS);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', returned);
+    window.addEventListener('blur', left);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', returned);
+      window.removeEventListener('blur', left);
+    };
+  }, [load]);
 
   // Only the answer for THIS selection is shown; anything else is in flight.
   const current = data && data.key === queryKey(unitId, offset) ? data.body : null;
@@ -252,6 +314,13 @@ const OnlinePayments = () => {
           </div>
         </div>
 
+        {/* What belongs on this list at all. A merchant who takes most of the
+            day's money at the till reads a short list here and concludes the
+            page is broken; it is not, those payments were never meant here. */}
+        <p className="text-xs text-muted-foreground" data-testid="scope-note">
+          {t('onlinePayments.scopeNote')}
+        </p>
+
         <p className="flex items-start gap-2 text-xs text-muted-foreground rounded-xl border border-border bg-secondary/40 px-3 py-2">
           <Info className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
           <span>{t('onlinePayments.markedPaidNote')}</span>
@@ -280,11 +349,24 @@ const OnlinePayments = () => {
           </select>
         )}
 
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">
-            {checkedAt && current && !error ? t('onlinePayments.checkedAt', { time: formatTime(checkedAt, lng) }) : ''}
-          </span>
-          <Button variant="outline" size="sm" className="rounded-xl gap-1.5" disabled={loading} onClick={() => load()}>
+        <div className="flex items-start justify-between gap-2">
+          {/* The list stamp first and on its own line: it is the one every
+              merchant has (the investor line below it exists only for an owner
+              whose rows carried a real brain read), and the two say different
+              things, so they never share a line. */}
+          <div className="flex flex-col gap-0.5 min-w-0">
+            {listReadAt && !error && (
+              <span className="text-xs text-muted-foreground" data-testid="list-read-at">
+                {t('onlinePayments.listReadAt', { time: formatTime(listReadAt, lng) })}
+              </span>
+            )}
+            {checkedAt && current && !error && (
+              <span className="text-[11px] text-muted-foreground/80" data-testid="investor-checked-at">
+                {t('onlinePayments.checkedAt', { time: formatTime(checkedAt, lng) })}
+              </span>
+            )}
+          </div>
+          <Button variant="outline" size="sm" className="rounded-xl gap-1.5 shrink-0" disabled={loading} onClick={() => load()}>
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             {t('onlinePayments.refresh')}
           </Button>
@@ -299,7 +381,10 @@ const OnlinePayments = () => {
         ) : !current ? (
           <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
         ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6">{t('onlinePayments.empty')}</p>
+          <div className="text-center py-6 space-y-1">
+            <p className="text-sm text-muted-foreground">{t('onlinePayments.empty')}</p>
+            <p className="text-xs text-muted-foreground" data-testid="empty-hint">{t('onlinePayments.emptyHint')}</p>
+          </div>
         ) : (
           <>
             <div className="flex flex-col gap-2.5">

@@ -437,6 +437,9 @@
   "onlinePayments.checkedAt": "Stanje investitora provjereno u {{time}}",
   "onlinePayments.refresh": "Osvježi",
   "onlinePayments.empty": "Nema online plaćanja za prikaz.",
+  "onlinePayments.scopeNote": "Na ovom popisu su samo poveznice za plaćanje na daljinu napravljene u ovoj aplikaciji. Plaćanje Lanom na blagajni ovdje se ne prikazuje.",
+  "onlinePayments.emptyHint": "Za ove jedinice takve poveznice još nema.",
+  "onlinePayments.listReadAt": "Popis pročitan u {{time}}",
   "onlinePayments.sigClock": "Sat na ovom uređaju odstupa više od minute. Ispravite datum i vrijeme, zatim pokušajte ponovno.",
   "onlinePayments.sigRelogin": "Odjavite se i ponovno se prijavite, zatim pokušajte još jednom.",
   "onlinePayments.loadError": "Popis nije bilo moguće učitati. Pokušajte ponovno."

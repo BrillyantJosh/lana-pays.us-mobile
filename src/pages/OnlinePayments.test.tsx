@@ -15,9 +15,17 @@
  * SQLite UTC times are shown in local time; a new unit or page never shows the
  * previous selection's rows; a slow older answer never overwrites a newer
  * one; paging and a unit change send the right offset.
+ *
+ * And, since a merchant reported a page "stuck since 17 September" that was in
+ * fact a unit with nothing new: every successful read stamps the LIST (its own
+ * clock, separate from the investor one, and there even for staff and for an
+ * empty list); the open page re-reads itself every minute and once when it is
+ * returned to, and stops when it is left; a read nobody asked for that fails
+ * keeps the rows instead of throwing an error over them; and an empty list says
+ * that a payment taken at the till was never going to appear here.
  */
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const { KEY } = vi.hoisted(() => {
@@ -353,5 +361,118 @@ describe('changing the selection', () => {
     expect(last.get('unit_id')).toBe('u2');
     expect(last.get('offset')).toBe('0');
     expect(within(container).getByText('1 / 3')).toBeTruthy();
+  });
+});
+
+// ── does the page keep itself up to date, and say when it last did? ─────
+
+/** jsdom's visibilityState is read-only; a getter is how a tab is hidden. */
+const setVisibility = (state: 'visible' | 'hidden') => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  fireEvent(document, new Event('visibilitychange'));
+};
+
+const settle = () => new Promise((r) => setTimeout(r, 20));
+
+describe('staying up to date', () => {
+  afterEach(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  });
+
+  it('stamps the list on a successful read — for staff, and with nothing to show', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json200(body([
+      row({ id: 's', invoice_number: 'S', investor: null }),
+    ], { investor_owner_only: true }))));
+    renderPage();
+    const stamp = await screen.findByTestId('list-read-at');
+    expect(stamp.textContent).toMatch(/^List read at \d\d:\d\d$/);
+    // Staff have no investor column, so the old stamp is not there at all.
+    expect(screen.queryByTestId('investor-checked-at')).toBeNull();
+  });
+
+  it('the list stamp and the investor stamp are two separate lines', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json200(body([
+      row({ id: 'n', invoice_number: 'N', customer_status: 'paid', paid_at: '2026-09-18 09:30:00',
+        investor: { invoice: { state: 'marked_paid', marked_paid_at: '2026-09-18 08:00:00' }, reward: null, checked_at: '2026-09-18T08:15:00.000Z' } }),
+    ]))));
+    renderPage();
+    const list = await screen.findByTestId('list-read-at');
+    const investor = screen.getByTestId('investor-checked-at');
+    expect(list).not.toBe(investor);
+    expect(list.textContent).toMatch(/^List read at \d\d:\d\d$/);
+    expect(investor.textContent).toBe('Investor status checked at 10:15');
+  });
+
+  it('coming back to the page reads the list again — once, not twice', async () => {
+    const fetchSpy = vi.fn(async () => json200(body([row({ id: 'v', invoice_number: 'V' })])));
+    vi.stubGlobal('fetch', fetchSpy);
+    renderPage();
+    await screen.findByText('Invoice #V');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    setVisibility('hidden');
+    await settle();
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // out of sight, nothing is asked
+
+    setVisibility('visible');
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+
+    fireEvent(window, new Event('focus')); // both fire on the same return
+    await settle();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-reads itself every minute while open, and stops when the page is left', async () => {
+    const fetchSpy = vi.fn(async () => json200(body([row({ id: 'i', invoice_number: 'I' })])));
+    vi.stubGlobal('fetch', fetchSpy);
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+    try {
+      const { unmount } = renderPage();
+      await screen.findByText('Invoice #I');
+
+      const i = setIntervalSpy.mock.calls.findIndex((c) => c[1] === 60_000);
+      expect(i, 'the page registers a one-minute poll').toBeGreaterThanOrEqual(0);
+      await act(async () => { (setIntervalSpy.mock.calls[i][0] as () => void)(); });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+      unmount();
+      expect(clearIntervalSpy).toHaveBeenCalledWith(setIntervalSpy.mock.results[i].value);
+      setVisibility('hidden');
+      setVisibility('visible');
+      await settle();
+      expect(fetchSpy).toHaveBeenCalledTimes(2); // the listeners left with the page
+    } finally {
+      setIntervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+    }
+  });
+
+  it('a read nobody asked for that fails keeps the rows instead of an error screen', async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(json200(body([row({ id: 'k', invoice_number: 'KEEP' })])))
+      .mockResolvedValueOnce(new Response('{}', { status: 500, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchSpy);
+    renderPage();
+    await screen.findByText('Invoice #KEEP');
+    const before = (await screen.findByTestId('list-read-at')).textContent;
+
+    setVisibility('hidden');
+    setVisibility('visible');
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    await settle();
+
+    expect(screen.getByText('Invoice #KEEP')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByTestId('list-read-at').textContent).toBe(before);
+  });
+
+  it('an empty list says that a payment at the till was never going to be here', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json200(body([]))));
+    renderPage();
+    expect(await screen.findByText('No online payments to show.')).toBeTruthy();
+    expect(screen.getByTestId('empty-hint').textContent).toMatch(/no such link has been made yet/i);
+    expect(screen.getByTestId('scope-note').textContent).toMatch(/at the till is not shown here/i);
+    expect(screen.getByTestId('list-read-at')).toBeTruthy();
   });
 });

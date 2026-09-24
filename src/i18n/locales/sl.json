@@ -656,6 +656,9 @@
   "onlinePayments.checkedAt": "Stanje vlagateljev preverjeno ob {{time}}",
   "onlinePayments.refresh": "Osveži",
   "onlinePayments.empty": "Ni spletnih plačil za prikaz.",
+  "onlinePayments.scopeNote": "Na tem seznamu so samo povezave za plačilo na daljavo, narejene v tej aplikaciji. Plačilo z Lano na blagajni se tu ne pokaže.",
+  "onlinePayments.emptyHint": "Za te enote take povezave še ni.",
+  "onlinePayments.listReadAt": "Seznam prebran ob {{time}}",
   "onlinePayments.sigClock": "Ura na tej napravi je zamaknjena za več kot minuto. Popravite datum in uro, nato poskusite znova.",
   "onlinePayments.sigRelogin": "Odjavite se in se znova prijavite, nato poskusite znova.",
   "onlinePayments.loadError": "Seznama ni bilo mogoče naložiti. Poskusite znova."

@@ -437,6 +437,9 @@
   "onlinePayments.checkedAt": "Investorenstatus geprüft um {{time}}",
   "onlinePayments.refresh": "Aktualisieren",
   "onlinePayments.empty": "Keine Online-Zahlungen vorhanden.",
+  "onlinePayments.scopeNote": "In dieser Liste stehen nur die in dieser App angelegten Links für Fernzahlungen. Eine mit Lana an der Kasse angenommene Zahlung erscheint hier nicht.",
+  "onlinePayments.emptyHint": "Für diese Einheiten gibt es noch keinen solchen Link.",
+  "onlinePayments.listReadAt": "Liste gelesen um {{time}}",
   "onlinePayments.sigClock": "Die Uhr dieses Geräts weicht um mehr als eine Minute ab. Korrigieren Sie Datum und Uhrzeit und versuchen Sie es erneut.",
   "onlinePayments.sigRelogin": "Melden Sie sich ab und wieder an, dann versuchen Sie es noch einmal.",
   "onlinePayments.loadError": "Die Liste konnte nicht geladen werden. Versuchen Sie es erneut."

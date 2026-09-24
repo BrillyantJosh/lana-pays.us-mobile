@@ -437,6 +437,9 @@
   "onlinePayments.checkedAt": "Stato dell'investitore verificato alle {{time}}",
   "onlinePayments.refresh": "Aggiorna",
   "onlinePayments.empty": "Nessun pagamento online da mostrare.",
+  "onlinePayments.scopeNote": "In questo elenco ci sono solo i link di pagamento a distanza fatti in questa app. Un pagamento incassato con Lana alla cassa non compare qui.",
+  "onlinePayments.emptyHint": "Per queste unità non esiste ancora un link di questo tipo.",
+  "onlinePayments.listReadAt": "Elenco letto alle {{time}}",
   "onlinePayments.sigClock": "L'orologio di questo dispositivo è sfasato di più di un minuto. Correggi data e ora, poi riprova.",
   "onlinePayments.sigRelogin": "Esci e accedi di nuovo, poi riprova.",
   "onlinePayments.loadError": "Impossibile caricare l'elenco. Riprova."

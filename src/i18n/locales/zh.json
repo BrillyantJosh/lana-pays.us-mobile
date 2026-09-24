@@ -437,6 +437,9 @@
   "onlinePayments.checkedAt": "投资者状态检查时间 {{time}}",
   "onlinePayments.refresh": "刷新",
   "onlinePayments.empty": "没有可显示的在线付款。",
+  "onlinePayments.scopeNote": "此列表只有在本应用中生成的远程付款链接。在收银台用 Lana 收取的付款不会显示在这里。",
+  "onlinePayments.emptyHint": "这些单位还没有这样的链接。",
+  "onlinePayments.listReadAt": "列表读取时间 {{time}}",
   "onlinePayments.sigClock": "此设备的时钟偏差超过一分钟。请校正日期和时间，然后重试。",
   "onlinePayments.sigRelogin": "请退出并重新登录，然后再试一次。",
   "onlinePayments.loadError": "无法加载列表。请重试。"

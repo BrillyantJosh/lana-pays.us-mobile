@@ -14,6 +14,12 @@
  *     so no string may say "you created".
  *   - the dedup self-heal case says "paid" (as the Lana-online tab and the
  *     toast do) AND that the system has not confirmed it.
+ *   - the page's own stamp ("list read at") and the investor stamp ("investor
+ *     status checked at") are never the same sentence: they answer different
+ *     questions and one moves while the other stands still.
+ *   - the page says what does NOT belong on it — a payment taken with Lana at
+ *     the till — because a merchant who reads a short list otherwise concludes
+ *     the page is broken.
  *   - the menu entry must differ from every other entry in the drawer, which
  *     renders them with key={label}; two equal labels would collide.
  */
@@ -41,7 +47,7 @@ const KEYS = [
     'customerExpired', 'customerUnverified',
     'investorNotApplicable', 'investorWaiting', 'investorMarkedPaid', 'investorPartly', 'investorUnknown',
     'investorUnavailable', 'investorOwnerOnly',
-    'invoiceLeg', 'rewardLeg', 'markedPaidNote', 'checkedAt', 'refresh', 'empty',
+    'invoiceLeg', 'rewardLeg', 'markedPaidNote', 'checkedAt', 'listReadAt', 'refresh', 'empty', 'emptyHint', 'scopeNote',
     'sigClock', 'sigRelogin', 'loadError'].map((k) => `onlinePayments.${k}`),
 ];
 
@@ -110,6 +116,20 @@ describe('online payments i18n keys', () => {
     expect(EN['onlinePayments.customerPaidUnconfirmed']).toContain('not confirmed');
     expect((sl as Record<string, string>)['onlinePayments.customerPaidUnconfirmed']).toMatch(/^Plačano/);
     expect((sl as Record<string, string>)['onlinePayments.customerPaidUnconfirmed']).toContain('brez potrdila');
+  });
+
+  it('the list stamp and the investor stamp are different sentences', () => {
+    for (const [lang, dict] of Object.entries(LOCALES)) {
+      expect(dict['onlinePayments.listReadAt'], lang).not.toBe(dict['onlinePayments.checkedAt']);
+    }
+  });
+
+  it('the scope note says a payment at the till is not on this list', () => {
+    expect(EN['onlinePayments.scopeNote'].toLowerCase()).toContain('till');
+    expect(EN['onlinePayments.scopeNote'].toLowerCase()).toContain('remote');
+    const slNote = (sl as Record<string, string>)['onlinePayments.scopeNote'].toLowerCase();
+    expect(slNote).toContain('blagajni');
+    expect(slNote).toContain('na daljavo');
   });
 
   it('"marked paid" says MARKED, in English and in Slovenian', () => {

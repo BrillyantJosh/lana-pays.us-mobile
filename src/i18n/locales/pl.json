@@ -437,6 +437,9 @@
   "onlinePayments.checkedAt": "Status inwestora sprawdzono o {{time}}",
   "onlinePayments.refresh": "Odśwież",
   "onlinePayments.empty": "Brak płatności online do wyświetlenia.",
+  "onlinePayments.scopeNote": "Na tej liście są tylko linki do płatności zdalnej zrobione w tej aplikacji. Płatność Laną przy kasie nie jest tu pokazywana.",
+  "onlinePayments.emptyHint": "Dla tych jednostek nie ma jeszcze takiego linku.",
+  "onlinePayments.listReadAt": "Lista odczytana o {{time}}",
   "onlinePayments.sigClock": "Zegar tego urządzenia różni się o ponad minutę. Popraw datę i godzinę, a następnie spróbuj ponownie.",
   "onlinePayments.sigRelogin": "Wyloguj się i zaloguj ponownie, a potem spróbuj jeszcze raz.",
   "onlinePayments.loadError": "Nie udało się wczytać listy. Spróbuj ponownie."
