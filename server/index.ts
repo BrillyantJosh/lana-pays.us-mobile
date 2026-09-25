@@ -50,6 +50,15 @@ const app = express();
 // admin JSON feed was going out UNCOMPRESSED — nothing in the chain (app or
 // nginx-proxy) set Content-Encoding — and the page took ~10 s. The same
 // payload gzips ~10x. Registered first so it wraps every route.
+//
+// Do NOT check this with `curl -I`. That sends HEAD, and compression refuses
+// HEAD outright (node_modules/compression/index.js:192), so the response shows
+// no Content-Encoding and keeps express.static's raw Content-Length — it looks
+// exactly like compression is missing. This cost an investigation on
+// 2026-09-24. Verify with a GET instead:
+//   curl -s -D - -o /dev/null --compressed https://mobile.lanapays.us/
+// `Vary: Accept-Encoding` with no Content-Encoding is the tell that the
+// middleware ran and bailed, not that it is absent.
 app.use(compression());
 const PORT = parseInt(process.env.SERVER_PORT || process.env.PORT || '3005');
 
