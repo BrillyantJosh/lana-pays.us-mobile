@@ -28,7 +28,7 @@ import { queryEvents, type SignedEvent } from './dm.js';
 import { getLanaRelays, broadcastEvent } from './nostr.js';
 import { SIMPLE_UNIT_SQL } from './unitOrigin.js';
 import {
-  resolveOrder, ORDER_ID_RE, orderIdMatchesPubkey, toCents,
+  resolveOrder, ORDER_ID_RE, orderIdMatchesPubkey, toCents, bindingString,
   type ResolverOrder, type ResolverPurchase, type ResolverFulfillment, type ResolverUnit,
 } from './orderResolver.js';
 
@@ -415,8 +415,24 @@ export function ingestEvent(db: Database.Database, ev: SignedEvent, trusted: Set
 
 // ─── Listing price (merchant-signed) by address ─────────────────────────
 
-export interface ListingInfo { price: string | null; currency: string; status: string; createdAt: number }
+export interface ListingInfo {
+  /** Money fields — the ONLY ones the resolver receives (price, createdAt). */
+  price: string | null; currency: string; status: string; createdAt: number;
+  /**
+   * Display only (the merchant's order screen): read from the same
+   * signature-verified, author-matched event. Never passed to resolveOrder.
+   */
+  eventId?: string; title?: string; sku?: string; weight?: string; unit?: string;
+}
 export type ListingFetcher = (address: string) => Promise<ListingInfo | null>;
+
+/** A display string from a listing tag: trimmed, single-spaced, bounded. */
+function displayTag(ev: { tags: string[][] }, name: string, max: number): string | undefined {
+  const v = tag(ev, name);
+  if (typeof v !== 'string') return undefined;
+  const s = v.replace(/\s+/g, ' ').trim();
+  return s ? s.slice(0, max) : undefined;
+}
 
 const listingCache = new Map<string, { info: ListingInfo | null; fetchedAt: number }>();
 const LISTING_TTL_MS = 10 * 60 * 1000;
@@ -448,6 +464,11 @@ export function makeListingFetcher(relays: string[], timeout = 6000): ListingFet
           currency: price?.[2] || '',
           status: tag(best, 'status') || 'active',
           createdAt: best.created_at,
+          eventId: best.id,
+          title: displayTag(best, 'title', 200),
+          sku: displayTag(best, 'sku', 64),
+          weight: displayTag(best, 'weight', 40),
+          unit: displayTag(best, 'unit', 40),
         };
       }
     } catch { info = null; }
@@ -458,6 +479,158 @@ export function makeListingFetcher(relays: string[], timeout = 6000): ListingFet
 }
 
 export function clearListingCache(): void { listingCache.clear(); }
+
+// ─── What was ordered — display only, never read by the resolver ────────
+//
+// A KIND 36520 v1 item is [address, qty, saleUnit, unitPrice, currency]: no
+// title, no šifra. Without this the merchant saw "1 × g · <d-tag>" (Živa
+// Center, 30. 9. 2026). The listing fetched for the resolver is the
+// merchant-signed source of the product name; it is kept per order item, the
+// version closest to the order's created_at winning.
+
+function itemsOf(row: { items_json?: string }): any[] {
+  try { const v = JSON.parse(row.items_json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+
+/**
+ * Is a listing version with created_at `cand` a truer picture of what the
+ * buyer saw than the stored one (`stored`)? The version live at order time is
+ * the newest with created_at ≤ the order's; failing that, the earliest after.
+ */
+export function closerToOrderTime(cand: number, stored: number, orderCreatedAt: number): boolean {
+  const candLive = cand <= orderCreatedAt;
+  const storedLive = stored <= orderCreatedAt;
+  if (candLive !== storedLive) return candLive;
+  return candLive ? cand > stored : cand < stored;
+}
+
+/**
+ * Keep the listing's display fields for one order item. Inserts when absent;
+ * replaces a receipt-only title, or a version further from order time. Returns
+ * true when a row was written.
+ */
+export function snapshotItem(
+  db: Database.Database,
+  order: { order_id: string; created_at: number },
+  itemA: string,
+  listing: ListingInfo | null,
+  now = nowUnix(),
+): boolean {
+  if (!listing || !listing.eventId) return false;
+  const existing = db.prepare(
+    'SELECT listing_event_id, listing_created_at, source FROM shop_order_item_snapshots WHERE order_id = ? AND item_a = ?'
+  ).get(order.order_id, itemA) as any;
+  if (existing) {
+    if (existing.listing_event_id === listing.eventId) return false;
+    if (existing.source === 'listing' && typeof existing.listing_created_at === 'number'
+      && !closerToOrderTime(listing.createdAt, existing.listing_created_at, order.created_at)) return false;
+  }
+  db.prepare(`
+    INSERT INTO shop_order_item_snapshots (
+      order_id, item_a, listing_event_id, listing_created_at, title, sku, weight, sale_unit, price, currency, source, fetched_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listing', ?)
+    ON CONFLICT(order_id, item_a) DO UPDATE SET
+      listing_event_id = excluded.listing_event_id, listing_created_at = excluded.listing_created_at,
+      title = excluded.title, sku = excluded.sku, weight = excluded.weight, sale_unit = excluded.sale_unit,
+      price = excluded.price, currency = excluded.currency, source = 'listing', fetched_at = excluded.fetched_at
+  `).run(
+    order.order_id, itemA, listing.eventId, listing.createdAt,
+    listing.title ?? null, listing.sku ?? null, listing.weight ?? null, listing.unit ?? null,
+    listing.price ?? null, listing.currency || null, now,
+  );
+  return true;
+}
+
+/**
+ * The product title the broker wrote into the paid 30933 —
+ * `<title> ×<qty> · 36520:<buyer>:<order>` (lana-pays-shop buildDescription) —
+ * or null when the description is not bound to exactly this order and qty.
+ * Display only: it may be truncated and carries no šifra.
+ */
+export function receiptTitle(desc: string | null | undefined, buyerPubkey: string, orderId: string, qty: number): string | null {
+  if (typeof desc !== 'string' || !Number.isInteger(qty) || qty <= 0) return null;
+  const suffix = ` ×${qty} · ${bindingString(buyerPubkey, orderId)}`;
+  if (!desc.endsWith(suffix)) return null;
+  const t = desc.slice(0, desc.length - suffix.length).replace(/\s+/g, ' ').trim();
+  if (!t || t === 'Order') return null; // 'Order' = the broker's placeholder for an untitled listing
+  return t.slice(0, 200);
+}
+
+/** receiptTitle of the 30933 the resolver accepted for this (single-item) order. */
+export function paidReceiptTitle(
+  db: Database.Database,
+  row: { order_id: string; unit_id: string; buyer_pubkey: string; items_json?: string; paid_event_id?: string | null },
+): string | null {
+  if (!row.paid_event_id) return null;
+  const items = itemsOf(row);
+  if (items.length !== 1) return null;
+  const p = db.prepare(
+    'SELECT receipt_description FROM shop_order_payments WHERE event_id = ? AND unit_id = ? AND invoice_number = ?'
+  ).get(row.paid_event_id, row.unit_id, row.order_id) as any;
+  return receiptTitle(p?.receipt_description, row.buyer_pubkey, row.order_id, Number(items[0]?.qty));
+}
+
+/**
+ * Snapshot an order's (v1: only) item from the fetched listing; with no
+ * listing, fall back to the paid receipt's title — never over an existing row.
+ */
+export function snapshotOrderItem(db: Database.Database, row: any, listing: ListingInfo | null, now = nowUnix()): boolean {
+  const a = itemsOf(row)[0]?.a;
+  if (typeof a !== 'string' || !a) return false;
+  if (listing?.eventId) return snapshotItem(db, row, a, listing, now);
+  const title = paidReceiptTitle(db, row);
+  if (!title) return false;
+  const r = db.prepare(`
+    INSERT INTO shop_order_item_snapshots (order_id, item_a, title, source, fetched_at)
+    VALUES (?, ?, ?, 'receipt', ?)
+    ON CONFLICT(order_id, item_a) DO NOTHING
+  `).run(row.order_id, a, title, now);
+  return r.changes === 1;
+}
+
+const BACKFILL_RETRY_MS = 30 * 60 * 1000;
+const backfillTried = new Map<string, number>();
+
+/**
+ * Orders with no item snapshot yet — above all the ones the resolver will
+ * never look at again (resolved, rejected, shipped…), e.g. every order placed
+ * before this table existed. Bounded per tick; an order that found neither a
+ * listing nor a receipt is retried after BACKFILL_RETRY_MS (so a few such
+ * orders cannot starve the rest). Listing REQs are #d-filtered and go through
+ * the same 10-min cache as the resolver's.
+ */
+export async function backfillItemSnapshots(db: Database.Database, fetchListing: ListingFetcher, limit = 20): Promise<number> {
+  const nowMs = Date.now();
+  for (const [id, at] of backfillTried) if (nowMs - at > BACKFILL_RETRY_MS) backfillTried.delete(id);
+  const rows = (db.prepare(`
+    SELECT o.* FROM shop_orders o
+    WHERE NOT EXISTS (SELECT 1 FROM shop_order_item_snapshots s WHERE s.order_id = o.order_id)
+    ORDER BY o.created_at DESC LIMIT ?
+  `).all(Math.max(limit * 10, limit)) as any[]).filter(r => !backfillTried.has(r.order_id)).slice(0, limit);
+  if (rows.length === 0) return 0;
+
+  // Same shape as resolveOrders: warm the cache a few at a time so a dead relay
+  // set costs one timeout per batch, not one per order.
+  const addrs = [...new Set(rows.map(r => itemsOf(r)[0]?.a).filter((a): a is string => typeof a === 'string' && !!a))];
+  const CONCURRENCY = 8;
+  for (let i = 0; i < addrs.length; i += CONCURRENCY) {
+    await Promise.all(addrs.slice(i, i + CONCURRENCY).map(a => fetchListing(a).catch(() => null)));
+  }
+
+  let filled = 0;
+  for (const row of rows) {
+    const a = itemsOf(row)[0]?.a;
+    let listing: ListingInfo | null = null;
+    if (typeof a === 'string' && a) {
+      try { listing = await fetchListing(a); } catch { listing = null; }
+    }
+    let wrote = false;
+    try { wrote = snapshotOrderItem(db, row, listing); } catch { wrote = false; }
+    if (wrote) filled++;
+    else backfillTried.set(row.order_id, nowMs);
+  }
+  return filled;
+}
 
 // ─── Resolve (SPEC §8 via orderResolver.ts) ─────────────────────────────
 
@@ -566,6 +739,15 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
       now, row.order_id,
     );
     resolved++;
+
+    // What was ordered, for the merchant's screen — from the listing already
+    // fetched above (no extra REQ). Display only: after the money row is
+    // written, and a failure here never touches it.
+    try {
+      snapshotOrderItem(db, { ...row, paid_event_id: r.paidBy?.eventId ?? null }, listing, now);
+    } catch (e) {
+      console.warn(`[orders] item snapshot failed order=${String(row.order_id).slice(0, 12)}…: ${(e as Error)?.message || e}`);
+    }
   }
   return resolved;
 }
@@ -635,7 +817,7 @@ async function fetchKind(relays: string[], filter: Record<string, any>, timeout:
 }
 
 export interface SyncStats {
-  relays: number; trusted: number; fetched: Record<string, number>; touched: number; resolved: number; republished: number; safetyNet: boolean;
+  relays: number; trusted: number; fetched: Record<string, number>; touched: number; resolved: number; backfilled: number; republished: number; safetyNet: boolean;
 }
 
 export async function syncShopOrders(db: Database.Database, relaysFromHeartbeat?: string[]): Promise<SyncStats> {
@@ -697,12 +879,19 @@ export async function syncShopOrders(db: Database.Database, relaysFromHeartbeat?
 
   // 3) Resolve everything that moved or can still move.
   const ids = new Set<string>([...touched, ...activeOrderIds(db, now)]);
-  const resolved = await resolveOrders(db, { orderIds: [...ids], trusted, fetchListing: makeListingFetcher(relays), now });
+  const fetchListing = makeListingFetcher(relays);
+  const resolved = await resolveOrders(db, { orderIds: [...ids], trusted, fetchListing, now });
+
+  // 3b) Item names for orders the resolver no longer visits (display only).
+  let backfilled = 0;
+  try { backfilled = await backfillItemSnapshots(db, fetchListing); } catch (e) {
+    console.warn(`[orders] item backfill failed: ${(e as Error)?.message || e}`);
+  }
 
   // 4) Our own fulfillments that no relay accepted at POST time.
   const republished = await republishUnpublished(db, relays);
 
-  const stats: SyncStats = { relays: relays.length, trusted: trusted.size, fetched, touched: touched.size, resolved, republished, safetyNet };
-  console.log(`[orders] sync: 36520=${fetched['36520']} 36521=${fetched['36521']} 36522=${fetched['36522']} 30933=${fetched['30933']} touched=${touched.size} resolved=${resolved} republished=${republished}${safetyNet ? ' (safety net)' : ''}`);
+  const stats: SyncStats = { relays: relays.length, trusted: trusted.size, fetched, touched: touched.size, resolved, backfilled, republished, safetyNet };
+  console.log(`[orders] sync: 36520=${fetched['36520']} 36521=${fetched['36521']} 36522=${fetched['36522']} 30933=${fetched['30933']} touched=${touched.size} resolved=${resolved} items_backfilled=${backfilled} republished=${republished}${safetyNet ? ' (safety net)' : ''}`);
   return stats;
 }

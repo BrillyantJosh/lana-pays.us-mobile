@@ -424,6 +424,30 @@ export function initializeSchema(db: Database.Database): void {
       value TEXT NOT NULL,
       updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- WHAT was ordered, for the merchant's screen. A KIND 36520 v1 item names
+    -- only the listing address, qty, sale unit and price — no title, no šifra.
+    -- This keeps the merchant-signed listing's display fields as they were
+    -- when the buyer ordered (the version closest to the order's created_at
+    -- wins; a later edit never overwrites it). DISPLAY ONLY: the resolver
+    -- never reads this table. source = 'listing' (signature-verified 36502…,
+    -- author = the address pubkey) or 'receipt' (title only, from the paid
+    -- 30933 receipt_description, when no listing could be fetched).
+    CREATE TABLE IF NOT EXISTS shop_order_item_snapshots (
+      order_id TEXT NOT NULL,
+      item_a TEXT NOT NULL,
+      listing_event_id TEXT,
+      listing_created_at INTEGER,
+      title TEXT,
+      sku TEXT,
+      weight TEXT,
+      sale_unit TEXT,
+      price TEXT,
+      currency TEXT,
+      source TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL,
+      PRIMARY KEY (order_id, item_a)
+    );
   `);
 
   console.log('Database schema initialized');

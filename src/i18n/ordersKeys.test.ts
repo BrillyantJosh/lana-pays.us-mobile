@@ -40,6 +40,8 @@ const SPEC_KEYS = [
 const EXTRA_KEYS = [
   'orders.reject', 'orders.confirmReject', 'orders.confirmRefunded', 'orders.total',
   'orders.fulfillmentShipping', 'orders.fulfillmentPickup', 'orders.priceChanged',
+  // What was ordered (product line): "Šifra 321 · 200 g · 1 × €4.08", or "Unknown item".
+  'orders.sku', 'orders.unknownItem', 'orders.qtyAtPrice',
 ];
 
 const placeholders = (s: string) => (s.match(/\{\{\w+\}\}/g) || []).sort();

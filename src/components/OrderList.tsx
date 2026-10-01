@@ -17,6 +17,48 @@ export interface OrderItem {
   saleUnit: string;
   unitPrice: string;
   currency: string;
+  /** Listing title as it was at order time (else the paid receipt's); null = unknown. */
+  title?: string | null;
+  /** The listing's `sku` tag (šifra). */
+  sku?: string | null;
+  /** The listing's `weight` tag — package size, e.g. "200 g". */
+  weight?: string | null;
+  /** qty × unitPrice, 2 decimals, computed by the server. */
+  lineTotal?: string | null;
+}
+
+/**
+ * Weight/volume sale units. Never shown after the quantity: imported listings
+ * (e.g. Živa Center, unit "g", price per 200 g jar) made "1 × g" read as one
+ * gram. The package size comes from the `weight` tag instead.
+ */
+const MEASURE_UNITS = new Set([
+  'g', 'kg', 'mg', 'dag', 'dkg', 'l', 'ml', 'dl', 'cl', 'lb', 'oz',
+  'gram', 'grams', 'kilogram', 'kilograms', 'liter', 'liters', 'litre', 'litres',
+]);
+/** Counting units already said by "N ×". */
+const PIECE_UNITS = new Set(['', 'piece', 'pieces', 'pc', 'pcs', 'kos', 'kom', 'item', 'items', 'unit', 'units']);
+
+/** The sale unit worth showing next to an item ('' for weight/volume and plain pieces). */
+export function itemUnitLabel(saleUnit: string | null | undefined): string {
+  const u = String(saleUnit ?? '').trim();
+  const k = u.toLowerCase();
+  return MEASURE_UNITS.has(k) || PIECE_UNITS.has(k) ? '' : u;
+}
+
+/** First 8 characters of the listing's d-tag — enough to tell items apart, not a raw id dump. */
+export function itemShortId(a: string): string {
+  return String(a || '').split(':').slice(2).join(':').slice(0, 8);
+}
+
+/** Server lineTotal, or qty × unitPrice in exact cents for a row served without it. */
+export function itemLineTotal(it: OrderItem): string {
+  if (it.lineTotal) return it.lineTotal;
+  const m = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(it.unitPrice ?? '').trim());
+  const qty = Number(it.qty);
+  if (!m || !Number.isInteger(qty) || qty <= 0) return String(it.unitPrice ?? '');
+  const c = (Number(m[1]) * 100 + Number((m[2] || '').padEnd(2, '0'))) * qty;
+  return `${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
 }
 
 /** Mirror of the server's orderView (server/orders.ts). No PII, no plaintext. */
@@ -105,6 +147,7 @@ export function OrderList({ rows, onSelect }: Props) {
     <div className="flex flex-col gap-2.5">
       {rows.map(row => {
         const qty = row.items.reduce((s, i) => s + (Number(i.qty) || 0), 0);
+        const firstTitle = row.items[0]?.title || '';
         return (
           <button
             key={row.order_id}
@@ -130,6 +173,11 @@ export function OrderList({ rows, onSelect }: Props) {
               </span>
               <span className="shrink-0">{localTime(row.paid_at ?? row.created_at)}</span>
             </div>
+            {firstTitle && (
+              <p className="text-sm font-medium text-foreground truncate">
+                {firstTitle}{row.items.length > 1 ? ` +${row.items.length - 1}` : ''}
+              </p>
+            )}
             <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
               <span className="font-mono truncate">{t('orders.buyer')}: {shortHex(row.buyer_pubkey)}</span>
               <ChevronRight className="w-4 h-4 shrink-0" />

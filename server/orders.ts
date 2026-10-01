@@ -20,7 +20,9 @@ import { broadcastEvent } from './lib/nostr.js';
 import { gate } from './lib/exclusionGate.js';
 import {
   KIND_FULFILLMENT, FULFILLMENT_RANK, parseFulfillmentEvent, upsertFulfillmentRow, readRelays, unitRow, unitSigners,
+  paidReceiptTitle,
 } from './lib/orderSync.js';
+import { toCents, centsToString } from './lib/orderResolver.js';
 import type { SignedEvent } from './lib/dm.js';
 
 const TERMINAL = new Set(['shipped', 'delivered', 'completed', 'rejected', 'refunded']);
@@ -48,6 +50,33 @@ function parseItems(json: string): any[] {
   try { const v = JSON.parse(json || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
 }
 
+/**
+ * The buyer's item tags, plus WHAT they are: the listing's title / šifra /
+ * package size as snapshotted at order time (orderSync snapshotOrderItem),
+ * else the title from the paid 30933 receipt; and qty × unitPrice. Display
+ * only — the order's own shipping/total are untouched and remain the amounts.
+ */
+function itemsView(db: Database.Database, r: any): any[] {
+  const items = parseItems(r.items_json);
+  const snaps = db.prepare(
+    'SELECT item_a, title, sku, weight FROM shop_order_item_snapshots WHERE order_id = ?'
+  ).all(r.order_id) as Array<{ item_a: string; title: string | null; sku: string | null; weight: string | null }>;
+  const byA = new Map(snaps.map(s => [s.item_a, s]));
+  let receipt: string | null | undefined;
+  return items.map(it => {
+    const s = byA.get(String(it?.a));
+    let title = s?.title || null;
+    if (!title) {
+      if (receipt === undefined) receipt = paidReceiptTitle(db, r);
+      title = receipt;
+    }
+    const cents = toCents(it?.unitPrice);
+    const qty = Number(it?.qty);
+    const lineTotal = cents !== null && Number.isInteger(qty) && qty > 0 ? centsToString(cents * qty) : null;
+    return { ...it, title, sku: s?.sku || null, weight: s?.weight || null, lineTotal };
+  });
+}
+
 /** Public order view — everything the merchant UI needs, never a plaintext detail. */
 export function orderView(db: Database.Database, r: any, hex: string): any {
   const unit = db.prepare('SELECT name FROM business_units WHERE unit_id = ?').get(r.unit_id) as any;
@@ -63,7 +92,7 @@ export function orderView(db: Database.Database, r: any, hex: string): any {
     unit_owner_hex: r.unit_owner_hex,
     buyer_pubkey: r.buyer_pubkey,
     created_at: r.created_at,
-    items: parseItems(r.items_json),
+    items: itemsView(db, r),
     shipping: r.shipping,
     total: r.total,
     currency: r.currency,

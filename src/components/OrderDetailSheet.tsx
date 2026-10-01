@@ -26,7 +26,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { currencySymbol, formatLanoshis } from '@/lib/format';
 import { signNostrEvent } from '@/lib/nostrSigning';
 import { decryptDeliveryDetails, type DeliveryDetails } from '@/lib/orderCrypto';
-import { type OrderRow, statusKey, statusStyle, localTime, shortHex } from '@/components/OrderList';
+import {
+  type OrderRow, statusKey, statusStyle, localTime, shortHex, itemUnitLabel, itemShortId, itemLineTotal,
+} from '@/components/OrderList';
 
 type Action = 'shipped' | 'delivered' | 'rejected' | 'refunded';
 
@@ -142,7 +144,8 @@ export function OrderDetailSheet({ order, open, onOpenChange, merchantHex, onCha
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="rounded-t-3xl max-h-[92vh] overflow-y-auto pb-8">
+      {/* Width-capped on wide screens: full-width, the amounts sat at the far right edge, away from their labels. */}
+      <SheetContent side="bottom" className="rounded-t-3xl max-h-[92vh] overflow-y-auto pb-8 sm:max-w-xl sm:mx-auto">
         <SheetHeader className="text-left">
           <div className="flex items-center justify-between gap-2 pr-6">
             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${statusStyle(status)}`}>
@@ -162,15 +165,33 @@ export function OrderDetailSheet({ order, open, onOpenChange, merchantHex, onCha
           {/* Items */}
           <div className="glass-card rounded-2xl border p-4 space-y-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('orders.items')}</p>
-            {order.items.map((it, i) => (
-              <div key={i} className="flex items-center justify-between gap-2 text-sm">
-                <span className="truncate">
-                  <span className="font-semibold">{it.qty}</span> × {it.saleUnit || ''}
-                  <span className="text-xs text-muted-foreground font-mono"> · {it.a.split(':').pop()}</span>
-                </span>
-                <span className="shrink-0">{sym}{it.unitPrice}</span>
-              </div>
-            ))}
+            {order.items.map((it, i) => {
+              // "Šifra 321 · 200 g · 1 × €4.08" — never a bare weight unit after the
+              // quantity ("1 × g" read as one gram), never the listing's raw d-tag.
+              const unitLabel = itemUnitLabel(it.saleUnit);
+              const meta = [
+                it.sku ? `${t('orders.sku')} ${it.sku}` : '',
+                it.weight || '',
+                unitLabel,
+                t('orders.qtyAtPrice', { qty: it.qty, price: `${sym}${it.unitPrice}` }),
+              ].filter(Boolean).join(' · ');
+              return (
+                <div key={i} className="flex items-start justify-between gap-3 text-sm">
+                  <div className="min-w-0">
+                    <p className="font-semibold break-words">
+                      {it.title || (
+                        <>
+                          {t('orders.unknownItem')}{' '}
+                          <span className="text-xs text-muted-foreground font-mono font-normal">#{itemShortId(it.a)}</span>
+                        </>
+                      )}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{meta}</p>
+                  </div>
+                  <span className="shrink-0 font-semibold">{sym}{itemLineTotal(it)}</span>
+                </div>
+              );
+            })}
             <div className="flex items-center justify-between gap-2 text-sm text-muted-foreground pt-1 border-t border-border">
               <span>{t('orders.shippingFee')}</span>
               <span>{sym}{order.shipping}</span>
