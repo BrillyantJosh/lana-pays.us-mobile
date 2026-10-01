@@ -166,14 +166,14 @@ export function OrderDetailSheet({ order, open, onOpenChange, merchantHex, onCha
           <div className="glass-card rounded-2xl border p-4 space-y-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('orders.items')}</p>
             {order.items.map((it, i) => {
-              // "Šifra 321 · 200 g · 1 × €4.08" — never a bare weight unit after the
-              // quantity ("1 × g" read as one gram), never the listing's raw d-tag.
-              const unitLabel = itemUnitLabel(it.saleUnit);
+              // "Šifra 321 · 200 g · 1 × €4.08" when the package size is known (never
+              // "1 × g", read as one gram); "2 kg × €12.00" when the price is per kg
+              // and no package size stands in for the unit. Never the raw d-tag.
+              const unitLabel = itemUnitLabel(it.saleUnit, it.weight);
               const meta = [
                 it.sku ? `${t('orders.sku')} ${it.sku}` : '',
                 it.weight || '',
-                unitLabel,
-                t('orders.qtyAtPrice', { qty: it.qty, price: `${sym}${it.unitPrice}` }),
+                t('orders.qtyAtPrice', { qty: unitLabel ? `${it.qty} ${unitLabel}` : it.qty, price: `${sym}${it.unitPrice}` }),
               ].filter(Boolean).join(' · ');
               return (
                 <div key={i} className="flex items-start justify-between gap-3 text-sm">

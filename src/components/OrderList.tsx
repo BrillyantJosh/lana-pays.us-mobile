@@ -28,9 +28,12 @@ export interface OrderItem {
 }
 
 /**
- * Weight/volume sale units. Never shown after the quantity: imported listings
- * (e.g. Živa Center, unit "g", price per 200 g jar) made "1 × g" read as one
- * gram. The package size comes from the `weight` tag instead.
+ * Weight/volume sale units. Hidden ONLY when the listing carries a `weight` tag:
+ * imported listings (e.g. Živa Center, unit "g" + weight "200 g", price per jar;
+ * unit "L" + weight "200 ml", price per bottle) made "1 × g" read as one gram,
+ * and the package size says what one piece is. Without a `weight` tag the unit
+ * IS the quantity's unit (price per kg / L — the storefront shows "€x / kg"), so
+ * hiding it would leave the merchant unable to tell 2 kg from 2 pieces.
  */
 const MEASURE_UNITS = new Set([
   'g', 'kg', 'mg', 'dag', 'dkg', 'l', 'ml', 'dl', 'cl', 'lb', 'oz',
@@ -39,11 +42,16 @@ const MEASURE_UNITS = new Set([
 /** Counting units already said by "N ×". */
 const PIECE_UNITS = new Set(['', 'piece', 'pieces', 'pc', 'pcs', 'kos', 'kom', 'item', 'items', 'unit', 'units']);
 
-/** The sale unit worth showing next to an item ('' for weight/volume and plain pieces). */
-export function itemUnitLabel(saleUnit: string | null | undefined): string {
+/**
+ * The sale unit worth showing after an item's quantity: '' for plain pieces, and
+ * '' for a weight/volume unit only when `weight` (the package size) stands in for it.
+ */
+export function itemUnitLabel(saleUnit: string | null | undefined, weight?: string | null): string {
   const u = String(saleUnit ?? '').trim();
   const k = u.toLowerCase();
-  return MEASURE_UNITS.has(k) || PIECE_UNITS.has(k) ? '' : u;
+  if (PIECE_UNITS.has(k)) return '';
+  if (MEASURE_UNITS.has(k) && String(weight ?? '').trim() !== '') return '';
+  return u;
 }
 
 /** First 8 characters of the listing's d-tag — enough to tell items apart, not a raw id dump. */

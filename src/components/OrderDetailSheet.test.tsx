@@ -7,7 +7,8 @@
  * the far right edge. Pinned: the product name, its šifra and package size, the
  * price per piece and the line total are on the sheet; the bare d-tag and a
  * bare "× g" are not; the sheet is capped in width so amounts sit next to their
- * labels.
+ * labels. A weight/volume unit is dropped only when the `weight` tag (package
+ * size) stands in for it — a listing priced per kg without one still says "kg".
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -119,9 +120,53 @@ describe('OrderDetailSheet — items', () => {
     expect(t).not.toMatch(/×\s*g\b/);
   });
 
-  it('a counting unit other than "piece" is still shown; a weight unit never is', () => {
+  it('a counting unit other than "piece" is still shown, with the quantity', () => {
     sheet(row([{ ...tarten, title: 'Kosilo', saleUnit: 'portion', weight: null, sku: null }]));
-    expect(text()).toContain('portion');
+    expect(text()).toContain('1 portion × €4.08');
+  });
+
+  it('"piece" is never repeated after "N ×"', () => {
+    sheet(row([{ ...tarten, title: 'Kosilo', saleUnit: 'piece', weight: null, sku: null }]));
+    expect(text()).toContain('1 × €4.08');
+    expect(text()).not.toContain('piece');
+  });
+
+  // A measure unit is hidden ONLY when the listing's `weight` tag says what one
+  // piece is. Without it the unit IS the quantity's unit (price per kg/L), and
+  // "2 × €12.00" would hide whether the buyer wants 2 kg or 2 pieces.
+  it('a listing sold per kg with no `weight` tag keeps its unit: "2 kg × €12.00"', () => {
+    sheet(row([{
+      a: `36502:${'18df12f9'.repeat(8)}:pisek`, kind: 36502, qty: 2, saleUnit: 'kg', unitPrice: '12.00', currency: 'EUR',
+      title: 'Eko Pišek', sku: null, weight: null, lineTotal: '24.00',
+    }], { total: '24.00' }));
+    const t = text();
+    expect(t).toContain('2 kg × €12.00');
+    expect(t).toContain('€24.00');
+  });
+
+  it('the 30933-receipt fallback (title, never a weight) keeps a per-litre unit too', () => {
+    sheet(row([{
+      a: `36502:${OWNER}:mleko`, kind: 36502, qty: 3, saleUnit: 'L', unitPrice: '1.20', currency: 'EUR',
+      title: 'Mleko', sku: null, weight: null, lineTotal: '3.60',
+    }]));
+    expect(text()).toContain('3 L × €1.20');
+  });
+
+  it('a row served without the weight field at all keeps the unit as well', () => {
+    const { a, kind, unitPrice, currency } = tarten;
+    sheet(row([{ a, kind, qty: 2, saleUnit: 'kg', unitPrice, currency }]));
+    expect(text()).toContain('2 kg × €4.08');
+  });
+
+  it('with a `weight` tag the package size stands in for the unit (Živa: unit "L", 200 ml bottle)', () => {
+    sheet(row([{
+      ...tarten, saleUnit: 'L', unitPrice: '11.66', weight: '200 ml', sku: '88',
+      title: 'Cvetna vodica SMILJ BIO 200ml', lineTotal: '11.66',
+    }]));
+    const t = text();
+    expect(t).toContain('200 ml');
+    expect(t).toContain('1 × €11.66');
+    expect(t).not.toMatch(/\bL\b/);
   });
 
   it('works for an order served before item titles existed (no title/sku/lineTotal fields at all)', () => {
