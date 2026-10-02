@@ -360,8 +360,10 @@ describe('order items carry the listing the buyer saw', () => {
     expect(input.listingPrice).toBe('4.08');
     expect(input.listingCreatedAt).toBe(createdAt);
     expect(Object.keys(input).sort()).toEqual(['fulfillment', 'listingCreatedAt', 'listingPrice', 'now', 'order', 'purchases', 'trustedSigners', 'unit']);
-    // The order the resolver sees is still the buyer's own item tag — no listing text mixed in.
-    expect(Object.keys(input.order.items[0]).sort()).toEqual(['a', 'currency', 'qty', 'unitPrice']);
+    // The order the resolver sees is still the buyer's own item tag plus that
+    // item's own listing price + created_at (SPEC v1.1.0) — no listing text mixed in.
+    expect(Object.keys(input.order.items[0]).sort()).toEqual(['a', 'currency', 'listingCreatedAt', 'listingPrice', 'qty', 'unitPrice']);
+    expect(input.order.items[0]).toMatchObject({ listingPrice: '4.08', listingCreatedAt: createdAt });
     expect(JSON.stringify(input.order)).not.toContain('TARTEN');
 
     const priceOnlyRow = await placeAndPay(mk(), listingD, sameAsListing);
@@ -383,5 +385,72 @@ describe('order items carry the listing the buyer saw', () => {
     reqCount = 0;
     await placeAndPay(mk(), listingD, fetchListing);
     expect(reqCount).toBe(1); // prefetch REQ; the per-order fetch and the snapshot reuse it
+  });
+});
+
+describe('cart orders: several products of one shop in ONE order (SPEC v1.1.0)', () => {
+  /** 2 × 4.08 (g) + 3 × 3.98 (kos), pickup = 20.10 */
+  function cartOrderEvent(b: { sk: Uint8Array; pk: string }, d: string, items: string[][], total: string, createdAt = now() - 120) {
+    return sign(b.sk, 36520, [
+      ['d', d], ['a', `30901:${owner.pk}:${UNIT}`], ['p', owner.pk], ['unit_id', UNIT], ['invoice_number', d],
+      ...items,
+      ['shipping', '0.00', 'EUR'], ['total', total, 'EUR'], ['fulfillment', 'pickup'], ['status', 'placed'],
+      ['pay_by', String(createdAt + 1800)], ['client', 'lanaeco.shop'], ['v', '1'],
+    ], '', createdAt);
+  }
+  const L1 = hex32();
+  const L2 = hex32();
+  const items = (q1 = '2', q2 = '3') => [
+    ['item', `36502:${owner.pk}:${L1}`, q1, 'g', '4.08', 'EUR'],
+    ['item', `36502:${owner.pk}:${L2}`, q2, 'kos', '3.98', 'EUR'],
+  ];
+  function listings() {
+    return [
+      listingEvent(owner, L1, now() - 86_400),
+      listingEvent(owner, L2, now() - 86_400, { title: 'HUMUS KLASIČNI BIO 180g', sku: '777', weight: '180 g', price: '3.98' }),
+    ];
+  }
+
+  it('the merchant sees a paid 2-product order: both lines with their own titles and line totals', async () => {
+    relayEvents = listings();
+    const buyer = mk();
+    const d = orderIdFor(buyer.pk);
+    expect(ingestEvent(db, cartOrderEvent(buyer, d, items(), '20.10'), trusted)).toBe(d);
+    expect(ingestEvent(db, purchaseEvent(d, buyer.pk, '20.10', 'TARTEN S PETERŠILJEM BIO 200g ×2 (+1)', 2), trusted)).toBe(d);
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    const row = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(d) as any;
+    expect(row).toMatchObject({ payment_state: 'paid', expected_total: '20.10', pending: 1 });
+
+    const r = await get(`/api/orders/${d}?hex=${owner.pk}`);
+    expect(r.json.items.map((i: any) => [i.title, i.qty, i.saleUnit, i.unitPrice, i.lineTotal, i.sku])).toEqual([
+      ['TARTEN S PETERŠILJEM BIO 200g', 2, 'g', '4.08', '8.16', '321'],
+      ['HUMUS KLASIČNI BIO 180g', 3, 'kos', '3.98', '11.94', '777'],
+    ]);
+    expect(r.json).toMatchObject({ total: '20.10', shipping: '0.00' });
+    // a snapshot per item
+    expect((db.prepare('SELECT COUNT(*) AS n FROM shop_order_item_snapshots WHERE order_id = ?').get(d) as any).n).toBe(2);
+  });
+
+  it('each item is priced by ITS listing: paid as item-1 price × all units → amount_mismatch, never pending', async () => {
+    relayEvents = listings();
+    const buyer = mk();
+    const d = orderIdFor(buyer.pk);
+    expect(ingestEvent(db, cartOrderEvent(buyer, d, items(), '20.10'), trusted)).toBe(d);
+    expect(ingestEvent(db, purchaseEvent(d, buyer.pk, '20.40', 'x', 2), trusted)).toBe(d); // 4.08 × 5
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    expect(db.prepare('SELECT payment_state, pending FROM shop_orders WHERE order_id = ?').get(d)).toEqual({ payment_state: 'amount_mismatch', pending: 0 });
+  });
+
+  it('refused like any malformed order: the same product twice, another shop\'s product, more than 30 items', () => {
+    const buyer = mk();
+    const twice = orderIdFor(buyer.pk);
+    expect(ingestEvent(db, cartOrderEvent(buyer, twice, [items()[0], items()[0]], '16.32'), trusted)).toBeNull();
+    const foreign = orderIdFor(buyer.pk);
+    expect(ingestEvent(db, cartOrderEvent(buyer, foreign, [items()[0], ['item', `36502:${stranger.pk}:${L2}`, '1', 'kos', '3.98', 'EUR']], '12.14'), trusted)).toBeNull();
+    const many = orderIdFor(buyer.pk);
+    const lines = Array.from({ length: 31 }, () => ['item', `36502:${owner.pk}:${hex32()}`, '1', 'kos', '1.00', 'EUR']);
+    expect(ingestEvent(db, cartOrderEvent(buyer, many, lines, '31.00'), trusted)).toBeNull();
+    const thirty = orderIdFor(buyer.pk);
+    expect(ingestEvent(db, cartOrderEvent(buyer, thirty, lines.slice(0, 30), '30.00'), trusted)).toBe(thirty);
   });
 });

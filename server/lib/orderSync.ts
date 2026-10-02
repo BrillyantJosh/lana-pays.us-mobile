@@ -152,6 +152,9 @@ export function unitToResolver(u: UnitRow): ResolverUnit {
 
 // ─── Parsers (tag layouts frozen in SPEC §2–§4, §7) ─────────────────────
 
+/** SPEC v1.1.0: different products ONE order may carry (all of one shop). */
+export const MAX_ITEMS_PER_ORDER = 30;
+
 export interface ParsedOrder {
   d: string; pubkey: string; eventId: string; createdAt: number;
   unitId: string; unitOwnerHex: string;
@@ -182,9 +185,15 @@ export function parseOrderEvent(ev: SignedEvent): ParsedOrder | null {
     if (toCents(unitPrice) === null || !cur) return null;
     items.push({ a: addr, kind: Number(kindS), qty, saleUnit: saleUnit || '', unitPrice, currency: cur });
   }
-  if (items.length === 0) return null;
-  // v1: exactly one item; every item must belong to the unit owner.
-  if (items.length !== 1 || items[0].a.split(':')[1] !== aOwner) return null;
+  // SPEC v1.1.0 (cart): 1..MAX_ITEMS_PER_ORDER items, every one a listing of
+  // the unit owner, each listing once. An order outside that is not a shop
+  // order we can show truthfully, so it is dropped as before.
+  if (items.length === 0 || items.length > MAX_ITEMS_PER_ORDER) return null;
+  const seenItems = new Set<string>();
+  for (const it of items) {
+    if (it.a.split(':')[1] !== aOwner || seenItems.has(it.a)) return null;
+    seenItems.add(it.a);
+  }
 
   const shipping = tagRow(ev, 'shipping');
   const total = tagRow(ev, 'total');
@@ -571,21 +580,44 @@ export function paidReceiptTitle(
 }
 
 /**
- * Snapshot an order's (v1: only) item from the fetched listing; with no
- * listing, fall back to the paid receipt's title — never over an existing row.
+ * Snapshot EVERY item of an order from its fetched listing (`listings[i]`
+ * belongs to item i). A one-item order with no listing falls back to the paid
+ * receipt's title — never over an existing row; a cart order has no such
+ * fallback (its receipt names only the first product). Returns true when any
+ * row was written.
  */
+export function snapshotOrderItems(db: Database.Database, row: any, listings: Array<ListingInfo | null>, now = nowUnix()): boolean {
+  const items = itemsOf(row);
+  let wrote = false;
+  items.forEach((it, i) => {
+    const a = it?.a;
+    if (typeof a !== 'string' || !a) return;
+    const listing = listings[i] ?? null;
+    if (listing?.eventId) { if (snapshotItem(db, row, a, listing, now)) wrote = true; return; }
+    if (items.length !== 1) return;
+    const title = paidReceiptTitle(db, row);
+    if (!title) return;
+    const r = db.prepare(`
+      INSERT INTO shop_order_item_snapshots (order_id, item_a, title, source, fetched_at)
+      VALUES (?, ?, ?, 'receipt', ?)
+      ON CONFLICT(order_id, item_a) DO NOTHING
+    `).run(row.order_id, a, title, now);
+    if (r.changes === 1) wrote = true;
+  });
+  return wrote;
+}
+
+/** One-item form, kept for callers of the v1.0 shape. */
 export function snapshotOrderItem(db: Database.Database, row: any, listing: ListingInfo | null, now = nowUnix()): boolean {
-  const a = itemsOf(row)[0]?.a;
-  if (typeof a !== 'string' || !a) return false;
-  if (listing?.eventId) return snapshotItem(db, row, a, listing, now);
-  const title = paidReceiptTitle(db, row);
-  if (!title) return false;
-  const r = db.prepare(`
-    INSERT INTO shop_order_item_snapshots (order_id, item_a, title, source, fetched_at)
-    VALUES (?, ?, ?, 'receipt', ?)
-    ON CONFLICT(order_id, item_a) DO NOTHING
-  `).run(row.order_id, a, title, now);
-  return r.changes === 1;
+  return snapshotOrderItems(db, row, [listing], now);
+}
+
+/** Fetch the listing of every item of an order (cache hits after the prefetch); null where it fails. */
+async function listingsOf(items: Array<{ a?: unknown }>, fetchListing: ListingFetcher): Promise<Array<ListingInfo | null>> {
+  return Promise.all(items.map(async it => {
+    if (typeof it?.a !== 'string' || !it.a) return null;
+    try { return await fetchListing(it.a); } catch { return null; }
+  }));
 }
 
 const BACKFILL_RETRY_MS = 30 * 60 * 1000;
@@ -611,7 +643,7 @@ export async function backfillItemSnapshots(db: Database.Database, fetchListing:
 
   // Same shape as resolveOrders: warm the cache a few at a time so a dead relay
   // set costs one timeout per batch, not one per order.
-  const addrs = [...new Set(rows.map(r => itemsOf(r)[0]?.a).filter((a): a is string => typeof a === 'string' && !!a))];
+  const addrs = [...new Set(rows.flatMap(r => itemsOf(r).map(i => i?.a)).filter((a): a is string => typeof a === 'string' && !!a))];
   const CONCURRENCY = 8;
   for (let i = 0; i < addrs.length; i += CONCURRENCY) {
     await Promise.all(addrs.slice(i, i + CONCURRENCY).map(a => fetchListing(a).catch(() => null)));
@@ -619,13 +651,9 @@ export async function backfillItemSnapshots(db: Database.Database, fetchListing:
 
   let filled = 0;
   for (const row of rows) {
-    const a = itemsOf(row)[0]?.a;
-    let listing: ListingInfo | null = null;
-    if (typeof a === 'string' && a) {
-      try { listing = await fetchListing(a); } catch { listing = null; }
-    }
+    const listings = await listingsOf(itemsOf(row), fetchListing);
     let wrote = false;
-    try { wrote = snapshotOrderItem(db, row, listing); } catch { wrote = false; }
+    try { wrote = snapshotOrderItems(db, row, listings); } catch { wrote = false; }
     if (wrote) filled++;
     else backfillTried.set(row.order_id, nowMs);
   }
@@ -687,8 +715,7 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
   for (const id of ids) {
     const row = getOrder.get(id) as any;
     if (!row) continue;
-    const a = orderFromRow(row).items[0]?.a;
-    if (a) addresses.add(a);
+    for (const it of orderFromRow(row).items) if (it.a) addresses.add(it.a);
   }
   const addrList = [...addresses];
   const PREFETCH_CONCURRENCY = 8;
@@ -715,10 +742,16 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
       paymentRef: fRow.payment_ref || undefined, carrier: fRow.carrier || undefined, tracking: fRow.tracking || undefined,
     } : null;
 
-    let listing: ListingInfo | null = null;
-    if (order.items[0]) {
-      try { listing = await opts.fetchListing(order.items[0].a); } catch { listing = null; }
-    }
+    // EVERY item is priced by its own current listing (SPEC v1.1.0): the
+    // first item's price applied to all would judge a correctly paid cart
+    // amount_mismatch. The top-level pair stays for the one-item v1.0 shape.
+    const listings = await listingsOf(order.items, opts.fetchListing);
+    const listing = listings[0] ?? null;
+    order.items = order.items.map((it, i) => ({
+      ...it,
+      listingPrice: listings[i]?.price ?? null,
+      listingCreatedAt: listings[i] ? listings[i]!.createdAt : null,
+    }));
 
     const r = resolveOrder({
       order, purchases, fulfillment, unit: unitToResolver(unit),
@@ -744,7 +777,7 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
     // fetched above (no extra REQ). Display only: after the money row is
     // written, and a failure here never touches it.
     try {
-      snapshotOrderItem(db, { ...row, paid_event_id: r.paidBy?.eventId ?? null }, listing, now);
+      snapshotOrderItems(db, { ...row, paid_event_id: r.paidBy?.eventId ?? null }, listings, now);
     } catch (e) {
       console.warn(`[orders] item snapshot failed order=${String(row.order_id).slice(0, 12)}…: ${(e as Error)?.message || e}`);
     }

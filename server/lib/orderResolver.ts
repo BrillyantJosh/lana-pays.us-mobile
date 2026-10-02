@@ -7,9 +7,28 @@
  * Money truth is ONLY a brain-signed KIND 30933 that matches the order on
  * (unit_id, invoice_number), the buyer-pubkey prefix, the receipt_description
  * binding string, currency and the RECOMPUTED expected amount.
+ *
+ * SPEC v1.1.0 (cart): an order may carry several items of ONE shop. Each
+ * item is priced by ITS OWN current listing (ResolverItem.listingPrice);
+ * the v1.0 top-level listingPrice still works, for one-item orders only.
  */
 
 export type PaymentState = 'unpaid' | 'paid' | 'amount_mismatch' | 'expired' | 'cancelled';
+
+export interface ResolverItem {
+  a: string;
+  qty: number;
+  unitPrice: string;
+  currency: string;
+  /**
+   * Current merchant-signed price of THIS item's listing; null when the
+   * listing is unknown. Left out (undefined) by v1.0 callers, which pass the
+   * single top-level `listingPrice` instead.
+   */
+  listingPrice?: string | null;
+  /** created_at of THIS item's current listing event; null when unknown. */
+  listingCreatedAt?: number | null;
+}
 
 export interface ResolverOrder {
   /** 36520 `d` tag == order id */
@@ -22,8 +41,11 @@ export interface ResolverOrder {
   status: string;
   /** 'shipping' | 'pickup' */
   fulfillment: string;
-  /** from ['item', addr, qty, saleUnit, unitPrice, cur] — v1 exactly one */
-  items: Array<{ a: string; qty: number; unitPrice: string; currency: string }>;
+  /**
+   * from ['item', addr, qty, saleUnit, unitPrice, cur] — SPEC v1.1: 1..30
+   * lines of ONE shop, each listing at most once (v1.0: exactly one).
+   */
+  items: ResolverItem[];
   /** from ['total', amount, cur] */
   total: string;
   currency: string;
@@ -73,10 +95,15 @@ export interface ResolverInput {
   purchases: ResolverPurchase[];
   fulfillment: ResolverFulfillment | null;
   unit: ResolverUnit;
-  /** current merchant-signed listing price for the (single) item, null when unknown */
-  listingPrice: string | null;
-  /** created_at of the current listing event, null when unknown */
-  listingCreatedAt: number | null;
+  /**
+   * v1.0 (single item): current merchant-signed listing price, null when
+   * unknown. Honoured ONLY for a one-item order whose item carries no
+   * listingPrice of its own — never applied to the items of a multi-item
+   * order (each item has its own price).
+   */
+  listingPrice?: string | null;
+  /** v1.0 (single item): created_at of the current listing event, null when unknown. Same rule. */
+  listingCreatedAt?: number | null;
   trustedSigners: Set<string>;
   now: number;
 }
@@ -130,16 +157,36 @@ export function orderIdMatchesPubkey(orderId: string, pubkey: string): boolean {
   return ORDER_ID_RE.test(orderId) && orderId.slice(0, 24) === String(pubkey || '').slice(0, 24);
 }
 
-/** expected = Σ(qty × unitPrice) + shipping(fee, free-from). Returns cents or null when un-computable. */
+/**
+ * The current listing price that counts for one item: its own when the
+ * caller supplied one (null = listing unknown), else — only for a one-item
+ * order — the v1.0 top-level price.
+ */
+function itemListingPrice(order: ResolverOrder, it: ResolverItem, legacyPrice: string | null | undefined): string | null {
+  if (it.listingPrice !== undefined) return it.listingPrice;
+  return order.items.length === 1 ? legacyPrice ?? null : null;
+}
+
+function itemListingCreatedAt(order: ResolverOrder, it: ResolverItem, legacyCreatedAt: number | null | undefined): number | null {
+  if (it.listingCreatedAt !== undefined) return it.listingCreatedAt;
+  return order.items.length === 1 ? legacyCreatedAt ?? null : null;
+}
+
+/**
+ * expected = Σ(qty_i × unitPrice_i) + shipping(fee, free-from on the WHOLE
+ * subtotal), where unitPrice_i is item i's own current listing price, or its
+ * signed unit_price when that listing is unknown. Returns cents or null when
+ * un-computable.
+ */
 export function expectedCents(
   order: ResolverOrder,
   unit: ResolverUnit,
-  listingPrice: string | null,
+  listingPrice: string | null = null,
 ): number | null {
   if (!order.items.length) return null;
   let sum = 0;
   for (const it of order.items) {
-    const price = toCents(listingPrice ?? it.unitPrice);
+    const price = toCents(itemListingPrice(order, it, listingPrice) ?? it.unitPrice);
     if (price === null || !Number.isInteger(it.qty) || it.qty <= 0) return null;
     sum += price * it.qty;
   }
@@ -156,9 +203,12 @@ export function resolveOrder(input: ResolverInput): ResolverResult {
   const bind = bindingString(order.pubkey, order.d);
   const prefixOk = orderIdMatchesPubkey(order.d, order.pubkey);
 
-  const expCents = expectedCents(order, unit, listingPrice);
+  const expCents = expectedCents(order, unit, listingPrice ?? null);
   const expected = expCents === null ? order.total : centsToString(expCents);
-  const priceChanged = listingCreatedAt !== null && listingCreatedAt > order.createdAt;
+  const priceChanged = order.items.some((it) => {
+    const at = itemListingCreatedAt(order, it, listingCreatedAt);
+    return at !== null && at > order.createdAt;
+  });
 
   // Candidate 30933: newest that satisfies every identity/binding rule.
   const candidates = purchases.filter((e) =>

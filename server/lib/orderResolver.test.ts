@@ -177,3 +177,62 @@ describe('resolveOrder — fulfillment & pending', () => {
     expect(r.pending).toBe(false);
   });
 });
+
+describe('resolveOrder — several items of one shop (SPEC v1.1.0)', () => {
+  const A1 = `36502:${OWNER}:lst1`;
+  const A2 = `36502:${OWNER}:lst2`;
+  /** 3 × 4.50 + 2 × 3.98 + 5.00 shipping = 26.46 */
+  function twoItems(over: Partial<ResolverInput> = {}): ResolverInput {
+    const i = base({ listingPrice: null, listingCreatedAt: null, ...over });
+    i.unit.shippingFee = '5.00';
+    i.order.items = [
+      { a: A1, qty: 3, unitPrice: '4.50', currency: 'EUR', listingPrice: '4.50', listingCreatedAt: 900 },
+      { a: A2, qty: 2, unitPrice: '3.98', currency: 'EUR', listingPrice: '3.98', listingCreatedAt: 950 },
+    ];
+    i.order.total = '26.46';
+    return i;
+  }
+  it('each item is priced by its own listing: paid exactly → paid', () => {
+    const r = resolveOrder(twoItems({ purchases: [purchase({ amount: '26.46' })] }));
+    expect(r.expected).toBe('26.46');
+    expect(r.paymentState).toBe('paid');
+    expect(r.priceChanged).toBe(false);
+  });
+  it('paid as if every item cost item 1 (4.50 × 5 + 5.00) → amount_mismatch', () => {
+    const r = resolveOrder(twoItems({ purchases: [purchase({ amount: '27.50' })] }));
+    expect(r.paymentState).toBe('amount_mismatch');
+    expect(r.pending).toBe(false);
+  });
+  it('a top-level v1.0 listingPrice is never applied to the items of a multi-item order', () => {
+    const i = twoItems({ listingPrice: '4.50', purchases: [purchase({ amount: '26.46' })] });
+    expect(resolveOrder(i).paymentState).toBe('paid');
+    // …even when the items carry no listing price at all (listing unknown → signed unit_price)
+    for (const it of i.order.items) { delete it.listingPrice; delete it.listingCreatedAt; }
+    expect(resolveOrder(i).expected).toBe('26.46');
+  });
+  it('the buyer cannot lower one line: expected uses that line\'s listing price', () => {
+    const i = twoItems({ purchases: [purchase({ amount: '22.48' })] });
+    i.order.items[1].unitPrice = '1.99'; i.order.total = '22.48';
+    const r = resolveOrder(i);
+    expect(r.expected).toBe('26.46');
+    expect(r.paymentState).toBe('amount_mismatch');
+  });
+  it('shipping is computed once, from the subtotal of ALL lines', () => {
+    const i = twoItems({ purchases: [purchase({ amount: '21.46' })] });
+    i.unit.freeShippingFrom = '20.00'; // each line alone is under 20, together 21.46
+    i.order.total = '21.46';
+    const r = resolveOrder(i);
+    expect(r.expected).toBe('21.46');
+    expect(r.paymentState).toBe('paid');
+  });
+  it('priceChanged when ANY item\'s listing was republished after the order', () => {
+    const i = twoItems();
+    i.order.items[1].listingCreatedAt = 2000;
+    expect(resolveOrder(i).priceChanged).toBe(true);
+  });
+  it('one item with its own listingPrice wins over the v1.0 top-level price', () => {
+    const i = base({ listingPrice: '9.99', purchases: [purchase()] });
+    i.order.items[0].listingPrice = '5.00';
+    expect(resolveOrder(i).paymentState).toBe('paid');
+  });
+});
