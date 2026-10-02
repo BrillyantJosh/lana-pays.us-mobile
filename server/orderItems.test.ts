@@ -310,22 +310,26 @@ describe('order items carry the listing the buyer saw', () => {
     expect(again).toBe(0);
   });
 
-  it('(e) no listing on any relay → title from the paid 30933 receipt, binding suffix stripped; upgraded once the listing appears', async () => {
+  it('(e) no listing on any relay → title from the 30933 receipt, binding suffix stripped; upgraded once the listing appears', async () => {
     const listingD = hex32();
     relayEvents = []; // listing deleted / relays silent
     const o = await placeAndPay(mk(), listingD, makeListingFetcher([relayUrl], 3000), 1);
-    expect(o.payment_state).toBe('paid');
+    // SPEC v1.1.1: with no merchant-signed price the amount is not computable,
+    // so the order is not paid yet (never priced at the buyer's unit_price).
+    expect(o).toMatchObject({ payment_state: 'amount_mismatch', pending: 0 });
     expect(snapRow(o.order_id)).toMatchObject({ source: 'receipt', title: 'TARTEN S PETERŠILJEM BIO 200g', sku: null, listing_event_id: null });
 
     const r = await get(`/api/orders/${o.order_id}?hex=${owner.pk}`);
     expect(r.json.items[0]).toMatchObject({ title: 'TARTEN S PETERŠILJEM BIO 200g', sku: null, lineTotal: '4.08' });
     expect(JSON.stringify(r.json.items)).not.toContain('36520:');
 
-    // The listing shows up again: the next resolve upgrades the receipt title.
+    // The listing shows up again: the next resolve pays the order and upgrades the receipt title.
     relayEvents = [listingEvent(owner, listingD, now() - 86_400)];
     clearListingCache();
+    expect(activeOrderIds(db, now())).toContain(o.order_id);
     await resolveOrders(db, { orderIds: [o.order_id], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
     expect(snapRow(o.order_id)).toMatchObject({ source: 'listing', sku: '321' });
+    expect(db.prepare('SELECT payment_state, pending FROM shop_orders WHERE order_id = ?').get(o.order_id)).toEqual({ payment_state: 'paid', pending: 1 });
   });
 
   it('(e) a receipt whose binding is for another order gives no title', async () => {

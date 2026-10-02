@@ -15,6 +15,19 @@
  * SPEC v1.1.0 §8 step 5a (settled): a 'paid' verdict the caller already
  * reached for exactly this 36520 event and this 30933 event is not revoked
  * by a later change of a listing price or of the shop's shipping fee.
+ *
+ * SPEC v1.1.1 (review 2 Oct 2026) — fail-closed. The buyer holds the key that
+ * signs the 36520 and may publish a replacement with the same d at any time,
+ * so no number in it is ever money:
+ *  - an item whose listing is unknown makes the expected amount
+ *    uncomputable, and an uncomputable order is never 'paid' by step 5 (it
+ *    heals on its own once the listing is found); there is no fallback to
+ *    the buyer-signed unit_price;
+ *  - only the NEWEST version of a 30933 (NIP-33: per signer and d = tx id)
+ *    counts, so the brain's cancellation republish un-pays the order;
+ *  - paid = status 'processing' | 'settled' (SPEC §7), nothing else;
+ *  - an unknown unit (the caller passes an empty ownerHex / currency) is
+ *    never paid, pinned (step 5a) or not.
  */
 
 export type PaymentState = 'unpaid' | 'paid' | 'amount_mismatch' | 'expired' | 'cancelled';
@@ -26,8 +39,12 @@ export interface ResolverItem {
   currency: string;
   /**
    * Current merchant-signed price of THIS item's listing; null when the
-   * listing is unknown. Left out (undefined) by v1.0 callers, which pass the
-   * single top-level `listingPrice` instead.
+   * listing is unknown — then the order's expected amount cannot be computed
+   * and step 5 never says 'paid' (the buyer-signed unitPrice is NEVER used
+   * as money). A caller that already checked this line against the listing
+   * (the broker, at order time) passes that checked price here. Left out
+   * (undefined) by v1.0 callers, which pass the single top-level
+   * `listingPrice` instead.
    */
   listingPrice?: string | null;
   /** created_at of THIS item's current listing event; null when unknown. */
@@ -84,6 +101,10 @@ export interface ResolverFulfillment {
   tracking?: string;
 }
 
+/**
+ * The shop the order's `a` tag names. A caller that cannot find it passes
+ * ownerHex '' and currency '' — nothing is then paid, pinned or not.
+ */
 export interface ResolverUnit {
   ownerHex: string;
   staffHexes: string[];
@@ -118,7 +139,9 @@ export interface ResolverInput {
    * order is judged afresh). While the same 30933 is still the candidate,
    * the order stays 'paid' even if a listing price or the shipping fee has
    * changed since: the buyer paid what was asked when the order was placed.
-   * A cancelled, failed or different 30933 is judged afresh.
+   * A cancelled, failed or different 30933 is judged afresh, and an unknown
+   * unit is never paid. The pin does hold when a listing is unknown later:
+   * step 5 only pays an order whose every listing is known.
    */
   settledPurchaseEventId?: string | null;
 }
@@ -133,7 +156,7 @@ export interface ResolverResult {
     lanaAmount: string;
     txHash?: string;
   } | null;
-  /** expected fiat amount, 2-decimal string */
+  /** expected fiat amount, 2-decimal string; '' when it cannot be computed (a listing is unknown) */
   expected: string;
   priceChanged: boolean;
   /** latest valid fulfillment status, else paymentState */
@@ -143,7 +166,8 @@ export interface ResolverResult {
 }
 
 const TERMINAL_FULFILLMENT = new Set(['shipped', 'delivered', 'completed', 'rejected', 'refunded']);
-const NOT_PAID_STATUS = new Set(['cancelled', 'failed']);
+/** SPEC §7: the only 30933 statuses that are money. The brain publishes 'processing' and, on a cancel, 'cancelled'. */
+const PAID_STATUS = new Set(['processing', 'settled']);
 
 /** Integer-cents parse of a decimal string; NaN-safe (returns null). */
 export function toCents(v: string | number | null | undefined): number | null {
@@ -175,7 +199,8 @@ export function orderIdMatchesPubkey(orderId: string, pubkey: string): boolean {
 /**
  * The current listing price that counts for one item: its own when the
  * caller supplied one (null = listing unknown), else — only for a one-item
- * order — the v1.0 top-level price.
+ * order — the v1.0 top-level price. null = unknown: the caller has no
+ * merchant-signed price for this line.
  */
 function itemListingPrice(order: ResolverOrder, it: ResolverItem, legacyPrice: string | null | undefined): string | null {
   if (it.listingPrice !== undefined) return it.listingPrice;
@@ -189,9 +214,10 @@ function itemListingCreatedAt(order: ResolverOrder, it: ResolverItem, legacyCrea
 
 /**
  * expected = Σ(qty_i × unitPrice_i) + shipping(fee, free-from on the WHOLE
- * subtotal), where unitPrice_i is item i's own current listing price, or its
- * signed unit_price when that listing is unknown. Returns cents or null when
- * un-computable.
+ * subtotal), where unitPrice_i is item i's own current listing price.
+ * Returns cents, or null when un-computable — above all when ANY item's
+ * listing is unknown: the buyer-signed unit_price is never money (the buyer
+ * can re-sign the order with any price at any time).
  */
 export function expectedCents(
   order: ResolverOrder,
@@ -201,7 +227,7 @@ export function expectedCents(
   if (!order.items.length) return null;
   let sum = 0;
   for (const it of order.items) {
-    const price = toCents(itemListingPrice(order, it, listingPrice) ?? it.unitPrice);
+    const price = toCents(itemListingPrice(order, it, listingPrice));
     if (price === null || !Number.isInteger(it.qty) || it.qty <= 0) return null;
     sum += price * it.qty;
   }
@@ -213,22 +239,40 @@ export function expectedCents(
   return sum;
 }
 
+/**
+ * NIP-33: a 30933 is replaceable per (signer, d = tx id); only the newest
+ * version is the purchase (same second: the lowest event id, NIP-01). Taken
+ * BEFORE any status filter, so a newer 'cancelled' version retires the older
+ * 'processing' one even when a caller still holds both.
+ */
+export function latestPurchaseVersions(purchases: ResolverPurchase[]): ResolverPurchase[] {
+  const newest = new Map<string, ResolverPurchase>();
+  for (const p of purchases) {
+    const k = JSON.stringify([p.pubkey, p.txId]);
+    const cur = newest.get(k);
+    if (!cur || p.createdAt > cur.createdAt || (p.createdAt === cur.createdAt && p.eventId < cur.eventId)) newest.set(k, p);
+  }
+  return [...newest.values()];
+}
+
 export function resolveOrder(input: ResolverInput): ResolverResult {
   const { order, purchases, fulfillment, unit, listingPrice, listingCreatedAt, trustedSigners, now, settledPurchaseEventId } = input;
   const bind = bindingString(order.pubkey, order.d);
   const prefixOk = orderIdMatchesPubkey(order.d, order.pubkey);
 
   const expCents = expectedCents(order, unit, listingPrice ?? null);
-  let expected = expCents === null ? order.total : centsToString(expCents);
+  let expected = expCents === null ? '' : centsToString(expCents);
+  const unitKnown = !!unit.ownerHex && !!unit.currency;
   const priceChanged = order.items.some((it) => {
     const at = itemListingCreatedAt(order, it, listingCreatedAt);
     return at !== null && at > order.createdAt;
   });
 
-  // Candidate 30933: newest that satisfies every identity/binding rule.
-  const candidates = purchases.filter((e) =>
+  // Candidate 30933: newest that satisfies every identity/binding rule, among
+  // the newest version of each purchase.
+  const candidates = latestPurchaseVersions(purchases).filter((e) =>
     trustedSigners.has(e.pubkey) &&
-    !NOT_PAID_STATUS.has(e.status) &&
+    PAID_STATUS.has(e.status) &&
     e.paymentType === 'lana' &&
     e.unitId === order.unitId &&
     e.invoiceNumber === order.d &&
@@ -244,10 +288,12 @@ export function resolveOrder(input: ResolverInput): ResolverResult {
     const amountOk = expCents !== null && amtCents !== null && Math.abs(amtCents - expCents) === 0;
     const currencyOk = e.currency === unit.currency && order.currency === unit.currency;
     paidBy = { txId: e.txId, eventId: e.eventId, customerHex: e.customerHex, amount: e.amount, lanaAmount: e.lanaAmount, txHash: e.txHash };
-    // Step 5a: this very 30933 already settled this very 36520 event.
+    // Step 5a: this very 30933 already settled this very 36520 event — of a
+    // shop we still know, for an order that still names what was bought.
     const settled = !!settledPurchaseEventId && settledPurchaseEventId === e.eventId
-      && amtCents !== null && e.currency === order.currency;
-    if (amountOk && currencyOk) {
+      && amtCents !== null && unitKnown && order.items.length > 0
+      && !!e.currency && e.currency === order.currency;
+    if (unitKnown && amountOk && currencyOk) {
       paymentState = 'paid';
     } else if (settled) {
       paymentState = 'paid';

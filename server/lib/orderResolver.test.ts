@@ -116,9 +116,10 @@ describe('resolveOrder — the money is recomputed from the merchant-signed list
   it('priceChanged flag when listing republished after order', () => {
     expect(resolveOrder(base({ listingCreatedAt: 2000 })).priceChanged).toBe(true);
   });
-  it('falls back to order unit_price when listing unknown', () => {
+  it('listing unknown: never priced by the buyer\'s unit_price — not paid (fail-closed, SPEC v1.1.1)', () => {
     const r = resolveOrder(base({ listingPrice: null, listingCreatedAt: null, purchases: [purchase()] }));
-    expect(r.paymentState).toBe('paid');
+    expect(r.paymentState).toBe('amount_mismatch');
+    expect(r.pending).toBe(false);
     expect(r.priceChanged).toBe(false);
   });
 });
@@ -206,9 +207,10 @@ describe('resolveOrder — several items of one shop (SPEC v1.1.0)', () => {
   it('a top-level v1.0 listingPrice is never applied to the items of a multi-item order', () => {
     const i = twoItems({ listingPrice: '4.50', purchases: [purchase({ amount: '26.46' })] });
     expect(resolveOrder(i).paymentState).toBe('paid');
-    // …even when the items carry no listing price at all (listing unknown → signed unit_price)
+    // …even when the items carry no listing price at all: listing unknown → not computable, not paid
     for (const it of i.order.items) { delete it.listingPrice; delete it.listingCreatedAt; }
-    expect(resolveOrder(i).expected).toBe('26.46');
+    expect(resolveOrder(i).expected).toBe('');
+    expect(resolveOrder(i).paymentState).toBe('amount_mismatch');
   });
   it('the buyer cannot lower one line: expected uses that line\'s listing price', () => {
     const i = twoItems({ purchases: [purchase({ amount: '22.48' })] });
@@ -294,5 +296,142 @@ describe('resolveOrder — a settled order stays paid (SPEC §8 step 5a)', () =>
     expect(r.paymentState).toBe('paid');
     expect(r.effectiveStatus).toBe('shipped');
     expect(r.pending).toBe(false);
+  });
+});
+
+/**
+ * Review of 2 Oct 2026. The buyer's ephemeral key lives in the buyer's
+ * browser, so the buyer can sign a REPLACEMENT 36520 with the same d at any
+ * time and publish it straight to the relays — every number in it is the
+ * buyer's. Only the merchant-signed listing and the brain-signed 30933 count.
+ */
+describe('resolveOrder — fail-closed money rules (review 2 Oct 2026)', () => {
+  const APPLES = `36502:${OWNER}:apples`;
+  const PEARS = `36502:${OWNER}:pears`;
+  /** E1 as placed and paid: 2 × apples at 5.00 + 2.50 shipping = 12.50. */
+  function paidApples(over: Partial<ResolverInput> = {}): ResolverInput {
+    const i = base({ listingPrice: null, listingCreatedAt: null, purchases: [purchase()], ...over });
+    i.order.items = [{ a: APPLES, qty: 2, unitPrice: '5.00', currency: 'EUR', listingPrice: '5.00', listingCreatedAt: 900 }];
+    return i;
+  }
+  /** E2, the buyer's replacement with the same d: 10 × pears "at 1.00" + 2.50 = 12.50 (pears really cost 50.00). */
+  function buyerReplacement(pearsListing: string | null, over: Partial<ResolverInput> = {}): ResolverInput {
+    const i = paidApples(over);
+    i.order.createdAt = 1005;
+    i.order.items = [{ a: PEARS, qty: 10, unitPrice: '1.00', currency: 'EUR', listingPrice: pearsListing, listingCreatedAt: pearsListing ? 900 : null }];
+    return i;
+  }
+
+  it('an item whose listing is unknown is never priced by the buyer: the order is not paid', () => {
+    const r = resolveOrder(buyerReplacement(null));
+    expect(r.paymentState).toBe('amount_mismatch');
+    expect(r.pending).toBe(false);
+    expect(r.expected).toBe('');
+    // …and a 0.00 line is not "free" either
+    const zero = paidApples({ purchases: [purchase({ amount: '2.50' })] });
+    zero.order.items[0] = { ...zero.order.items[0], unitPrice: '0.00', listingPrice: null, listingCreatedAt: null };
+    expect(resolveOrder(zero).paymentState).toBe('amount_mismatch');
+  });
+
+  it('one unknown line makes the whole cart uncomputable', () => {
+    const i = paidApples({ purchases: [purchase({ amount: '12.50' })] });
+    i.order.items.push({ a: PEARS, qty: 10, unitPrice: '0.00', currency: 'EUR', listingPrice: null, listingCreatedAt: null });
+    expect(resolveOrder(i).paymentState).toBe('amount_mismatch');
+  });
+
+  it('the v1.0 one-item shape with no listing price at all is not paid either', () => {
+    expect(resolveOrder(base({ listingPrice: null, listingCreatedAt: null, purchases: [purchase()] })).paymentState).toBe('amount_mismatch');
+    const noPair = base({ purchases: [purchase()] });
+    delete noPair.listingPrice; delete noPair.listingCreatedAt;
+    expect(resolveOrder(noPair).paymentState).toBe('amount_mismatch');
+  });
+
+  it('it heals by itself: once the listing is known, the same inputs are judged on the real price', () => {
+    expect(resolveOrder(buyerReplacement('50.00')).paymentState).toBe('amount_mismatch');
+    expect(resolveOrder(buyerReplacement('50.00')).expected).toBe('502.50');
+    expect(resolveOrder(paidApples()).paymentState).toBe('paid');
+  });
+
+  it('the step-5a pin does not outlive the shop: an unknown unit is never paid, pinned or not', () => {
+    const gone = { ownerHex: '', staffHexes: [], currency: '', shippingFee: '0.00', freeShippingFrom: null };
+    const r = resolveOrder(paidApples({ settledPurchaseEventId: 'ev1', unit: gone }));
+    expect(r.paymentState).toBe('amount_mismatch');
+    expect(r.pending).toBe(false);
+    // the same with the 30933 and the order both claiming no currency
+    const i = paidApples({ settledPurchaseEventId: 'ev1', unit: gone, purchases: [purchase({ currency: '' })] });
+    i.order.currency = '';
+    expect(resolveOrder(i).paymentState).toBe('amount_mismatch');
+    // …and without a pin: step 5 does not pay an unknown shop either (2 × 5.00, no fee known)
+    expect(resolveOrder({ ...i, settledPurchaseEventId: null, purchases: [purchase({ currency: '', amount: '10.00' })] }).paymentState).toBe('amount_mismatch');
+  });
+
+  it('a pin needs an order that still names its items and a currency', () => {
+    const noItems = paidApples({ settledPurchaseEventId: 'ev1' });
+    noItems.order.items = [];
+    expect(resolveOrder(noItems).paymentState).toBe('amount_mismatch');
+    const noCurrency = paidApples({ settledPurchaseEventId: 'ev1', purchases: [purchase({ currency: '' })] });
+    noCurrency.order.currency = '';
+    expect(resolveOrder(noCurrency).paymentState).toBe('amount_mismatch');
+  });
+
+  it('a pin survives a listing that is gone later — the verdict was reached with every listing known', () => {
+    const i = paidApples({ settledPurchaseEventId: 'ev1' });
+    i.order.items[0] = { ...i.order.items[0], listingPrice: null, listingCreatedAt: null };
+    const r = resolveOrder(i);
+    expect(r.paymentState).toBe('paid');
+    expect(r.expected).toBe('12.50');
+  });
+
+  it('NIP-33: only the newest version of a 30933 counts — a later cancellation un-pays the order', () => {
+    const processing = purchase({ eventId: 'v1', createdAt: 1200 });
+    // the brain's cancel republish (same signer, same d = tx id) carries no receipt_description
+    const cancelled = purchase({ eventId: 'v2', createdAt: 1300, status: 'cancelled', receiptDescription: '' });
+    for (const purchases of [[processing, cancelled], [cancelled, processing]]) {
+      const r = resolveOrder(paidApples({ purchases }));
+      expect(r.paymentState).toBe('unpaid');
+      expect(r.paidBy).toBeNull();
+      expect(r.pending).toBe(false);
+    }
+    // …also against a pin on the old version
+    expect(resolveOrder(paidApples({ purchases: [processing, cancelled], settledPurchaseEventId: 'v1' })).paymentState).toBe('unpaid');
+    // …and after pay_by it is expired, not paid
+    expect(resolveOrder(paidApples({ purchases: [processing, cancelled], now: 5000 })).paymentState).toBe('expired');
+  });
+
+  it('versions are per (signer, tx id): another tx id, or a stranger\'s copy, cancels nothing', () => {
+    const paying = purchase({ eventId: 'v1', createdAt: 1200 });
+    const otherTx = purchase({ eventId: 'o1', txId: 'tx2', createdAt: 1300, status: 'cancelled' });
+    const stranger = purchase({ eventId: 's1', pubkey: 'x'.repeat(64), createdAt: 1400, status: 'cancelled' });
+    const r = resolveOrder(paidApples({ purchases: [paying, otherTx, stranger] }));
+    expect(r.paymentState).toBe('paid');
+    expect(r.paidBy?.eventId).toBe('v1');
+  });
+
+  it('two versions in the same second: the lowest event id is the one kept (NIP-01)', () => {
+    const a = purchase({ eventId: 'a-cancel', createdAt: 1300, status: 'cancelled' });
+    const b = purchase({ eventId: 'b-paid', createdAt: 1300 });
+    expect(resolveOrder(paidApples({ purchases: [b, a] })).paymentState).toBe('unpaid');
+    expect(resolveOrder(paidApples({ purchases: [a, b] })).paymentState).toBe('unpaid');
+  });
+
+  it('only status processing or settled is paid (SPEC §7)', () => {
+    for (const status of ['processing', 'settled']) {
+      expect(resolveOrder(paidApples({ purchases: [purchase({ status })] })).paymentState, status).toBe('paid');
+    }
+    for (const status of ['', 'refunded', 'pending', 'created', 'partial', 'Processing', 'cancelled', 'failed']) {
+      const r = resolveOrder(paidApples({ purchases: [purchase({ status })] }));
+      expect(r.paymentState, status).toBe('unpaid');
+      expect(r.pending, status).toBe(false);
+    }
+  });
+
+  it('the live order of 2 Oct 2026 keeps its verdict: 1 × 4.08, pickup, listing 4.08 republished later, 30933 processing', () => {
+    const i = base({ listingPrice: null, listingCreatedAt: null, purchases: [purchase({ amount: '4.08' })] });
+    i.order.fulfillment = 'pickup'; i.order.total = '4.08';
+    i.order.items = [{ a: APPLES, qty: 1, unitPrice: '4.08', currency: 'EUR', listingPrice: '4.08', listingCreatedAt: 99999 }];
+    for (const settledPurchaseEventId of [null, 'ev1']) {
+      const r = resolveOrder({ ...i, settledPurchaseEventId, fulfillment: { pubkey: OWNER, createdAt: 2000, status: 'rejected' } });
+      expect(r).toMatchObject({ paymentState: 'paid', expected: '4.08', priceChanged: true, effectiveStatus: 'rejected', pending: false });
+    }
   });
 });

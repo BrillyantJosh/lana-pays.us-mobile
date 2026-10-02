@@ -155,6 +155,15 @@ export function unitToResolver(u: UnitRow): ResolverUnit {
 /** SPEC v1.1.0: different products ONE order may carry (all of one shop). */
 export const MAX_ITEMS_PER_ORDER = 30;
 
+/**
+ * Kinds a 36520 item may point at: the Lana listing kinds 36500–36516 and the
+ * NIP-52 calendar listing 31923 — the set the broker (shop.lanapays.us
+ * LISTING_KINDS) takes an order for. Anything else is not a product.
+ */
+export const ORDER_ITEM_KINDS: ReadonlySet<number> = new Set([
+  31923, ...Array.from({ length: 17 }, (_, i) => 36500 + i),
+]);
+
 export interface ParsedOrder {
   d: string; pubkey: string; eventId: string; createdAt: number;
   unitId: string; unitOwnerHex: string;
@@ -179,9 +188,12 @@ export function parseOrderEvent(ev: SignedEvent): ParsedOrder | null {
   for (const t of ev.tags) {
     if (t[0] !== 'item') continue;
     const [, addr, qtyS, saleUnit, unitPrice, cur] = t;
-    const [kindS, owner] = String(addr || '').split(':');
+    // `<listing kind>:<owner>:<listing d>` exactly, as the broker takes it.
+    const parts = String(addr || '').split(':');
+    const [kindS, owner, listingD] = parts;
     const qty = Number(qtyS);
-    if (!/^\d+$/.test(kindS || '') || !HEX64.test(owner || '') || !Number.isInteger(qty) || qty <= 0) return null;
+    if (parts.length !== 3 || !/^[1-9]\d*$/.test(kindS || '') || !ORDER_ITEM_KINDS.has(Number(kindS)) || !listingD) return null;
+    if (!HEX64.test(owner || '') || !Number.isInteger(qty) || qty <= 0) return null;
     if (toCents(unitPrice) === null || !cur) return null;
     items.push({ a: addr, kind: Number(kindS), qty, saleUnit: saleUnit || '', unitPrice, currency: cur });
   }
@@ -300,6 +312,11 @@ export function ingestOrder(db: Database.Database, ev: SignedEvent): string | nu
     if (existing.buyer_pubkey !== o.pubkey) return null;          // NIP-33 replace is per (pubkey, d)
     if (o.createdAt <= existing.created_at) return null;          // NIP-33 newest wins (same event = no-op)
   }
+  // A replacement is a NEW order event: the verdict of the old one (paid,
+  // pending, paid_*) must not show beside the new lines until resolveOrders
+  // has judged it — the view, the pending count and the fulfillment gate read
+  // these columns. So the row goes back to "never resolved"; the merchant's
+  // own fulfillment columns stay, and resolveOrders (same sync tick) re-judges.
   db.prepare(`
     INSERT INTO shop_orders (
       order_id, event_id, buyer_pubkey, created_at, unit_id, unit_owner_hex, items_json,
@@ -311,6 +328,10 @@ export function ingestOrder(db: Database.Database, ev: SignedEvent): string | nu
       shipping = excluded.shipping, total = excluded.total, currency = excluded.currency,
       fulfillment = excluded.fulfillment, order_status = excluded.order_status, pay_by = excluded.pay_by,
       client = excluded.client, supersedes = excluded.supersedes, raw_event = excluded.raw_event,
+      payment_state = 'unpaid', expected_total = NULL, price_changed = 0, effective_status = 'unpaid', pending = 0,
+      paid_signer_hex = NULL, paid_tx_id = NULL, paid_event_id = NULL, paid_customer_hex = NULL,
+      paid_amount = NULL, paid_lana_amount = NULL, paid_at = NULL, paid_order_event_id = NULL,
+      resolved_at = NULL,
       updated_at = datetime('now')
   `).run(
     o.d, o.eventId, o.pubkey, o.createdAt, o.unitId, o.unitOwnerHex, JSON.stringify(o.items),
@@ -680,13 +701,18 @@ function orderFromRow(r: any): ResolverOrder {
   };
 }
 
-/** Orders whose state can still move: unpaid/expired within 7d, anything pending, never resolved. */
+/**
+ * Orders whose state can still move: unpaid/expired/amount_mismatch within
+ * 7d, anything pending, never resolved. amount_mismatch is here because an
+ * order whose listing was not found (a quiet relay) is not computable and so
+ * not paid (SPEC v1.1.1) — it must be judged again once the listing answers.
+ */
 export function activeOrderIds(db: Database.Database, now = nowUnix()): string[] {
   return (db.prepare(`
     SELECT order_id FROM shop_orders
     WHERE resolved_at IS NULL
        OR pending = 1
-       OR (payment_state IN ('unpaid', 'expired') AND created_at > ?)
+       OR (payment_state IN ('unpaid', 'expired', 'amount_mismatch') AND created_at > ?)
   `).all(now - 7 * DAY) as any[]).map(r => r.order_id);
 }
 
@@ -746,6 +772,9 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
     // EVERY item is priced by its own current listing (SPEC v1.1.0): the
     // first item's price applied to all would judge a correctly paid cart
     // amount_mismatch. The top-level pair stays for the one-item v1.0 shape.
+    // A listing not found (no event of that kind, author and d, or a failed
+    // REQ) is null: the order is then not paid until it is (SPEC v1.1.1) —
+    // the buyer's own unit_price is never money.
     const listings = await listingsOf(order.items, opts.fetchListing);
     const listing = listings[0] ?? null;
     order.items = order.items.map((it, i) => ({
@@ -819,6 +848,7 @@ export async function republishUnpublished(db: Database.Database, relays: string
 const SAFETY_NET_EVERY = 60;         // ticks (≈ hourly at the 1-min heartbeat)
 const CURSOR_OVERLAP = 6 * 3600;     // tolerate late-published events + relay clock skew
 const PAGE_HINT = 300;               // a relay that returns this many probably capped the REQ
+const TX_IDS_PER_REQ = 100;          // #d values per 30933 REQ (each has ≤ 1 version per signer on a relay)
 
 function readState(db: Database.Database, key: string): string | null {
   return (db.prepare('SELECT value FROM shop_order_sync_state WHERE key = ?').get(key) as any)?.value ?? null;
@@ -899,7 +929,8 @@ export async function syncShopOrders(db: Database.Database, relaysFromHeartbeat?
   advanceCursor(KIND_ORDER, orders); advanceCursor(KIND_FULFILLMENT, fulfillments); advanceCursor(KIND_DELIVERY, deliveries);
 
   // 2) 30933 — trusted authors only, and only for the window in which an order
-  //    of ours can still be paid (bounded: no open orders ⇒ no purchase REQ).
+  //    of ours can still be paid (bounded: no open orders ⇒ no window REQ),
+  //    plus (2b) the paid orders' own 30933 by tx id.
   fetched['30933'] = 0;
   if (trusted.size > 0) {
     const open = db.prepare(`
@@ -916,6 +947,25 @@ export async function syncShopOrders(db: Database.Database, relaysFromHeartbeat?
       for (const ev of purchases) { const id = ingestEvent(db, ev, trusted); if (id) touched.add(id); }
       advanceCursor(KIND_PURCHASE, purchases);
     }
+
+    // 2b) The 30933 of every PAID order not yet shipped/finished, by its tx id
+    //     (= the 30933 d), whether or not any order is open. When the brain
+    //     cancels a purchase it republishes that d with status 'cancelled';
+    //     the window read above only runs while some order is unpaid, so a
+    //     cancellation published while none is would be missed for good and
+    //     the merchant could ship a cancelled order. Exact #d reads, chunked
+    //     (a relay answers ≤ 500 per REQ); the cursor is not moved by them.
+    const paidTx = (db.prepare(`
+      SELECT DISTINCT paid_tx_id AS tx FROM shop_orders
+      WHERE payment_state = 'paid' AND pending = 1 AND paid_tx_id IS NOT NULL AND paid_tx_id != ''
+    `).all() as Array<{ tx: string }>).map(r => r.tx);
+    let byTx = 0;
+    for (let i = 0; i < paidTx.length; i += TX_IDS_PER_REQ) {
+      const evs = await fetchKind(relays, { kinds: [KIND_PURCHASE], authors: [...trusted], '#d': paidTx.slice(i, i + TX_IDS_PER_REQ) }, 15000);
+      byTx += evs.length;
+      for (const ev of evs) { const id = ingestEvent(db, ev, trusted); if (id) touched.add(id); }
+    }
+    fetched['30933_by_tx'] = byTx;
   } else {
     console.warn('[orders] no trusted signers in KIND 38888 — purchases are NOT synced (fail-closed)');
   }
@@ -935,6 +985,6 @@ export async function syncShopOrders(db: Database.Database, relaysFromHeartbeat?
   const republished = await republishUnpublished(db, relays);
 
   const stats: SyncStats = { relays: relays.length, trusted: trusted.size, fetched, touched: touched.size, resolved, backfilled, republished, safetyNet };
-  console.log(`[orders] sync: 36520=${fetched['36520']} 36521=${fetched['36521']} 36522=${fetched['36522']} 30933=${fetched['30933']} touched=${touched.size} resolved=${resolved} items_backfilled=${backfilled} republished=${republished}${safetyNet ? ' (safety net)' : ''}`);
+  console.log(`[orders] sync: 36520=${fetched['36520']} 36521=${fetched['36521']} 36522=${fetched['36522']} 30933=${fetched['30933']} 30933_by_tx=${fetched['30933_by_tx'] ?? 0} touched=${touched.size} resolved=${resolved} items_backfilled=${backfilled} republished=${republished}${safetyNet ? ' (safety net)' : ''}`);
   return stats;
 }
