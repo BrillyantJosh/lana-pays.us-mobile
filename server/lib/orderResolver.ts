@@ -11,6 +11,10 @@
  * SPEC v1.1.0 (cart): an order may carry several items of ONE shop. Each
  * item is priced by ITS OWN current listing (ResolverItem.listingPrice);
  * the v1.0 top-level listingPrice still works, for one-item orders only.
+ *
+ * SPEC v1.1.0 §8 step 5a (settled): a 'paid' verdict the caller already
+ * reached for exactly this 36520 event and this 30933 event is not revoked
+ * by a later change of a listing price or of the shop's shipping fee.
  */
 
 export type PaymentState = 'unpaid' | 'paid' | 'amount_mismatch' | 'expired' | 'cancelled';
@@ -106,6 +110,17 @@ export interface ResolverInput {
   listingCreatedAt?: number | null;
   trustedSigners: Set<string>;
   now: number;
+  /**
+   * SPEC §8 step 5a — the 30933 event id this caller already judged 'paid'
+   * for EXACTLY this 36520 event. The caller stores the order's event id
+   * with that verdict and passes null as soon as the stored order event is a
+   * different one (the buyer may replace a 36520 at will, and a replaced
+   * order is judged afresh). While the same 30933 is still the candidate,
+   * the order stays 'paid' even if a listing price or the shipping fee has
+   * changed since: the buyer paid what was asked when the order was placed.
+   * A cancelled, failed or different 30933 is judged afresh.
+   */
+  settledPurchaseEventId?: string | null;
 }
 
 export interface ResolverResult {
@@ -199,12 +214,12 @@ export function expectedCents(
 }
 
 export function resolveOrder(input: ResolverInput): ResolverResult {
-  const { order, purchases, fulfillment, unit, listingPrice, listingCreatedAt, trustedSigners, now } = input;
+  const { order, purchases, fulfillment, unit, listingPrice, listingCreatedAt, trustedSigners, now, settledPurchaseEventId } = input;
   const bind = bindingString(order.pubkey, order.d);
   const prefixOk = orderIdMatchesPubkey(order.d, order.pubkey);
 
   const expCents = expectedCents(order, unit, listingPrice ?? null);
-  const expected = expCents === null ? order.total : centsToString(expCents);
+  let expected = expCents === null ? order.total : centsToString(expCents);
   const priceChanged = order.items.some((it) => {
     const at = itemListingCreatedAt(order, it, listingCreatedAt);
     return at !== null && at > order.createdAt;
@@ -229,7 +244,17 @@ export function resolveOrder(input: ResolverInput): ResolverResult {
     const amountOk = expCents !== null && amtCents !== null && Math.abs(amtCents - expCents) === 0;
     const currencyOk = e.currency === unit.currency && order.currency === unit.currency;
     paidBy = { txId: e.txId, eventId: e.eventId, customerHex: e.customerHex, amount: e.amount, lanaAmount: e.lanaAmount, txHash: e.txHash };
-    paymentState = amountOk && currencyOk ? 'paid' : 'amount_mismatch';
+    // Step 5a: this very 30933 already settled this very 36520 event.
+    const settled = !!settledPurchaseEventId && settledPurchaseEventId === e.eventId
+      && amtCents !== null && e.currency === order.currency;
+    if (amountOk && currencyOk) {
+      paymentState = 'paid';
+    } else if (settled) {
+      paymentState = 'paid';
+      expected = centsToString(amtCents as number);
+    } else {
+      paymentState = 'amount_mismatch';
+    }
   } else if (order.status === 'cancelled') {
     paymentState = 'cancelled';
   } else {

@@ -359,7 +359,9 @@ describe('order items carry the listing the buyer saw', () => {
     const input = calls[0][0];
     expect(input.listingPrice).toBe('4.08');
     expect(input.listingCreatedAt).toBe(createdAt);
-    expect(Object.keys(input).sort()).toEqual(['fulfillment', 'listingCreatedAt', 'listingPrice', 'now', 'order', 'purchases', 'trustedSigners', 'unit']);
+    expect(Object.keys(input).sort()).toEqual(['fulfillment', 'listingCreatedAt', 'listingPrice', 'now', 'order', 'purchases', 'settledPurchaseEventId', 'trustedSigners', 'unit']);
+    // A first resolve has no stored paid verdict to keep (SPEC §8 step 5a).
+    expect(input.settledPurchaseEventId).toBeNull();
     // The order the resolver sees is still the buyer's own item tag plus that
     // item's own listing price + created_at (SPEC v1.1.0) — no listing text mixed in.
     expect(Object.keys(input.order.items[0]).sort()).toEqual(['a', 'currency', 'listingCreatedAt', 'listingPrice', 'qty', 'unitPrice']);
@@ -439,6 +441,35 @@ describe('cart orders: several products of one shop in ONE order (SPEC v1.1.0)',
     expect(ingestEvent(db, purchaseEvent(d, buyer.pk, '20.40', 'x', 2), trusted)).toBe(d); // 4.08 × 5
     await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
     expect(db.prepare('SELECT payment_state, pending FROM shop_orders WHERE order_id = ?').get(d)).toEqual({ payment_state: 'amount_mismatch', pending: 0 });
+  });
+
+  it('a paid cart stays paid and pending when one product\'s price changes afterwards (SPEC §8 step 5a)', async () => {
+    relayEvents = listings();
+    const buyer = mk();
+    const d = orderIdFor(buyer.pk);
+    expect(ingestEvent(db, cartOrderEvent(buyer, d, items(), '20.10'), trusted)).toBe(d);
+    expect(ingestEvent(db, purchaseEvent(d, buyer.pk, '20.10', 'x', 2), trusted)).toBe(d);
+    const fetchListing = makeListingFetcher([relayUrl], 3000);
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing, now: now() });
+    const paid = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(d) as any;
+    expect(paid).toMatchObject({ payment_state: 'paid', pending: 1 });
+    expect(paid.paid_order_event_id).toBe(paid.event_id);
+
+    // Next day the merchant republishes the second product at 4.20.
+    relayEvents = [listings()[0], listingEvent(owner, L2, now() - 10, { title: 'HUMUS KLASIČNI BIO 180g', sku: '777', weight: '180 g', price: '4.20' })];
+    clearListingCache();
+    expect(activeOrderIds(db, now())).toContain(d);
+    await resolveOrders(db, { trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    const after = db.prepare('SELECT payment_state, pending, expected_total, price_changed FROM shop_orders WHERE order_id = ?').get(d);
+    expect(after).toEqual({ payment_state: 'paid', pending: 1, expected_total: '20.10', price_changed: 1 });
+    expect(activeOrderIds(db, now())).toContain(d);
+
+    // The buyer replaces the 36520 afterwards: that new event is judged afresh at today's prices.
+    expect(ingestEvent(db, cartOrderEvent(buyer, d, items(), '20.10', now() - 5), trusted)).toBe(d);
+    clearListingCache();
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    expect(db.prepare('SELECT payment_state, pending, paid_order_event_id FROM shop_orders WHERE order_id = ?').get(d))
+      .toEqual({ payment_state: 'amount_mismatch', pending: 0, paid_order_event_id: null });
   });
 
   it('refused like any malformed order: the same product twice, another shop\'s product, more than 30 items', () => {

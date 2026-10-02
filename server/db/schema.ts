@@ -349,6 +349,9 @@ export function initializeSchema(db: Database.Database): void {
       paid_amount TEXT,
       paid_lana_amount TEXT,
       paid_at INTEGER,
+      -- the 36520 event id (shop_orders.event_id) the 'paid' verdict was
+      -- reached for — SPEC §8 step 5a
+      paid_order_event_id TEXT,
       fulfillment_status TEXT,
       fulfillment_event_id TEXT,
       fulfillment_pubkey TEXT,
@@ -449,6 +452,15 @@ export function initializeSchema(db: Database.Database): void {
       PRIMARY KEY (order_id, item_a)
     );
   `);
+
+  // SPEC §8 step 5a: a 'paid' verdict remembers WHICH 36520 event it was
+  // reached for, so a later listing or shipping-fee change does not turn a
+  // paid order into amount_mismatch (and drop it from the merchant's pending
+  // list for good). No fill for old rows: ingestOrder can store a newer
+  // 36520 before the next resolve, so only resolveOrders knows which event a
+  // verdict belongs to — it fills the column on its next pass (pending orders
+  // are resolved on every sync).
+  try { db.exec(`ALTER TABLE shop_orders ADD COLUMN paid_order_event_id TEXT`); } catch { /* column exists */ }
 
   console.log('Database schema initialized');
 }

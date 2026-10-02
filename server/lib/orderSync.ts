@@ -700,6 +700,7 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
     UPDATE shop_orders SET
       payment_state = ?, expected_total = ?, price_changed = ?, effective_status = ?, pending = ?,
       paid_signer_hex = ?, paid_tx_id = ?, paid_event_id = ?, paid_customer_hex = ?, paid_amount = ?, paid_lana_amount = ?, paid_at = ?,
+      paid_order_event_id = ?,
       fulfillment_status = ?, fulfillment_event_id = ?, fulfillment_pubkey = ?, fulfillment_created_at = ?,
       fulfillment_carrier = ?, fulfillment_tracking = ?, fulfillment_published = ?,
       resolved_at = ?, updated_at = datetime('now')
@@ -753,11 +754,19 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
       listingCreatedAt: listings[i] ? listings[i]!.createdAt : null,
     }));
 
+    // SPEC §8 step 5a: a paid verdict reached for THIS 36520 event (same id)
+    // survives a later price or shipping-fee change; a replaced order is
+    // judged afresh.
+    const settledPurchaseEventId = row.payment_state === 'paid' && row.paid_event_id
+      && row.paid_order_event_id && row.paid_order_event_id === row.event_id
+      ? String(row.paid_event_id) : null;
+
     const r = resolveOrder({
       order, purchases, fulfillment, unit: unitToResolver(unit),
       listingPrice: listing?.price ?? null,
       listingCreatedAt: listing ? listing.createdAt : null,
       trustedSigners: opts.trusted, now,
+      settledPurchaseEventId,
     });
 
     const paidPurchase = r.paidBy ? purchases.find(p => p.eventId === r.paidBy!.eventId) || null : null;
@@ -766,6 +775,7 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
       r.paymentState, r.expected, r.priceChanged ? 1 : 0, r.effectiveStatus, r.pending ? 1 : 0,
       paidPurchase?.pubkey ?? null, r.paidBy?.txId ?? null, r.paidBy?.eventId ?? null, r.paidBy?.customerHex ?? null,
       r.paidBy?.amount ?? null, r.paidBy?.lanaAmount ?? null, paidPurchase?.createdAt ?? null,
+      r.paymentState === 'paid' ? row.event_id : null,
       signerOk ? fRow.status : null, signerOk ? fRow.event_id : null, signerOk ? fRow.pubkey : null,
       signerOk ? fRow.created_at : null, signerOk ? fRow.carrier : null, signerOk ? fRow.tracking : null,
       signerOk ? fRow.published : 1,

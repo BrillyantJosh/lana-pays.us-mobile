@@ -236,3 +236,63 @@ describe('resolveOrder — several items of one shop (SPEC v1.1.0)', () => {
     expect(resolveOrder(i).paymentState).toBe('paid');
   });
 });
+
+describe('resolveOrder — a settled order stays paid (SPEC §8 step 5a)', () => {
+  const A1 = `36502:${OWNER}:lst1`;
+  const A2 = `36502:${OWNER}:lst2`;
+  /** Paid 26.46 = 3 × 4.50 + 2 × 3.98 + 5.00; the next day line 2's listing is republished at 4.20. */
+  function repricedCart(over: Partial<ResolverInput> = {}): ResolverInput {
+    const i = base({ listingPrice: null, listingCreatedAt: null, purchases: [purchase({ amount: '26.46' })], ...over });
+    i.unit.shippingFee = '5.00';
+    i.order.items = [
+      { a: A1, qty: 3, unitPrice: '4.50', currency: 'EUR', listingPrice: '4.50', listingCreatedAt: 900 },
+      { a: A2, qty: 2, unitPrice: '3.98', currency: 'EUR', listingPrice: '4.20', listingCreatedAt: 90000 },
+    ];
+    i.order.total = '26.46';
+    return i;
+  }
+  it('without a stored verdict a later price change turns it into amount_mismatch (the old behaviour)', () => {
+    const r = resolveOrder(repricedCart());
+    expect(r.expected).toBe('26.90');
+    expect(r.paymentState).toBe('amount_mismatch');
+    expect(r.pending).toBe(false);
+  });
+  it('the same 30933 that settled this order event keeps it paid and pending, at the amount paid', () => {
+    const r = resolveOrder(repricedCart({ settledPurchaseEventId: 'ev1' }));
+    expect(r.paymentState).toBe('paid');
+    expect(r.pending).toBe(true);
+    expect(r.expected).toBe('26.46');
+    expect(r.priceChanged).toBe(true);
+    expect(r.paidBy?.eventId).toBe('ev1');
+  });
+  it('a later shipping-fee change does not revoke it either', () => {
+    const i = base({ purchases: [purchase()], settledPurchaseEventId: 'ev1' });
+    i.unit.shippingFee = '4.90';
+    expect(resolveOrder(i).paymentState).toBe('paid');
+    i.settledPurchaseEventId = null;
+    expect(resolveOrder(i).paymentState).toBe('amount_mismatch');
+  });
+  it('a different 30933 is judged afresh', () => {
+    const r = resolveOrder(repricedCart({ settledPurchaseEventId: 'some-other-event' }));
+    expect(r.paymentState).toBe('amount_mismatch');
+  });
+  it('a cancelled 30933 still un-pays the order', () => {
+    const r = resolveOrder(repricedCart({ settledPurchaseEventId: 'ev1', purchases: [purchase({ amount: '26.46', status: 'cancelled' })] }));
+    expect(r.paymentState).toBe('unpaid');
+    expect(r.paidBy).toBeNull();
+  });
+  it('never makes an order paid that has no qualifying 30933', () => {
+    expect(resolveOrder(base({ settledPurchaseEventId: 'ev1' })).paymentState).toBe('unpaid');
+    expect(resolveOrder(base({ settledPurchaseEventId: 'ev1', purchases: [purchase({ pubkey: 'x'.repeat(64) })] })).paymentState).toBe('unpaid');
+  });
+  it('a 30933 in another currency than the order is not kept', () => {
+    const r = resolveOrder(repricedCart({ settledPurchaseEventId: 'ev1', purchases: [purchase({ amount: '26.46', currency: 'GBP' })] }));
+    expect(r.paymentState).toBe('amount_mismatch');
+  });
+  it('fulfillment still ends pending on a settled order', () => {
+    const r = resolveOrder(repricedCart({ settledPurchaseEventId: 'ev1', fulfillment: { pubkey: OWNER, createdAt: 99999, status: 'shipped' } }));
+    expect(r.paymentState).toBe('paid');
+    expect(r.effectiveStatus).toBe('shipped');
+    expect(r.pending).toBe(false);
+  });
+});
