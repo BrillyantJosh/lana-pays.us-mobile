@@ -143,7 +143,7 @@ let base = '';
 let httpServer: any;
 const trusted = new Set([brain.pk]);
 /** The fetcher every pre-existing test uses: money fields only, nothing to display. */
-const priceOnly: ListingFetcher = async () => ({ price: '4.08', currency: 'EUR', status: 'active', createdAt: now() - 86_400 });
+const priceOnly: ListingFetcher = async () => ({ price: '4.08', currency: 'EUR', status: 'active', createdAt: now() - 86_400, unitRef: `30901:${owner.pk}:${UNIT}` });
 
 const get = async (path: string) => { const r = await fetch(base + path); return { status: r.status, json: await r.json() as any }; };
 const snapRow = (orderId: string) => db.prepare('SELECT * FROM shop_order_item_snapshots WHERE order_id = ?').get(orderId) as any;
@@ -184,7 +184,7 @@ beforeAll(async () => {
     INSERT INTO business_units (unit_id, event_id, pubkey, created_at, name, owner_hex, authorized_hex, currency, status, raw_event)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'EUR', 'active', ?)
   `).run(UNIT, 'e'.repeat(64), owner.pk, now(), 'Eko veganska trgovina Živa Center', owner.pk, JSON.stringify([owner.pk]),
-    JSON.stringify({ kind: 30901, pubkey: owner.pk, tags: [['d', UNIT], ['unit_id', UNIT], ['online_shop', 'true']], content: '' }));
+    JSON.stringify({ kind: 30901, pubkey: owner.pk, tags: [['d', UNIT], ['unit_id', UNIT], ['online_shop', 'true'], ['online_shop_pickup', 'true']], content: '' }));
 
   const app = express();
   app.use(express.json());
@@ -355,17 +355,16 @@ describe('order items carry the listing the buyer saw', () => {
     const listingD = hex32();
     const createdAt = now() - 86_400;
     relayEvents = [listingEvent(owner, listingD, createdAt)];
-    const sameAsListing: ListingFetcher = async () => ({ price: '4.08', currency: 'EUR', status: 'active', createdAt });
+    const sameAsListing: ListingFetcher = async () => ({ price: '4.08', currency: 'EUR', status: 'active', createdAt, unitRef: `30901:${owner.pk}:${UNIT}` });
 
     const withDisplay = await placeAndPay(mk(), listingD, makeListingFetcher([relayUrl], 3000));
     const calls = vi.mocked(resolveOrder).mock.calls;
     expect(calls.length).toBe(1);
     const input = calls[0][0];
-    expect(input.listingPrice).toBe('4.08');
-    expect(input.listingCreatedAt).toBe(createdAt);
-    expect(Object.keys(input).sort()).toEqual(['fulfillment', 'listingCreatedAt', 'listingPrice', 'now', 'order', 'purchases', 'settledPurchaseEventId', 'trustedSigners', 'unit']);
+    // every item carries its own price (SPEC v1.1.0); no v1.0 top-level pair any more
+    expect(Object.keys(input).sort()).toEqual(['fulfillment', 'now', 'order', 'purchases', 'settledPurchase', 'trustedSigners', 'unit']);
     // A first resolve has no stored paid verdict to keep (SPEC §8 step 5a).
-    expect(input.settledPurchaseEventId).toBeNull();
+    expect(input.settledPurchase).toBeNull();
     // The order the resolver sees is still the buyer's own item tag plus that
     // item's own listing price + created_at (SPEC v1.1.0) — no listing text mixed in.
     expect(Object.keys(input.order.items[0]).sort()).toEqual(['a', 'currency', 'listingCreatedAt', 'listingPrice', 'qty', 'unitPrice']);
@@ -428,9 +427,10 @@ describe('cart orders: several products of one shop in ONE order (SPEC v1.1.0)',
     expect(row).toMatchObject({ payment_state: 'paid', expected_total: '20.10', pending: 1 });
 
     const r = await get(`/api/orders/${d}?hex=${owner.pk}`);
-    expect(r.json.items.map((i: any) => [i.title, i.qty, i.saleUnit, i.unitPrice, i.lineTotal, i.sku])).toEqual([
-      ['TARTEN S PETERŠILJEM BIO 200g', 2, 'g', '4.08', '8.16', '321'],
-      ['HUMUS KLASIČNI BIO 180g', 3, 'kos', '3.98', '11.94', '777'],
+    // The sale unit shown is the MERCHANT-signed listing's (both fixtures sign 'g'); the buyer's tag says 'kos'.
+    expect(r.json.items.map((i: any) => [i.title, i.qty, i.saleUnit, i.unitPrice, i.lineTotal, i.sku, i.buyerSaleUnit])).toEqual([
+      ['TARTEN S PETERŠILJEM BIO 200g', 2, 'g', '4.08', '8.16', '321', 'g'],
+      ['HUMUS KLASIČNI BIO 180g', 3, 'g', '3.98', '11.94', '777', 'kos'],
     ]);
     expect(r.json).toMatchObject({ total: '20.10', shipping: '0.00' });
     // a snapshot per item

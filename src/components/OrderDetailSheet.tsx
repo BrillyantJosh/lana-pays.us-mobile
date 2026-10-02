@@ -68,9 +68,14 @@ export function OrderDetailSheet({ order, open, onOpenChange, merchantHex, onCha
   if (!order) return null;
 
   const sym = currencySymbol(order.currency);
-  const amountLabel = `${sym}${order.total}`;
   const status = order.effectiveStatus;
   const paid = order.paymentState === 'paid';
+  // The money the merchant received — the brain-signed 30933 amount — never
+  // the buyer-signed total (the buyer's key can re-sign the order with any
+  // numbers). The server's `total` is already that amount; paid_amount is
+  // read here first so the refund tag cannot drift from what was paid.
+  const amount = paid && order.paid_amount ? order.paid_amount : order.total;
+  const amountLabel = `${sym}${amount}`;
   const canShip = paid && CAN_SHIP.has(status) && order.fulfillment === 'shipping';
   const canDeliver = paid && (status === 'shipped' || (order.fulfillment === 'pickup' && CAN_SHIP.has(status)));
   const canReject = paid && CAN_SHIP.has(status);
@@ -108,7 +113,7 @@ export function OrderDetailSheet({ order, open, onOpenChange, merchantHex, onCha
         tags.push(['shipped_at', nowIso]);
       }
       if (action === 'delivered') tags.push(['delivered_at', nowIso]);
-      if (action === 'refunded') tags.push(['refund', order.total, order.currency, '', nowIso]);
+      if (action === 'refunded') tags.push(['refund', amount, order.currency, '', nowIso]);
       tags.push(['v', '1']);
 
       const event = signNostrEvent(session.privateKeyHex, 36521, '', tags);
@@ -200,7 +205,7 @@ export function OrderDetailSheet({ order, open, onOpenChange, merchantHex, onCha
               <span>{t('orders.total')}</span>
               <span>{amountLabel}</span>
             </div>
-            {order.paymentState === 'amount_mismatch' && order.expected_total && (
+            {order.paymentState === 'amount_mismatch' && order.expected_total && order.paid_amount !== order.expected_total && (
               <p className="text-xs text-destructive flex items-center gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                 {t('orders.statusAmountMismatch')}: {sym}{order.paid_amount} ≠ {sym}{order.expected_total}

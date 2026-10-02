@@ -35,7 +35,8 @@ const buyer = mk(), buyer2 = mk(), buyer3 = mk(), buyer4 = mk(), buyer5 = mk();
 const UNIT_A = 'a'.repeat(32);
 const UNIT_B = 'b'.repeat(32);
 const UNIT_S = 'c'.repeat(32); // simple.lanapays.us — never ours
-const LISTING = `36502:${owner.pk}:lst1`;
+/** One listing per shop (a listing names exactly one unit in its `a` tag): `lst-a` belongs to UNIT_A, `lst-b` to UNIT_B. */
+const listingOf = (unitId: string) => `36502:${owner.pk}:lst-${unitId[0]}`;
 const now = () => Math.floor(Date.now() / 1000);
 
 const orderIdFor = (pk: string) => `${pk.slice(0, 24)}.${crypto.randomBytes(16).toString('hex')}`;
@@ -52,7 +53,7 @@ function orderEvent(b: { sk: Uint8Array; pk: string }, unitId: string, d: string
     ['p', owner.pk],
     ['unit_id', unitId],
     ['invoice_number', d],
-    ['item', LISTING, '2', 'kos', '5.00', 'EUR'],
+    ['item', listingOf(unitId), '2', 'kos', '5.00', 'EUR'],
     ['shipping', opts.fulfillment === 'pickup' ? '0.00' : '2.50', 'EUR'],
     ['total', opts.total ?? '12.50', 'EUR'],
     ['fulfillment', opts.fulfillment ?? 'shipping'],
@@ -101,7 +102,10 @@ let base = '';
 let httpServer: any;
 let relay: WebSocketServer;
 const trusted = new Set([brain.pk]);
-const listing: ListingFetcher = async () => ({ price: '5.00', currency: 'EUR', status: 'active', createdAt: now() - 3600 });
+const listing: ListingFetcher = async (a: string) => ({
+  price: '5.00', currency: 'EUR', status: 'active', createdAt: now() - 3600,
+  unitRef: `30901:${owner.pk}:${String(a.split(':')[2]).slice(4).repeat(32)}`,
+});
 
 const unitRaw = (unitId: string, extraTags: string[][] = []) => JSON.stringify({
   kind: 30901, pubkey: owner.pk, tags: [['d', unitId], ['unit_id', unitId], ['online_shop', 'true'], ['online_shop_shipping_fee', '2.50'], ...extraTags], content: '',

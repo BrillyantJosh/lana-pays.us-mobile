@@ -53,14 +53,21 @@ function parseItems(json: string): any[] {
 /**
  * The buyer's item tags, plus WHAT they are: the listing's title / šifra /
  * package size as snapshotted at order time (orderSync snapshotOrderItem),
- * else the title from the paid 30933 receipt; and qty × unitPrice. Display
- * only — the order's own shipping/total are untouched and remain the amounts.
+ * else the title from the paid 30933 receipt.
+ *
+ * Every number and the sale unit on the merchant's screen come from the
+ * MERCHANT-signed listing snapshot when there is one (review 2 Oct 2026): the
+ * buyer's key signs the 36520 and may re-sign it with any unit_price or sale
+ * unit ("crate"), so those are kept only as buyerUnitPrice / buyerSaleUnit.
+ * Without a listing snapshot (or one in another currency) the buyer's values
+ * are all there is to show; a 'paid' order's are the merchant's anyway
+ * (resolver step 5 pays only an order whose own numbers are the listing's).
  */
 function itemsView(db: Database.Database, r: any): any[] {
   const items = parseItems(r.items_json);
   const snaps = db.prepare(
-    'SELECT item_a, title, sku, weight FROM shop_order_item_snapshots WHERE order_id = ?'
-  ).all(r.order_id) as Array<{ item_a: string; title: string | null; sku: string | null; weight: string | null }>;
+    'SELECT item_a, title, sku, weight, sale_unit, price, currency, source FROM shop_order_item_snapshots WHERE order_id = ?'
+  ).all(r.order_id) as Array<{ item_a: string; title: string | null; sku: string | null; weight: string | null; sale_unit: string | null; price: string | null; currency: string | null; source: string }>;
   const byA = new Map(snaps.map(s => [s.item_a, s]));
   let receipt: string | null | undefined;
   return items.map(it => {
@@ -70,11 +77,44 @@ function itemsView(db: Database.Database, r: any): any[] {
       if (receipt === undefined) receipt = paidReceiptTitle(db, r);
       title = receipt;
     }
-    const cents = toCents(it?.unitPrice);
+    const fromListing = s?.source === 'listing';
+    const listingPrice = fromListing && toCents(s?.price) !== null && String(s?.currency || '').toUpperCase() === String(r.currency || '').toUpperCase()
+      ? String(s!.price) : null;
+    const unitPrice = listingPrice ?? String(it?.unitPrice ?? '');
+    const saleUnit = fromListing ? String(s?.sale_unit ?? '') : String(it?.saleUnit ?? '');
+    const cents = toCents(unitPrice);
     const qty = Number(it?.qty);
     const lineTotal = cents !== null && Number.isInteger(qty) && qty > 0 ? centsToString(cents * qty) : null;
-    return { ...it, title, sku: s?.sku || null, weight: s?.weight || null, lineTotal };
+    return {
+      ...it, unitPrice, saleUnit, buyerUnitPrice: it?.unitPrice ?? null, buyerSaleUnit: it?.saleUnit ?? null,
+      title, sku: s?.sku || null, weight: s?.weight || null, lineTotal,
+    };
   });
+}
+
+/**
+ * The amount the merchant's screen shows for an order — and the one a
+ * "refunded" event names: the brain-signed 30933 amount once the order is
+ * paid, else the amount recomputed from the merchant's listings, else
+ * (nothing computable) the buyer's own total. Never the buyer's total for a
+ * paid order.
+ */
+export function merchantAmount(r: { payment_state?: string; paid_amount?: string | null; expected_total?: string | null; total?: string }): string {
+  if (r.payment_state === 'paid' && r.paid_amount) return String(r.paid_amount);
+  if (r.expected_total) return String(r.expected_total);
+  return String(r.total ?? '');
+}
+
+/** The shipping line that adds up to merchantAmount: amount − Σ line totals; the buyer's tag when that does not work out. */
+function merchantShipping(amount: string, items: any[], buyerShipping: string): string {
+  const total = toCents(amount);
+  let sum = 0;
+  for (const it of items) {
+    const c = toCents(it?.lineTotal);
+    if (c === null) return buyerShipping;
+    sum += c;
+  }
+  return total !== null && total >= sum ? centsToString(total - sum) : buyerShipping;
 }
 
 /** Public order view — everything the merchant UI needs, never a plaintext detail. */
@@ -85,6 +125,8 @@ export function orderView(db: Database.Database, r: any, hex: string): any {
   ).get(r.order_id, hex) as any;
   let deliveryEvent: any = null;
   try { deliveryEvent = delivery ? JSON.parse(delivery.raw_event) : null; } catch { deliveryEvent = null; }
+  const items = itemsView(db, r);
+  const total = merchantAmount(r);
   return {
     order_id: r.order_id,
     unit_id: r.unit_id,
@@ -92,9 +134,13 @@ export function orderView(db: Database.Database, r: any, hex: string): any {
     unit_owner_hex: r.unit_owner_hex,
     buyer_pubkey: r.buyer_pubkey,
     created_at: r.created_at,
-    items: itemsView(db, r),
-    shipping: r.shipping,
-    total: r.total,
+    items,
+    // total / shipping = what the merchant asked and was paid (merchantAmount);
+    // the buyer-signed tags stay visible as buyer_total / buyer_shipping.
+    shipping: merchantShipping(total, items, r.shipping),
+    total,
+    buyer_shipping: r.shipping,
+    buyer_total: r.total,
     currency: r.currency,
     fulfillment: r.fulfillment,
     order_status: r.order_status,
@@ -146,12 +192,17 @@ export function registerOrderRoutes(app: Express, db: Database.Database): void {
     const count = (db.prepare(`
       SELECT COUNT(*) AS c FROM shop_orders WHERE unit_id IN (${ph}) AND pending = 1
     `).get(...unitIds) as any).c;
-    const latest = db.prepare(`
-      SELECT o.order_id, o.unit_id, COALESCE(u.name, o.unit_id) AS unit_name, o.total, o.currency, o.paid_at
+    // total = the paid 30933 amount (pending ⇒ paid), never the buyer-signed tag.
+    const latest = (db.prepare(`
+      SELECT o.order_id, o.unit_id, COALESCE(u.name, o.unit_id) AS unit_name,
+             o.payment_state, o.paid_amount, o.expected_total, o.total, o.currency, o.paid_at
       FROM shop_orders o LEFT JOIN business_units u ON u.unit_id = o.unit_id
       WHERE o.unit_id IN (${ph}) AND o.pending = 1
       ORDER BY o.paid_at DESC LIMIT 3
-    `).all(...unitIds) as any[];
+    `).all(...unitIds) as any[]).map(o => ({
+      order_id: o.order_id, unit_id: o.unit_id, unit_name: o.unit_name,
+      total: merchantAmount(o), currency: o.currency, paid_at: o.paid_at,
+    }));
     res.json({ success: true, count, latest });
   });
 

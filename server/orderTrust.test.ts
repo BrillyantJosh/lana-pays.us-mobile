@@ -30,8 +30,8 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import { initializeSchema } from './db/schema.js';
 import { registerOrderRoutes } from './orders.js';
 import {
-  ingestEvent, resolveOrders, activeOrderIds, syncShopOrders, parseOrderEvent, clearListingCache,
-  type ListingFetcher,
+  ingestEvent, resolveOrders, activeOrderIds, syncShopOrders, parseOrderEvent, clearListingCache, makeListingFetcher,
+  unitToResolver, unitRow, type ListingFetcher,
 } from './lib/orderSync.js';
 import { bindingString } from './lib/orderResolver.js';
 
@@ -109,7 +109,7 @@ const LISTED: Record<string, string> = { [APPLES]: '5.00', [PEARS]: '50.00' };
 /** Merchant-signed prices by address; `down` = the REQ for that address failed. */
 function fetcher(down: string[] = []): ListingFetcher {
   return async (a: string) => (LISTED[a] && !down.includes(a))
-    ? { price: LISTED[a], currency: 'EUR', status: 'active', createdAt: now() - 86_400 }
+    ? { price: LISTED[a], currency: 'EUR', status: 'active', createdAt: now() - 86_400, unitRef: `30901:${owner.pk}:${UNIT}` }
     : null;
 }
 const row = (d: string) => db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(d) as any;
@@ -168,7 +168,7 @@ beforeAll(async () => {
     INSERT INTO business_units (unit_id, event_id, pubkey, created_at, name, owner_hex, authorized_hex, currency, status, raw_event)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'EUR', 'active', ?)
   `).run(UNIT, 'e'.repeat(64), owner.pk, now(), 'Trgovina', owner.pk, JSON.stringify([owner.pk]),
-    JSON.stringify({ kind: 30901, pubkey: owner.pk, tags: [['d', UNIT], ['unit_id', UNIT], ['online_shop', 'true'], ['online_shop_shipping_fee', '2.50']], content: '' }));
+    JSON.stringify({ kind: 30901, pubkey: owner.pk, tags: [['d', UNIT], ['unit_id', UNIT], ['online_shop', 'true'], ['online_shop_shipping_fee', '2.50'], ['online_shop_pickup', 'true']], content: '' }));
 
   const app = express();
   app.use(express.json());
@@ -188,7 +188,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   // Every test starts with no order at all — "no order is open" must really be true.
-  for (const t of ['shop_orders', 'shop_order_payments', 'shop_order_fulfillments', 'shop_order_delivery', 'shop_order_item_snapshots', 'shop_order_sync_state']) {
+  for (const t of ['shop_orders', 'shop_order_payments', 'shop_order_fulfillments', 'shop_order_delivery', 'shop_order_item_snapshots', 'shop_order_listing_prices', 'shop_order_sync_state']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
   relayEvents = [];
@@ -319,7 +319,8 @@ describe('the live order of 2 Oct 2026 keeps its verdict', () => {
     const txId = crypto.randomUUID();
     expect(ingestEvent(db, ev, trusted)).toBe(d);
     expect(ingestEvent(db, purchaseEvent(d, b.pk, txId, '4.08', t0 + 44), trusted)).toBe(d);
-    const listing408: ListingFetcher = async () => ({ price: '4.08', currency: 'EUR', status: 'active', createdAt: now() - 60 });
+    // as live: the listing was republished after the order, with unit 'kos' where the order says 'g'
+    const listing408: ListingFetcher = async () => ({ price: '4.08', currency: 'EUR', status: 'active', createdAt: now() - 60, unitRef: `30901:${owner.pk}:${UNIT}`, unit: 'kos' });
     await resolveOrders(db, { orderIds: [d], trusted, fetchListing: listing408, now: now() });
     db.prepare(`UPDATE shop_orders SET paid_order_event_id = NULL, fulfillment_status = 'rejected', effective_status = 'rejected', pending = 0 WHERE order_id = ?`).run(d);
     db.prepare(`INSERT INTO shop_order_fulfillments (order_id, event_id, pubkey, created_at, status, raw_event, published) VALUES (?, ?, ?, ?, 'rejected', '{}', 1)`)
@@ -327,6 +328,153 @@ describe('the live order of 2 Oct 2026 keeps its verdict', () => {
     await resolveOrders(db, { orderIds: [d], trusted, fetchListing: listing408, now: now() });
     expect(row(d)).toMatchObject({ payment_state: 'paid', expected_total: '4.08', price_changed: 1, effective_status: 'rejected', pending: 0 });
     const v = await get(`/api/orders/${d}?hex=${owner.pk}`);
-    expect(v.json).toMatchObject({ paymentState: 'paid', effectiveStatus: 'rejected' });
+    expect(v.json).toMatchObject({ paymentState: 'paid', effectiveStatus: 'rejected', total: '4.08', shipping: '0.00', buyer_total: '4.08' });
+  });
+});
+
+/**
+ * Second review of 2 Oct 2026 (SPEC v1.1.2). E1 = 2 × apples at 5.00 + 2.50
+ * shipping = 12.50, paid; E2 = the buyer's replacement with the same d.
+ */
+describe('SPEC v1.1.2 — the merchant app pays and shows only the merchant\'s numbers', () => {
+  const REF = () => `30901:${owner.pk}:${UNIT}`;
+  async function replaceWith(p: Awaited<ReturnType<typeof paidApples>>, items: string[][], total: string, fetchListing: ListingFetcher = fetcher(), extra: Partial<{ shipping: string; fulfillment: string }> = {}) {
+    const ev = sign(p.buyer.sk, 36520, [
+      ['d', p.d], ['a', REF()], ['p', owner.pk], ['unit_id', UNIT], ['invoice_number', p.d],
+      ...items,
+      ['shipping', extra.shipping ?? '2.50', 'EUR'], ['total', total, 'EUR'], ['fulfillment', extra.fulfillment ?? 'shipping'], ['status', 'placed'],
+      ['pay_by', String(p.t0 + 1800)], ['client', 'lanaeco.shop'], ['v', '1'],
+    ], '', p.t0 + 5);
+    expect(ingestEvent(db, ev, trusted)).toBe(p.d);
+    await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing, now: now() });
+    return row(p.d);
+  }
+
+  it('D: the same line re-signed as unit_price 500.00, sale unit "crate", total 1002.50 is not paid — and never shown as the amount', async () => {
+    const p = await paidApples();
+    const r = await replaceWith(p, [['item', APPLES, '2', 'crate', '500.00', 'EUR']], '1002.50');
+    expect(r).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '12.50' });
+    const v = await get(`/api/orders/${p.d}?hex=${owner.pk}`);
+    expect(v.json.total).toBe('12.50');
+    expect(v.json.buyer_total).toBe('1002.50');
+    const ship = await post(`/api/orders/${p.d}/fulfillment`, { hex: owner.pk, event: fulfillmentEvent(r, 'shipped') });
+    expect(ship.status).toBe(409);
+  });
+
+  it('A/B/C: a listing in another currency, of another shop, or priced 0.00 does not price the order', async () => {
+    const cases: Array<[string, any]> = [
+      ['currency HUF', { price: '5.00', currency: 'HUF', unitRef: REF() }],
+      ['another shop', { price: '5.00', currency: 'EUR', unitRef: `30901:${owner.pk}:${'f'.repeat(32)}` }],
+      ['no shop', { price: '5.00', currency: 'EUR' }],
+      ['price 0.00', { price: '0.00', currency: 'EUR', unitRef: REF() }],
+    ];
+    for (const [why, l] of cases) {
+      const p = await paidApples();
+      const odd: ListingFetcher = async (a: string) => a === PEARS
+        ? { status: 'active', createdAt: now() - 86_400, ...l }
+        : (await fetcher()(a));
+      const r = await replaceWith(p, [['item', PEARS, '10', 'kg', l.price === '0.00' ? '0.00' : '1.00', 'EUR']], l.price === '0.00' ? '2.50' : '12.50', odd);
+      expect(r.payment_state, why).toBe('amount_mismatch');
+      expect(r.pending, why).toBe(0);
+      expect(r.expected_total, why).toBe('');
+    }
+  });
+
+  it('E: pickup at a shop that does not offer it is not computable', async () => {
+    const raw = JSON.parse(unitRow(db, UNIT)!.raw_event!);
+    expect(unitToResolver(unitRow(db, UNIT)!).pickup).toBe(true);
+    db.prepare('UPDATE business_units SET raw_event = ? WHERE unit_id = ?')
+      .run(JSON.stringify({ ...raw, tags: raw.tags.filter((t: string[]) => t[0] !== 'online_shop_pickup') }), UNIT);
+    try {
+      expect(unitToResolver(unitRow(db, UNIT)!).pickup).toBe(false);
+      const p = await paidApples();
+      // E2 switches to pickup and turns the 2.50 shipping fee into goods: 10 × pears at 1.25 = the same 12.50
+      LISTED[PEARS] = '1.25';
+      const r = await replaceWith(p, [['item', PEARS, '10', 'kg', '1.25', 'EUR']], '12.50', fetcher(), { shipping: '0.00', fulfillment: 'pickup' });
+      expect(r).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '' });
+    } finally {
+      LISTED[PEARS] = '50.00';
+      db.prepare('UPDATE business_units SET raw_event = ? WHERE unit_id = ?').run(JSON.stringify(raw), UNIT);
+    }
+  });
+
+  it('an honest order whose listing is deleted after it was judged once is still paid — also after a restart', async () => {
+    const buyer = mk();
+    const d = orderIdFor(buyer.pk);
+    const t0 = now() - 120;
+    expect(ingestEvent(db, orderEvent(buyer, d, [['item', APPLES, '2', 'kg', '5.00', 'EUR']], '12.50', t0), trusted)).toBe(d);
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: fetcher(), now: now() });
+    expect(row(d)).toMatchObject({ payment_state: 'unpaid', expected_total: '12.50' });
+    // the merchant deletes the product while the buyer is paying; the app restarts (no cache)
+    clearListingCache();
+    expect(ingestEvent(db, purchaseEvent(d, buyer.pk, crypto.randomUUID()), trusted)).toBe(d);
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: fetcher([APPLES]), now: now() });
+    expect(row(d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50' });
+    expect(row(d).paid_order_event_id).toBe(row(d).event_id);
+  });
+
+  it('…but a replacement naming a listing it was never judged with has no price: not paid', async () => {
+    const p = await paidApples();
+    // E2 names pears, whose REQ fails from the start: no price was ever seen for THIS event
+    const r = await replaceWith(p, [['item', PEARS, '10', 'kg', '1.00', 'EUR']], '12.50', fetcher([PEARS]));
+    expect(r).toMatchObject({ payment_state: 'amount_mismatch', expected_total: '' });
+    // E1's apples price is E1's memory, never E2's
+    expect((db.prepare('SELECT COUNT(*) AS n FROM shop_order_listing_prices WHERE order_event_id = ?').get(r.event_id) as any).n).toBe(0);
+  });
+
+  it('the brain re-signs the same purchase (publish retry) after a reprice: the order stays paid', async () => {
+    const p = await paidApples();
+    LISTED[APPLES] = '6.00';
+    try {
+      clearListingCache();
+      // newer copy of the same 30933 (same d = tx id, same amount), signed 60 s later
+      expect(ingestEvent(db, purchaseEvent(p.d, p.buyer.pk, p.txId, '12.50', now()), trusted)).toBe(p.d);
+      await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: fetcher(), now: now() });
+      expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50' });
+    } finally {
+      LISTED[APPLES] = '5.00';
+    }
+  });
+
+  it('a cancellation signed in the same second as the payment is stored, whichever id is lower (probe-tie)', async () => {
+    for (const lower of [true, false]) {
+      const p = await paidApples();
+      const stored = db.prepare('SELECT created_at, event_id FROM shop_order_payments WHERE tx_id = ?').get(p.txId) as any;
+      let cancel: any = null;
+      for (let i = 0; i < 64; i++) {
+        const c = sign(brain.sk, 30933, [
+          ['d', p.txId], ['p', 'f'.repeat(64)], ['unit_id', UNIT], ['payment_type', 'lana'], ['customer_hex', 'f'.repeat(64)],
+          ['merchant_hex', owner.pk], ['amount', '12.50'], ['currency', 'EUR'], ['status', 'cancelled'], ['cancel_reason', `r${i}`],
+          ['invoice_number', p.d],
+        ], '', stored.created_at);
+        if ((c.id < stored.event_id) === lower) { cancel = c; break; }
+      }
+      expect(cancel).not.toBeNull();
+      expect(ingestEvent(db, cancel, trusted)).toBe(p.d);
+      await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: fetcher(), now: now() });
+      expect(row(p.d), `cancel id lower: ${lower}`).toMatchObject({ payment_state: 'unpaid', pending: 0 });
+      // the processing copy coming back changes nothing
+      const proc = db.prepare('SELECT raw_event FROM shop_order_payments WHERE tx_id = ?').get(p.txId) as any;
+      expect(JSON.parse(proc.raw_event).id).toBe(cancel.id);
+    }
+  });
+
+  it('the listing fetcher never returns a deleted listing\'s old price (probe-stale)', async () => {
+    const lst = sign(owner.sk, 36502, [['d', 'stale'], ['a', REF()], ['title', 'Hruske'], ['price', '1.00', 'EUR'], ['unit', 'kg'], ['status', 'active']], '', now() - 3600);
+    relayEvents = [lst];
+    const f = makeListingFetcher([relayUrl], 2000);
+    const a = `36502:${owner.pk}:stale`;
+    expect((await f(a))?.price).toBe('1.00');
+    expect((await f(a))?.unitRef).toBe(REF());
+    relayEvents = []; // the merchant deleted it: the relay answers EOSE with no event
+    const realNow = Date.now;
+    try {
+      Date.now = () => realNow() + 11 * 60 * 1000; // past the 10-min cache
+      expect(await f(a)).toBeNull();
+      Date.now = () => realNow() + 3 * 86_400 * 1000;
+      expect(await f(a)).toBeNull();
+    } finally {
+      Date.now = realNow;
+    }
   });
 });

@@ -1,6 +1,9 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { resolveOrder, bindingString, toCents, centsToString, orderIdMatchesPubkey, type ResolverInput } from './orderResolver';
+import {
+  resolveOrder, bindingString, toCents, centsToString, orderIdMatchesPubkey, usableListingPrice, purchaseVersionWins, latestPurchaseVersions,
+  type ResolverInput,
+} from './orderResolver';
 
 const BUYER = 'a'.repeat(24) + 'b'.repeat(40);
 const D = BUYER.slice(0, 24) + '.' + 'c'.repeat(32);
@@ -18,7 +21,7 @@ function base(over: Partial<ResolverInput> = {}): ResolverInput {
     },
     purchases: [],
     fulfillment: null,
-    unit: { ownerHex: OWNER, staffHexes: [STAFF], currency: 'EUR', shippingFee: '2.50', freeShippingFrom: null },
+    unit: { ownerHex: OWNER, staffHexes: [STAFF], currency: 'EUR', shippingFee: '2.50', freeShippingFrom: null, pickup: true },
     listingPrice: '5.00',
     listingCreatedAt: 900,
     trustedSigners: new Set([BRAIN]),
@@ -88,7 +91,7 @@ describe('resolveOrder — payment states', () => {
   });
   it('free shipping threshold reached', () => {
     const i = base({ purchases: [purchase({ amount: '10.00' })] });
-    i.unit.freeShippingFrom = '10.00';
+    i.unit.freeShippingFrom = '10.00'; i.order.total = '10.00';
     expect(resolveOrder(i).paymentState).toBe('paid');
   });
 });
@@ -260,7 +263,7 @@ describe('resolveOrder — a settled order stays paid (SPEC §8 step 5a)', () =>
     expect(r.pending).toBe(false);
   });
   it('the same 30933 that settled this order event keeps it paid and pending, at the amount paid', () => {
-    const r = resolveOrder(repricedCart({ settledPurchaseEventId: 'ev1' }));
+    const r = resolveOrder(repricedCart({ settledPurchase: { txId: 'tx1', amount: '26.46' } }));
     expect(r.paymentState).toBe('paid');
     expect(r.pending).toBe(true);
     expect(r.expected).toBe('26.46');
@@ -268,31 +271,49 @@ describe('resolveOrder — a settled order stays paid (SPEC §8 step 5a)', () =>
     expect(r.paidBy?.eventId).toBe('ev1');
   });
   it('a later shipping-fee change does not revoke it either', () => {
-    const i = base({ purchases: [purchase()], settledPurchaseEventId: 'ev1' });
+    const i = base({ purchases: [purchase()], settledPurchase: { txId: 'tx1', amount: '12.50' } });
     i.unit.shippingFee = '4.90';
     expect(resolveOrder(i).paymentState).toBe('paid');
-    i.settledPurchaseEventId = null;
+    i.settledPurchase = null;
     expect(resolveOrder(i).paymentState).toBe('amount_mismatch');
   });
   it('a different 30933 is judged afresh', () => {
-    const r = resolveOrder(repricedCart({ settledPurchaseEventId: 'some-other-event' }));
+    const r = resolveOrder(repricedCart({ settledPurchase: { txId: 'some-other-tx', amount: '26.46' } }));
     expect(r.paymentState).toBe('amount_mismatch');
   });
+  it('the same tx with another amount is judged afresh', () => {
+    const r = resolveOrder(repricedCart({ settledPurchase: { txId: 'tx1', amount: '26.45' } }));
+    expect(r.paymentState).toBe('amount_mismatch');
+  });
+  it('the brain re-signs the same purchase (a publish retry): the newer copy keeps the order settled', () => {
+    // event ev1 settled it; the outbox retry signed ev2 — same tx, same amount, 60 s later
+    const resigned = purchase({ eventId: 'ev2', createdAt: 1260, amount: '26.46' });
+    const r = resolveOrder(repricedCart({ settledPurchase: { txId: 'tx1', amount: '26.46' }, purchases: [resigned] }));
+    expect(r.paymentState).toBe('paid');
+    expect(r.pending).toBe(true);
+    expect(r.paidBy?.eventId).toBe('ev2');
+    // …and both copies held side by side change nothing
+    const both = resolveOrder(repricedCart({ settledPurchase: { txId: 'tx1', amount: '26.46' }, purchases: [purchase({ amount: '26.46' }), resigned] }));
+    expect(both.paymentState).toBe('paid');
+    // …but a newer cancelled copy still un-pays it
+    const cancelled = purchase({ eventId: 'ev3', createdAt: 1300, amount: '26.46', status: 'cancelled', receiptDescription: '' });
+    expect(resolveOrder(repricedCart({ settledPurchase: { txId: 'tx1', amount: '26.46' }, purchases: [resigned, cancelled] })).paymentState).toBe('unpaid');
+  });
   it('a cancelled 30933 still un-pays the order', () => {
-    const r = resolveOrder(repricedCart({ settledPurchaseEventId: 'ev1', purchases: [purchase({ amount: '26.46', status: 'cancelled' })] }));
+    const r = resolveOrder(repricedCart({ settledPurchase: { txId: 'tx1', amount: '26.46' }, purchases: [purchase({ amount: '26.46', status: 'cancelled' })] }));
     expect(r.paymentState).toBe('unpaid');
     expect(r.paidBy).toBeNull();
   });
   it('never makes an order paid that has no qualifying 30933', () => {
-    expect(resolveOrder(base({ settledPurchaseEventId: 'ev1' })).paymentState).toBe('unpaid');
-    expect(resolveOrder(base({ settledPurchaseEventId: 'ev1', purchases: [purchase({ pubkey: 'x'.repeat(64) })] })).paymentState).toBe('unpaid');
+    expect(resolveOrder(base({ settledPurchase: { txId: 'tx1', amount: '12.50' } })).paymentState).toBe('unpaid');
+    expect(resolveOrder(base({ settledPurchase: { txId: 'tx1', amount: '12.50' }, purchases: [purchase({ pubkey: 'x'.repeat(64) })] })).paymentState).toBe('unpaid');
   });
   it('a 30933 in another currency than the order is not kept', () => {
-    const r = resolveOrder(repricedCart({ settledPurchaseEventId: 'ev1', purchases: [purchase({ amount: '26.46', currency: 'GBP' })] }));
+    const r = resolveOrder(repricedCart({ settledPurchase: { txId: 'tx1', amount: '26.46' }, purchases: [purchase({ amount: '26.46', currency: 'GBP' })] }));
     expect(r.paymentState).toBe('amount_mismatch');
   });
   it('fulfillment still ends pending on a settled order', () => {
-    const r = resolveOrder(repricedCart({ settledPurchaseEventId: 'ev1', fulfillment: { pubkey: OWNER, createdAt: 99999, status: 'shipped' } }));
+    const r = resolveOrder(repricedCart({ settledPurchase: { txId: 'tx1', amount: '26.46' }, fulfillment: { pubkey: OWNER, createdAt: 99999, status: 'shipped' } }));
     expect(r.paymentState).toBe('paid');
     expect(r.effectiveStatus).toBe('shipped');
     expect(r.pending).toBe(false);
@@ -353,29 +374,29 @@ describe('resolveOrder — fail-closed money rules (review 2 Oct 2026)', () => {
   });
 
   it('the step-5a pin does not outlive the shop: an unknown unit is never paid, pinned or not', () => {
-    const gone = { ownerHex: '', staffHexes: [], currency: '', shippingFee: '0.00', freeShippingFrom: null };
-    const r = resolveOrder(paidApples({ settledPurchaseEventId: 'ev1', unit: gone }));
+    const gone = { ownerHex: '', staffHexes: [], currency: '', shippingFee: '0.00', freeShippingFrom: null, pickup: false };
+    const r = resolveOrder(paidApples({ settledPurchase: { txId: 'tx1', amount: '12.50' }, unit: gone }));
     expect(r.paymentState).toBe('amount_mismatch');
     expect(r.pending).toBe(false);
     // the same with the 30933 and the order both claiming no currency
-    const i = paidApples({ settledPurchaseEventId: 'ev1', unit: gone, purchases: [purchase({ currency: '' })] });
+    const i = paidApples({ settledPurchase: { txId: 'tx1', amount: '12.50' }, unit: gone, purchases: [purchase({ currency: '' })] });
     i.order.currency = '';
     expect(resolveOrder(i).paymentState).toBe('amount_mismatch');
     // …and without a pin: step 5 does not pay an unknown shop either (2 × 5.00, no fee known)
-    expect(resolveOrder({ ...i, settledPurchaseEventId: null, purchases: [purchase({ currency: '', amount: '10.00' })] }).paymentState).toBe('amount_mismatch');
+    expect(resolveOrder({ ...i, settledPurchase: null, purchases: [purchase({ currency: '', amount: '10.00' })] }).paymentState).toBe('amount_mismatch');
   });
 
   it('a pin needs an order that still names its items and a currency', () => {
-    const noItems = paidApples({ settledPurchaseEventId: 'ev1' });
+    const noItems = paidApples({ settledPurchase: { txId: 'tx1', amount: '12.50' } });
     noItems.order.items = [];
     expect(resolveOrder(noItems).paymentState).toBe('amount_mismatch');
-    const noCurrency = paidApples({ settledPurchaseEventId: 'ev1', purchases: [purchase({ currency: '' })] });
+    const noCurrency = paidApples({ settledPurchase: { txId: 'tx1', amount: '12.50' }, purchases: [purchase({ currency: '' })] });
     noCurrency.order.currency = '';
     expect(resolveOrder(noCurrency).paymentState).toBe('amount_mismatch');
   });
 
   it('a pin survives a listing that is gone later — the verdict was reached with every listing known', () => {
-    const i = paidApples({ settledPurchaseEventId: 'ev1' });
+    const i = paidApples({ settledPurchase: { txId: 'tx1', amount: '12.50' } });
     i.order.items[0] = { ...i.order.items[0], listingPrice: null, listingCreatedAt: null };
     const r = resolveOrder(i);
     expect(r.paymentState).toBe('paid');
@@ -393,7 +414,7 @@ describe('resolveOrder — fail-closed money rules (review 2 Oct 2026)', () => {
       expect(r.pending).toBe(false);
     }
     // …also against a pin on the old version
-    expect(resolveOrder(paidApples({ purchases: [processing, cancelled], settledPurchaseEventId: 'v1' })).paymentState).toBe('unpaid');
+    expect(resolveOrder(paidApples({ purchases: [processing, cancelled], settledPurchase: { txId: 'tx1', amount: '12.50' } })).paymentState).toBe('unpaid');
     // …and after pay_by it is expired, not paid
     expect(resolveOrder(paidApples({ purchases: [processing, cancelled], now: 5000 })).paymentState).toBe('expired');
   });
@@ -407,11 +428,30 @@ describe('resolveOrder — fail-closed money rules (review 2 Oct 2026)', () => {
     expect(r.paidBy?.eventId).toBe('v1');
   });
 
-  it('two versions in the same second: the lowest event id is the one kept (NIP-01)', () => {
-    const a = purchase({ eventId: 'a-cancel', createdAt: 1300, status: 'cancelled' });
-    const b = purchase({ eventId: 'b-paid', createdAt: 1300 });
-    expect(resolveOrder(paidApples({ purchases: [b, a] })).paymentState).toBe('unpaid');
-    expect(resolveOrder(paidApples({ purchases: [a, b] })).paymentState).toBe('unpaid');
+  it('two versions in the same second: the not-paid one is kept, whichever id is lower (fail-closed)', () => {
+    for (const [cancelId, paidId] of [['a-cancel', 'b-paid'], ['z-cancel', 'b-paid']]) {
+      const c = purchase({ eventId: cancelId, createdAt: 1300, status: 'cancelled', receiptDescription: '' });
+      const p = purchase({ eventId: paidId, createdAt: 1300 });
+      expect(resolveOrder(paidApples({ purchases: [p, c] })).paymentState, cancelId).toBe('unpaid');
+      expect(resolveOrder(paidApples({ purchases: [c, p] })).paymentState, cancelId).toBe('unpaid');
+    }
+    // two paid copies of one second: the lowest id (NIP-01), and the order is paid either way
+    const lo = purchase({ eventId: 'a-paid', createdAt: 1300 });
+    const hi = purchase({ eventId: 'b-paid', createdAt: 1300 });
+    expect(latestPurchaseVersions([hi, lo]).map(p => p.eventId)).toEqual(['a-paid']);
+    expect(resolveOrder(paidApples({ purchases: [hi, lo] })).paidBy?.eventId).toBe('a-paid');
+  });
+
+  it('purchaseVersionWins: newer wins; same second → not-paid, then lowest id; never itself', () => {
+    const v = (createdAt: number, status: string, eventId: string) => ({ createdAt, status, eventId });
+    expect(purchaseVersionWins(v(2, 'processing', 'b'), v(1, 'cancelled', 'a'))).toBe(true);
+    expect(purchaseVersionWins(v(1, 'cancelled', 'a'), v(2, 'processing', 'b'))).toBe(false);
+    expect(purchaseVersionWins(v(5, 'cancelled', 'z'), v(5, 'processing', 'a'))).toBe(true);
+    expect(purchaseVersionWins(v(5, 'processing', 'a'), v(5, 'cancelled', 'z'))).toBe(false);
+    expect(purchaseVersionWins(v(5, '', 'z'), v(5, 'settled', 'a'))).toBe(true);
+    expect(purchaseVersionWins(v(5, 'processing', 'a'), v(5, 'processing', 'b'))).toBe(true);
+    expect(purchaseVersionWins(v(5, 'processing', 'b'), v(5, 'processing', 'a'))).toBe(false);
+    expect(purchaseVersionWins(v(5, 'processing', 'a'), v(5, 'processing', 'a'))).toBe(false);
   });
 
   it('only status processing or settled is paid (SPEC §7)', () => {
@@ -427,11 +467,124 @@ describe('resolveOrder — fail-closed money rules (review 2 Oct 2026)', () => {
 
   it('the live order of 2 Oct 2026 keeps its verdict: 1 × 4.08, pickup, listing 4.08 republished later, 30933 processing', () => {
     const i = base({ listingPrice: null, listingCreatedAt: null, purchases: [purchase({ amount: '4.08' })] });
-    i.order.fulfillment = 'pickup'; i.order.total = '4.08';
+    i.order.fulfillment = 'pickup'; i.order.total = '4.08'; i.order.shipping = '0.00';
+    // its sale unit 'g' is not the listing's unit today ('kos'): the money rule never reads the sale unit
     i.order.items = [{ a: APPLES, qty: 1, unitPrice: '4.08', currency: 'EUR', listingPrice: '4.08', listingCreatedAt: 99999 }];
-    for (const settledPurchaseEventId of [null, 'ev1']) {
-      const r = resolveOrder({ ...i, settledPurchaseEventId, fulfillment: { pubkey: OWNER, createdAt: 2000, status: 'rejected' } });
+    i.unit.pickup = true; i.unit.shippingFee = '5.00';
+    for (const settledPurchase of [null, { txId: 'tx1', amount: '4.08' }]) {
+      const r = resolveOrder({ ...i, settledPurchase, fulfillment: { pubkey: OWNER, createdAt: 2000, status: 'rejected' } });
       expect(r).toMatchObject({ paymentState: 'paid', expected: '4.08', priceChanged: true, effectiveStatus: 'rejected', pending: false });
     }
+  });
+});
+
+/**
+ * Second review of 2 Oct 2026. Step 5 compared the 30933 only with the
+ * recomputed total, so a buyer could re-sign a paid order with the same
+ * lines but their own numbers (unit_price 500.00, total 1002.50) and the
+ * merchant's screen — and its refund button — showed those as the money.
+ */
+describe('resolveOrder — a paid order carries the merchant\'s numbers (SPEC v1.1.2)', () => {
+  const APPLES = `36502:${OWNER}:apples`;
+  const UNIT_REF = `30901:${OWNER}:${UNIT}`;
+  /** E1: 2 × apples at 5.00 + 2.50 shipping = 12.50, paid. */
+  function paid(over: Partial<ResolverInput> = {}): ResolverInput {
+    const i = base({ listingPrice: null, listingCreatedAt: null, purchases: [purchase()], ...over });
+    i.order.items = [{ a: APPLES, qty: 2, unitPrice: '5.00', currency: 'EUR', listingPrice: '5.00', listingCreatedAt: 900 }];
+    i.order.shipping = '2.50';
+    return i;
+  }
+
+  it('the honest order is paid', () => {
+    expect(resolveOrder(paid())).toMatchObject({ paymentState: 'paid', expected: '12.50', pending: true });
+  });
+
+  it('the same lines with the buyer\'s own unit_price and total are not paid (probe case D)', () => {
+    const i = paid();
+    i.order.items[0].unitPrice = '500.00'; i.order.total = '1002.50';
+    const r = resolveOrder(i);
+    expect(r.paymentState).toBe('amount_mismatch');
+    expect(r.pending).toBe(false);
+    expect(r.expected).toBe('12.50');
+  });
+
+  it('every buyer number on its own: total, one line price, shipping, a line currency', () => {
+    const total = paid(); total.order.total = '12.51';
+    expect(resolveOrder(total).paymentState).toBe('amount_mismatch');
+    const line = paid(); line.order.items[0].unitPrice = '5.01';
+    expect(resolveOrder(line).paymentState).toBe('amount_mismatch');
+    const ship = paid(); ship.order.shipping = '0.00';
+    expect(resolveOrder(ship).paymentState).toBe('amount_mismatch');
+    const cur = paid(); cur.order.items[0].currency = 'HUF';
+    expect(resolveOrder(cur).paymentState).toBe('amount_mismatch');
+    // a caller that passes no shipping is judged on total and lines only
+    const noShip = paid(); delete noShip.order.shipping;
+    expect(resolveOrder(noShip).paymentState).toBe('paid');
+  });
+
+  it('a cart: every line must carry its own listing price', () => {
+    const i = paid({ purchases: [purchase({ amount: '15.50' })] });
+    i.order.items.push({ a: `36502:${OWNER}:pears`, qty: 1, unitPrice: '3.00', currency: 'EUR', listingPrice: '3.00', listingCreatedAt: 900 });
+    i.order.total = '15.50';
+    expect(resolveOrder(i).paymentState).toBe('paid');
+    // the buyer moves 1.00 from one line to the other: same total, wrong lines
+    i.order.items[0].unitPrice = '4.50'; i.order.items[1].unitPrice = '4.00';
+    expect(resolveOrder(i).paymentState).toBe('amount_mismatch');
+  });
+
+  it('the step-5a pin is unaffected: the settled event keeps its verdict after a reprice', () => {
+    const i = paid({ settledPurchase: { txId: 'tx1', amount: '12.50' } });
+    i.order.items[0].listingPrice = '6.00';
+    expect(resolveOrder(i).paymentState).toBe('paid');
+    expect(resolveOrder({ ...i, settledPurchase: null }).paymentState).toBe('amount_mismatch');
+  });
+
+  it('a listing priced 0.00 (or below a cent) makes the order uncomputable', () => {
+    const i = paid({ purchases: [purchase({ amount: '2.50' })] });
+    i.order.items[0] = { ...i.order.items[0], unitPrice: '0.00', listingPrice: '0.00' };
+    i.order.total = '2.50';
+    const r = resolveOrder(i);
+    expect(r.paymentState).toBe('amount_mismatch');
+    expect(r.expected).toBe('');
+  });
+
+  it('pickup is computable only at a shop that offers it (probe case E)', () => {
+    // apples at 2.50: E1 = 4 × 2.50 + 2.50 shipping; E2 = 5 × 2.50 pickup — same 12.50
+    const i = paid();
+    i.order.fulfillment = 'pickup'; i.order.shipping = '0.00';
+    i.order.items[0] = { ...i.order.items[0], qty: 5, unitPrice: '2.50', listingPrice: '2.50' };
+    for (const pickup of [false, undefined]) {
+      const r = resolveOrder({ ...i, unit: { ...i.unit, pickup } });
+      expect(r.paymentState, String(pickup)).toBe('amount_mismatch');
+      expect(r.expected, String(pickup)).toBe('');
+    }
+    expect(resolveOrder({ ...i, unit: { ...i.unit, pickup: true } }).paymentState).toBe('paid');
+    // a settled pickup order keeps its verdict when the shop stops offering pickup later
+    expect(resolveOrder({ ...i, unit: { ...i.unit, pickup: false }, settledPurchase: { txId: 'tx1', amount: '12.50' } }).paymentState).toBe('paid');
+  });
+
+  it('a fulfillment other than shipping / pickup is not computable', () => {
+    const i = paid(); i.order.fulfillment = 'teleport';
+    expect(resolveOrder(i).paymentState).toBe('amount_mismatch');
+  });
+
+  it('usableListingPrice: positive price, the shop\'s currency, the order\'s own shop', () => {
+    const l = { price: '5.00', currency: 'EUR', unitRef: UNIT_REF };
+    expect(usableListingPrice(l, 'EUR', UNIT_REF)).toBe('5.00');
+    expect(usableListingPrice({ ...l, currency: 'eur' }, 'EUR', UNIT_REF)).toBe('5.00');
+    expect(usableListingPrice(null, 'EUR', UNIT_REF)).toBeNull();
+    expect(usableListingPrice({ ...l, price: '0.00' }, 'EUR', UNIT_REF)).toBeNull();
+    expect(usableListingPrice({ ...l, price: '' }, 'EUR', UNIT_REF)).toBeNull();
+    expect(usableListingPrice({ ...l, price: '5.001' }, 'EUR', UNIT_REF)).toBeNull();
+    expect(usableListingPrice({ ...l, price: null }, 'EUR', UNIT_REF)).toBeNull();
+    // probe A: a EUR-priced listing in a HUF shop
+    expect(usableListingPrice(l, 'HUF', UNIT_REF)).toBeNull();
+    expect(usableListingPrice({ ...l, currency: '' }, 'EUR', UNIT_REF)).toBeNull();
+    expect(usableListingPrice(l, '', UNIT_REF)).toBeNull();
+    // probe B: the same owner's listing of ANOTHER shop
+    expect(usableListingPrice({ ...l, unitRef: `30901:${OWNER}:${'2'.repeat(32)}` }, 'EUR', UNIT_REF)).toBeNull();
+    expect(usableListingPrice({ ...l, unitRef: `30901:${'x'.repeat(64)}:${UNIT}` }, 'EUR', UNIT_REF)).toBeNull();
+    expect(usableListingPrice({ ...l, unitRef: '' }, 'EUR', UNIT_REF)).toBeNull();
+    expect(usableListingPrice({ ...l, unitRef: undefined }, 'EUR', '')).toBeNull();
   });
 });

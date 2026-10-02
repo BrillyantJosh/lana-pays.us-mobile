@@ -11,7 +11,7 @@
  * size) stands in for it — a listing priced per kg without one still says "kg".
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 vi.hoisted(() => {
   // This runner has no real Storage, and i18n reads `lang` from it at import.
@@ -189,5 +189,36 @@ describe('OrderList — row', () => {
     render(<OrderList rows={[row([tarten])]} />);
     expect(screen.getByText('TARTEN S PETERŠILJEM BIO 200g')).toBeInTheDocument();
     expect(text()).not.toContain(D_TAG);
+  });
+});
+
+/**
+ * Review of 2 Oct 2026: the buyer's key signs the 36520, so its `total` is the
+ * buyer's word. The sheet shows — and a "refunded" event names — the money
+ * the brain-signed 30933 says was paid, even if a row ever carries another
+ * total.
+ */
+describe('OrderDetailSheet — the amount is the paid one', () => {
+  it('header, total line and the refund tag all use paid_amount, never a buyer-made total', async () => {
+    const posted: any[] = [];
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      posted.push(JSON.parse(init.body));
+      return { ok: true, status: 200, json: async () => ({ success: true }) } as any;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      sheet(row([{ ...tarten, qty: 2, saleUnit: 'crate', unitPrice: '500.00', lineTotal: '1000.00' }],
+        { total: '1002.50', paid_amount: '12.50', expected_total: '12.50', shipping: '2.50', fulfillment: 'shipping', effectiveStatus: 'rejected', fulfillment_status: 'rejected', pending: false }));
+      expect(text()).toContain('€12.50');
+      expect(text()).not.toContain('€1002.50');
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(i18n.t('orders.statusRefunded')) }));
+      const confirm = await screen.findAllByRole('button', { name: new RegExp(i18n.t('orders.statusRefunded')) });
+      fireEvent.click(confirm[confirm.length - 1]);
+      await waitFor(() => expect(posted.length).toBe(1));
+      const refund = posted[0].event.tags.find((t: string[]) => t[0] === 'refund');
+      expect(refund.slice(0, 3)).toEqual(['refund', '12.50', 'EUR']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

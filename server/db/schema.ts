@@ -462,5 +462,24 @@ export function initializeSchema(db: Database.Database): void {
   // are resolved on every sync).
   try { db.exec(`ALTER TABLE shop_orders ADD COLUMN paid_order_event_id TEXT`); } catch { /* column exists */ }
 
+  // SPEC v1.1.2 step 2: the last MERCHANT-signed price this app saw for a
+  // listing while judging one exact 36520 event — keyed by that event's id,
+  // never by the order id: a buyer's replacement is another event and starts
+  // with no prices. An honest order whose listing is deleted (or whose
+  // listing REQ fails) after it was judged once is still priced by what the
+  // merchant asked; a listing a buyer names in a replacement never priced
+  // that replacement, so it stays unknown. MONEY input (unlike
+  // shop_order_item_snapshots, which is display only).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS shop_order_listing_prices (
+      order_event_id TEXT NOT NULL,
+      item_a TEXT NOT NULL,
+      price TEXT NOT NULL,
+      listing_created_at INTEGER NOT NULL,
+      seen_at INTEGER NOT NULL,
+      PRIMARY KEY (order_event_id, item_a)
+    );
+  `);
+
   console.log('Database schema initialized');
 }

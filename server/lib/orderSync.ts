@@ -28,8 +28,8 @@ import { queryEvents, type SignedEvent } from './dm.js';
 import { getLanaRelays, broadcastEvent } from './nostr.js';
 import { SIMPLE_UNIT_SQL } from './unitOrigin.js';
 import {
-  resolveOrder, ORDER_ID_RE, orderIdMatchesPubkey, toCents, bindingString,
-  type ResolverOrder, type ResolverPurchase, type ResolverFulfillment, type ResolverUnit,
+  resolveOrder, ORDER_ID_RE, orderIdMatchesPubkey, toCents, bindingString, usableListingPrice, purchaseVersionWins,
+  type ResolverOrder, type ResolverPurchase, type ResolverFulfillment, type ResolverUnit, type SettledPurchase,
 } from './orderResolver.js';
 
 export const KIND_ORDER = 36520;
@@ -130,16 +130,18 @@ export function unitSigners(u: UnitRow): string[] {
   return [...set];
 }
 
-/** KIND 30901 v1.2.0 online-shop tags (SPEC §6) → resolver unit. Absent fee == '0.00'. */
+/** KIND 30901 v1.2.0 online-shop tags (SPEC §6) → resolver unit. Absent fee == '0.00', absent pickup == not offered. */
 export function unitToResolver(u: UnitRow): ResolverUnit {
   let shippingFee = '0.00';
   let freeShippingFrom: string | null = null;
+  let pickup = false;
   try {
     const ev = u.raw_event ? JSON.parse(u.raw_event) : null;
     const fee = ev ? tag(ev, 'online_shop_shipping_fee') : undefined;
     const free = ev ? tag(ev, 'online_shop_free_shipping_from') : undefined;
     if (fee && toCents(fee) !== null) shippingFee = fee;
     if (free && toCents(free) !== null) freeShippingFrom = free;
+    pickup = !!ev && tag(ev, 'online_shop_pickup') === 'true';
   } catch { /* defaults */ }
   return {
     ownerHex: u.owner_hex,
@@ -147,6 +149,7 @@ export function unitToResolver(u: UnitRow): ResolverUnit {
     currency: String(u.currency || '').toUpperCase(),
     shippingFee,
     freeShippingFrom,
+    pickup,
   };
 }
 
@@ -409,8 +412,16 @@ export function ingestPurchase(db: Database.Database, ev: SignedEvent, trusted: 
   if (!p) return null;
   if (!ORDER_ID_RE.test(p.invoiceNumber)) return null; // a till purchase, not a shop order
   if (!unitRow(db, p.unitId)) return null;
-  const existing = db.prepare('SELECT created_at FROM shop_order_payments WHERE pubkey = ? AND tx_id = ?').get(p.pubkey, p.txId) as any;
-  if (existing && p.createdAt <= existing.created_at) return null;
+  // One row per (signer, tx id): the incoming version replaces the stored one
+  // only when the resolver's version rule says it counts over it — newer
+  // wins; in the same second the NOT-paid one, then the lowest id. "Newer
+  // only" kept the first copy seen, so a cancellation signed in the same
+  // second as the payment never landed and the order stayed paid.
+  const existing = db.prepare('SELECT created_at, status, event_id FROM shop_order_payments WHERE pubkey = ? AND tx_id = ?').get(p.pubkey, p.txId) as any;
+  if (existing && !purchaseVersionWins(
+    { createdAt: p.createdAt, status: p.status, eventId: p.eventId },
+    { createdAt: existing.created_at, status: existing.status || '', eventId: existing.event_id },
+  )) return null;
   db.prepare(`
     INSERT INTO shop_order_payments (
       pubkey, tx_id, event_id, created_at, unit_id, invoice_number, receipt_description,
@@ -446,8 +457,12 @@ export function ingestEvent(db: Database.Database, ev: SignedEvent, trusted: Set
 // ─── Listing price (merchant-signed) by address ─────────────────────────
 
 export interface ListingInfo {
-  /** Money fields — the ONLY ones the resolver receives (price, createdAt). */
-  price: string | null; currency: string; status: string; createdAt: number;
+  /**
+   * Money fields — the ONLY ones the resolver's caller reads: price, the
+   * currency the price is signed in, the listing's `a` tag (which shop it
+   * belongs to — usableListingPrice) and createdAt.
+   */
+  price: string | null; currency: string; status: string; createdAt: number; unitRef?: string;
   /**
    * Display only (the merchant's order screen): read from the same
    * signature-verified, author-matched event. Never passed to resolveOrder.
@@ -491,7 +506,9 @@ export function makeListingFetcher(relays: string[], timeout = 6000): ListingFet
         const price = tagRow(best, 'price');
         info = {
           price: price && toCents(price[1]) !== null ? price[1] : null,
-          currency: price?.[2] || '',
+          // KIND 36511 (Body Arts) signs its currency in a separate tag — as the broker reads it.
+          currency: price?.[2] || (best.kind === 36511 ? tag(best, 'currency') || '' : ''),
+          unitRef: tag(best, 'a') || '',
           status: tag(best, 'status') || 'active',
           createdAt: best.created_at,
           eventId: best.id,
@@ -502,7 +519,10 @@ export function makeListingFetcher(relays: string[], timeout = 6000): ListingFet
         };
       }
     } catch { info = null; }
-    if (info === null && cached) return cached.info; // relay hiccup: keep the last known signed price
+    // Not found (deleted, or the REQ failed) is null — never the last cached
+    // price, which outlived a deleted listing for as long as the process ran
+    // (review 2 Oct 2026). resolveOrders falls back to the price it saw while
+    // judging the same 36520 event (shop_order_listing_prices), nothing else.
     listingCache.set(address, { info, fetchedAt: Date.now() });
     return info;
   };
@@ -697,7 +717,7 @@ function orderFromRow(r: any): ResolverOrder {
     d: r.order_id, pubkey: r.buyer_pubkey, createdAt: r.created_at, unitId: r.unit_id,
     status: r.order_status, fulfillment: r.fulfillment,
     items: items.map((i: any) => ({ a: String(i.a), qty: Number(i.qty), unitPrice: String(i.unitPrice), currency: String(i.currency) })),
-    total: r.total, currency: r.currency, payBy: r.pay_by,
+    shipping: r.shipping, total: r.total, currency: r.currency, payBy: r.pay_by,
   };
 }
 
@@ -722,6 +742,14 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
   const getOrder = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?');
   const getPurchases = db.prepare('SELECT * FROM shop_order_payments WHERE unit_id = ? AND invoice_number = ?');
   const getFulfillment = db.prepare('SELECT * FROM shop_order_fulfillments WHERE order_id = ?');
+  const getSeenPrice = db.prepare('SELECT price, listing_created_at FROM shop_order_listing_prices WHERE order_event_id = ? AND item_a = ?');
+  const putSeenPrice = db.prepare(`
+    INSERT INTO shop_order_listing_prices (order_event_id, item_a, price, listing_created_at, seen_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(order_event_id, item_a) DO UPDATE SET
+      price = excluded.price, listing_created_at = excluded.listing_created_at, seen_at = excluded.seen_at
+    WHERE shop_order_listing_prices.price != excluded.price
+       OR shop_order_listing_prices.listing_created_at != excluded.listing_created_at
+  `);
   const update = db.prepare(`
     UPDATE shop_orders SET
       payment_state = ?, expected_total = ?, price_changed = ?, effective_status = ?, pending = ?,
@@ -771,31 +799,39 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
 
     // EVERY item is priced by its own current listing (SPEC v1.1.0): the
     // first item's price applied to all would judge a correctly paid cart
-    // amount_mismatch. The top-level pair stays for the one-item v1.0 shape.
-    // A listing not found (no event of that kind, author and d, or a failed
-    // REQ) is null: the order is then not paid until it is (SPEC v1.1.1) —
-    // the buyer's own unit_price is never money.
+    // amount_mismatch. A listing prices an item only when it is usable for
+    // THIS order (SPEC v1.1.2 step 2: a positive price in the shop's
+    // currency, its `a` naming the order's shop). Otherwise the last usable
+    // price seen for it while judging this very 36520 event counts (an
+    // honest order whose listing was deleted, or whose listing REQ failed);
+    // else null — the order is then not paid until it is (SPEC v1.1.1): the
+    // buyer's own unit_price is never money.
+    const resolverUnit = unitToResolver(unit);
+    const orderUnitRef = `30901:${row.unit_owner_hex}:${row.unit_id}`;
     const listings = await listingsOf(order.items, opts.fetchListing);
-    const listing = listings[0] ?? null;
-    order.items = order.items.map((it, i) => ({
-      ...it,
-      listingPrice: listings[i]?.price ?? null,
-      listingCreatedAt: listings[i] ? listings[i]!.createdAt : null,
-    }));
+    order.items = order.items.map((it, i) => {
+      const l = listings[i];
+      const usable = usableListingPrice(l, resolverUnit.currency, orderUnitRef);
+      if (usable !== null && l) {
+        putSeenPrice.run(row.event_id, it.a, usable, l.createdAt, now);
+        return { ...it, listingPrice: usable, listingCreatedAt: l.createdAt };
+      }
+      const seen = getSeenPrice.get(row.event_id, it.a) as { price: string; listing_created_at: number } | undefined;
+      return { ...it, listingPrice: seen ? seen.price : null, listingCreatedAt: seen ? seen.listing_created_at : null };
+    });
 
-    // SPEC §8 step 5a: a paid verdict reached for THIS 36520 event (same id)
-    // survives a later price or shipping-fee change; a replaced order is
-    // judged afresh.
-    const settledPurchaseEventId = row.payment_state === 'paid' && row.paid_event_id
+    // SPEC §8 step 5a: the purchase (tx id + amount) that settled THIS 36520
+    // event (same id) keeps it paid through a later price, shipping-fee or
+    // pickup change, also when the brain re-signs that 30933; a replaced
+    // order is judged afresh.
+    const settledPurchase: SettledPurchase | null = row.payment_state === 'paid' && row.paid_tx_id && row.paid_amount
       && row.paid_order_event_id && row.paid_order_event_id === row.event_id
-      ? String(row.paid_event_id) : null;
+      ? { txId: String(row.paid_tx_id), amount: String(row.paid_amount) } : null;
 
     const r = resolveOrder({
-      order, purchases, fulfillment, unit: unitToResolver(unit),
-      listingPrice: listing?.price ?? null,
-      listingCreatedAt: listing ? listing.createdAt : null,
+      order, purchases, fulfillment, unit: resolverUnit,
       trustedSigners: opts.trusted, now,
-      settledPurchaseEventId,
+      settledPurchase,
     });
 
     const paidPurchase = r.paidBy ? purchases.find(p => p.eventId === r.paidBy!.eventId) || null : null;

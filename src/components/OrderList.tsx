@@ -25,6 +25,12 @@ export interface OrderItem {
   weight?: string | null;
   /** qty × unitPrice, 2 decimals, computed by the server. */
   lineTotal?: string | null;
+  /**
+   * The buyer-signed unit_price / sale unit. unitPrice and saleUnit above are
+   * the merchant-signed listing's when the server has a listing snapshot.
+   */
+  buyerUnitPrice?: string | null;
+  buyerSaleUnit?: string | null;
 }
 
 /**
@@ -78,8 +84,12 @@ export interface OrderRow {
   buyer_pubkey: string;
   created_at: number;
   items: OrderItem[];
+  /** Merchant-side shipping / amount: the paid 30933 amount once paid (server orderView merchantAmount). */
   shipping: string;
   total: string;
+  /** The buyer-signed `shipping` / `total` tags, for reference only. */
+  buyer_shipping?: string;
+  buyer_total?: string;
   currency: string;
   fulfillment: 'shipping' | 'pickup';
   order_status: string;
