@@ -22,8 +22,9 @@
  *  - an item whose listing is unknown makes the expected amount
  *    uncomputable, and an uncomputable order is never 'paid' by step 5;
  *    there is no fallback to the buyer-signed unit_price;
- *  - only the NEWEST version of a 30933 (NIP-33: per signer and d = tx id)
- *    counts, so the brain's cancellation republish un-pays the order;
+ *  - only the NEWEST version of a 30933 (d = tx id; since the third review
+ *    across trusted signers) counts, so the brain's cancellation republish
+ *    un-pays the order;
  *  - paid = status 'processing' | 'settled' (SPEC §7), nothing else;
  *  - an unknown unit (the caller passes an empty ownerHex / currency) is
  *    never paid, pinned (step 5a) or not.
@@ -41,6 +42,15 @@
  *  - the step-5a pin names the PURCHASE (tx id + amount), not one event id:
  *    the brain re-signs a 30933 when it retries a publish, and that newer
  *    copy of the same payment keeps the order settled.
+ *
+ * SPEC v1.1.2 (third review 2 Oct 2026):
+ *  - the newest version of a purchase is taken per tx id across ALL trusted
+ *    signers (untrusted ones are dropped first): after a brain key rotation
+ *    the new key's 'cancelled' retires the old key's 'processing' of the
+ *    same tx id;
+ *  - a step-5a pin is only one this rule set wrote: a consumer upgrading
+ *    from an older resolver re-judges its stored 'paid' verdicts without a
+ *    pin (before v1.1.1 an unknown listing was priced by the buyer).
  */
 
 export type PaymentState = 'unpaid' | 'paid' | 'amount_mismatch' | 'expired' | 'cancelled';
@@ -174,7 +184,9 @@ export interface ResolverInput {
    * was placed. A cancelled or failed version, another amount or another
    * purchase is judged afresh, and an unknown unit is never paid. The pin
    * does hold when a listing is unknown later: step 5 only pays an order
-   * whose every listing is known.
+   * whose every listing is known. Only a verdict reached by THIS rule set
+   * (SPEC v1.1.2) may be passed: a 'paid' an older resolver stored is no pin
+   * — the caller judges that order again with null.
    */
   settledPurchase?: SettledPurchase | null;
 }
@@ -350,15 +362,20 @@ export function purchaseVersionWins(
 }
 
 /**
- * NIP-33: a 30933 is replaceable per (signer, d = tx id); only the version
- * purchaseVersionWins keeps is the purchase. Taken BEFORE any status filter,
- * so a newer 'cancelled' version retires the older 'processing' one even when
- * a caller still holds both.
+ * The purchase is the version purchaseVersionWins keeps among every version
+ * of one d = tx id (NIP-33 replaces per signer; a mirror keeps one row per
+ * (signer, d)). Pass TRUSTED signers' versions only — resolveOrder drops the
+ * rest first: then the newest is taken per tx id ACROSS signers, so after a
+ * brain key rotation the new key's 'cancelled' retires the old key's
+ * 'processing' of the same tx (a trusted key could sign a paying 30933 for
+ * that order anyway, and a stranger's version never gets here). Taken BEFORE
+ * any status filter, so a newer 'cancelled' version retires the older
+ * 'processing' one even when a caller still holds both.
  */
 export function latestPurchaseVersions(purchases: ResolverPurchase[]): ResolverPurchase[] {
   const newest = new Map<string, ResolverPurchase>();
   for (const p of purchases) {
-    const k = JSON.stringify([p.pubkey, p.txId]);
+    const k = p.txId;
     const cur = newest.get(k);
     if (!cur || purchaseVersionWins(p, cur)) newest.set(k, p);
   }
@@ -379,9 +396,8 @@ export function resolveOrder(input: ResolverInput): ResolverResult {
   });
 
   // Candidate 30933: newest that satisfies every identity/binding rule, among
-  // the newest version of each purchase.
-  const candidates = latestPurchaseVersions(purchases).filter((e) =>
-    trustedSigners.has(e.pubkey) &&
+  // the newest version of each purchase (per tx id, trusted signers only).
+  const candidates = latestPurchaseVersions(purchases.filter((e) => trustedSigners.has(e.pubkey))).filter((e) =>
     PAID_STATUS.has(e.status) &&
     e.paymentType === 'lana' &&
     e.unitId === order.unitId &&

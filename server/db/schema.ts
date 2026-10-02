@@ -352,6 +352,9 @@ export function initializeSchema(db: Database.Database): void {
       -- the 36520 event id (shop_orders.event_id) the 'paid' verdict was
       -- reached for — SPEC §8 step 5a
       paid_order_event_id TEXT,
+      -- the 36520 event id a v1.1.2 'paid' verdict was reached for (the
+      -- step-5a pin; never filled from an older verdict — schema below)
+      settled_order_event_id TEXT,
       fulfillment_status TEXT,
       fulfillment_event_id TEXT,
       fulfillment_pubkey TEXT,
@@ -461,6 +464,29 @@ export function initializeSchema(db: Database.Database): void {
   // verdict belongs to — it fills the column on its next pass (pending orders
   // are resolved on every sync).
   try { db.exec(`ALTER TABLE shop_orders ADD COLUMN paid_order_event_id TEXT`); } catch { /* column exists */ }
+
+  // SPEC v1.1.2 step 5a (third review 2 Oct 2026): the pin is honoured only
+  // when THIS code wrote it. paid_order_event_id was also written by the
+  // older rules, which priced an item whose listing was not found at the
+  // BUYER's own unit_price — so a buyer's replacement naming an unknown
+  // listing could be 'paid' and pinned there. settled_order_event_id is
+  // written only by a v1.1.2 'paid' verdict (resolveOrders) and is never
+  // filled from stored verdicts: every 'paid' row without it is judged again
+  // by step 5 (activeOrderIds), and the ones step 5 does not pay are listed
+  // in shop_order_settle_review for Brilly instead of being paid.
+  try { db.exec(`ALTER TABLE shop_orders ADD COLUMN settled_order_event_id TEXT`); } catch { /* column exists */ }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS shop_order_settle_review (
+      order_id TEXT PRIMARY KEY,
+      order_event_id TEXT,
+      old_paid_tx_id TEXT,
+      old_paid_amount TEXT,
+      verdict TEXT NOT NULL,
+      expected_total TEXT,
+      listed_at INTEGER NOT NULL,
+      cleared_at INTEGER
+    );
+  `);
 
   // SPEC v1.1.2 step 2: the last MERCHANT-signed price this app saw for a
   // listing while judging one exact 36520 event — keyed by that event's id,

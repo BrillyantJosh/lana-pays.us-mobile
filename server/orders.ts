@@ -62,12 +62,21 @@ function parseItems(json: string): any[] {
  * Without a listing snapshot (or one in another currency) the buyer's values
  * are all there is to show; a 'paid' order's are the merchant's anyway
  * (resolver step 5 pays only an order whose own numbers are the listing's).
+ *
+ * A snapshot whose listing version was published AFTER the order (taken by a
+ * later sync or the backfill, when no earlier version was left on the
+ * relays) is not what the buyer ordered: for a PAID order the buyer's line
+ * stands — its unit_price is the one step 5 checked against the listing —
+ * and the later listing's sale unit, when it differs, is only reported as
+ * listingSaleUnit with saleUnitChanged (third review 2 Oct 2026). An unpaid
+ * order is judged on the current listing, so it keeps showing that.
  */
 function itemsView(db: Database.Database, r: any): any[] {
   const items = parseItems(r.items_json);
   const snaps = db.prepare(
-    'SELECT item_a, title, sku, weight, sale_unit, price, currency, source FROM shop_order_item_snapshots WHERE order_id = ?'
-  ).all(r.order_id) as Array<{ item_a: string; title: string | null; sku: string | null; weight: string | null; sale_unit: string | null; price: string | null; currency: string | null; source: string }>;
+    'SELECT item_a, title, sku, weight, sale_unit, price, currency, source, listing_created_at FROM shop_order_item_snapshots WHERE order_id = ?'
+  ).all(r.order_id) as Array<{ item_a: string; title: string | null; sku: string | null; weight: string | null; sale_unit: string | null; price: string | null; currency: string | null; source: string; listing_created_at: number | null }>;
+  const paid = r.payment_state === 'paid';
   const byA = new Map(snaps.map(s => [s.item_a, s]));
   let receipt: string | null | undefined;
   return items.map(it => {
@@ -78,15 +87,20 @@ function itemsView(db: Database.Database, r: any): any[] {
       title = receipt;
     }
     const fromListing = s?.source === 'listing';
-    const listingPrice = fromListing && toCents(s?.price) !== null && String(s?.currency || '').toUpperCase() === String(r.currency || '').toUpperCase()
+    // a later version stands in for what was ordered only while nothing is paid
+    const laterListing = fromListing && !(typeof s?.listing_created_at === 'number' && s.listing_created_at <= Number(r.created_at));
+    const useListing = fromListing && !(paid && laterListing);
+    const listingPrice = useListing && toCents(s?.price) !== null && String(s?.currency || '').toUpperCase() === String(r.currency || '').toUpperCase()
       ? String(s!.price) : null;
     const unitPrice = listingPrice ?? String(it?.unitPrice ?? '');
-    const saleUnit = fromListing ? String(s?.sale_unit ?? '') : String(it?.saleUnit ?? '');
+    const saleUnit = useListing ? String(s?.sale_unit ?? '') : String(it?.saleUnit ?? '');
+    const later = fromListing && !useListing && String(s?.sale_unit ?? '') !== String(it?.saleUnit ?? '') ? String(s?.sale_unit ?? '') : null;
     const cents = toCents(unitPrice);
     const qty = Number(it?.qty);
     const lineTotal = cents !== null && Number.isInteger(qty) && qty > 0 ? centsToString(cents * qty) : null;
     return {
       ...it, unitPrice, saleUnit, buyerUnitPrice: it?.unitPrice ?? null, buyerSaleUnit: it?.saleUnit ?? null,
+      saleUnitChanged: later !== null, listingSaleUnit: later,
       title, sku: s?.sku || null, weight: s?.weight || null, lineTotal,
     };
   });
@@ -293,6 +307,12 @@ export function registerOrderRoutes(app: Express, db: Database.Database): void {
 
     // Money gate: only a brain-signed 30933 (resolver: payment_state === 'paid') can be fulfilled.
     if (row.payment_state !== 'paid') return res.status(409).json({ success: false, error: 'NOT_PAID', paymentState: row.payment_state });
+    // …reached by THIS rule set (SPEC v1.1.2 §8 5a): a 'paid' the older rules
+    // stored is judged again on the next sync (orderSync activeOrderIds) and
+    // cannot be shipped before that.
+    if (row.settled_order_event_id !== row.event_id) {
+      return res.status(409).json({ success: false, error: 'NOT_PAID', paymentState: 'not_judged_yet' });
+    }
     // From 'confirmed' onward the event must name the payment it accepts (SPEC §3).
     const needsPayment = f.status !== 'received';
     const expectedPaymentRef = `30933:${row.paid_signer_hex}:${row.paid_tx_id}`;
@@ -319,7 +339,7 @@ export function registerOrderRoutes(app: Express, db: Database.Database): void {
         fulfillment_status = ?, fulfillment_event_id = ?, fulfillment_pubkey = ?, fulfillment_created_at = ?,
         fulfillment_carrier = ?, fulfillment_tracking = ?, fulfillment_published = 0,
         effective_status = ?, pending = ?, updated_at = datetime('now')
-      WHERE order_id = ? AND payment_state = 'paid' AND fulfillment_status IS ?
+      WHERE order_id = ? AND payment_state = 'paid' AND settled_order_event_id = event_id AND fulfillment_status IS ?
     `).run(f.status, f.eventId, f.pubkey, f.createdAt, f.carrier, f.tracking, f.status, pending, orderId, current);
     if (claimed.changes !== 1) {
       const fresh = db.prepare('SELECT fulfillment_status FROM shop_orders WHERE order_id = ?').get(orderId) as any;

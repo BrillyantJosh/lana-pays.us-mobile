@@ -31,7 +31,7 @@ import { initializeSchema } from './db/schema.js';
 import { registerOrderRoutes } from './orders.js';
 import {
   ingestEvent, resolveOrders, activeOrderIds, syncShopOrders, parseOrderEvent, clearListingCache, makeListingFetcher,
-  unitToResolver, unitRow, type ListingFetcher,
+  unitToResolver, unitRow, orderTimeSnapshotPrice, type ListingFetcher,
 } from './lib/orderSync.js';
 import { bindingString } from './lib/orderResolver.js';
 
@@ -188,7 +188,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   // Every test starts with no order at all — "no order is open" must really be true.
-  for (const t of ['shop_orders', 'shop_order_payments', 'shop_order_fulfillments', 'shop_order_delivery', 'shop_order_item_snapshots', 'shop_order_listing_prices', 'shop_order_sync_state']) {
+  for (const t of ['shop_orders', 'shop_order_payments', 'shop_order_fulfillments', 'shop_order_delivery', 'shop_order_item_snapshots', 'shop_order_listing_prices', 'shop_order_sync_state', 'shop_order_settle_review']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
   relayEvents = [];
@@ -322,11 +322,13 @@ describe('the live order of 2 Oct 2026 keeps its verdict', () => {
     // as live: the listing was republished after the order, with unit 'kos' where the order says 'g'
     const listing408: ListingFetcher = async () => ({ price: '4.08', currency: 'EUR', status: 'active', createdAt: now() - 60, unitRef: `30901:${owner.pk}:${UNIT}`, unit: 'kos' });
     await resolveOrders(db, { orderIds: [d], trusted, fetchListing: listing408, now: now() });
-    db.prepare(`UPDATE shop_orders SET paid_order_event_id = NULL, fulfillment_status = 'rejected', effective_status = 'rejected', pending = 0 WHERE order_id = ?`).run(d);
+    db.prepare(`UPDATE shop_orders SET paid_order_event_id = NULL, settled_order_event_id = NULL, fulfillment_status = 'rejected', effective_status = 'rejected', pending = 0 WHERE order_id = ?`).run(d);
+    db.prepare('DELETE FROM shop_order_listing_prices').run();
     db.prepare(`INSERT INTO shop_order_fulfillments (order_id, event_id, pubkey, created_at, status, raw_event, published) VALUES (?, ?, ?, ?, 'rejected', '{}', 1)`)
       .run(d, 'f'.repeat(64), owner.pk, t0 + 600);
     await resolveOrders(db, { orderIds: [d], trusted, fetchListing: listing408, now: now() });
     expect(row(d)).toMatchObject({ payment_state: 'paid', expected_total: '4.08', price_changed: 1, effective_status: 'rejected', pending: 0 });
+    expect(row(d).settled_order_event_id).toBe(row(d).event_id);
     const v = await get(`/api/orders/${d}?hex=${owner.pk}`);
     expect(v.json).toMatchObject({ paymentState: 'paid', effectiveStatus: 'rejected', total: '4.08', shipping: '0.00', buyer_total: '4.08' });
   });
@@ -441,7 +443,7 @@ describe('SPEC v1.1.2 — the merchant app pays and shows only the merchant\'s n
       const p = await paidApples();
       const stored = db.prepare('SELECT created_at, event_id FROM shop_order_payments WHERE tx_id = ?').get(p.txId) as any;
       let cancel: any = null;
-      for (let i = 0; i < 64; i++) {
+      for (let i = 0; i < 4096; i++) { // a stored id near 0 or f…: 64 tries missed ~1 run in 65
         const c = sign(brain.sk, 30933, [
           ['d', p.txId], ['p', 'f'.repeat(64)], ['unit_id', UNIT], ['payment_type', 'lana'], ['customer_hex', 'f'.repeat(64)],
           ['merchant_hex', owner.pk], ['amount', '12.50'], ['currency', 'EUR'], ['status', 'cancelled'], ['cancel_reason', `r${i}`],
@@ -476,5 +478,159 @@ describe('SPEC v1.1.2 — the merchant app pays and shows only the merchant\'s n
     } finally {
       Date.now = realNow;
     }
+  });
+});
+
+/**
+ * Third review of 2 Oct 2026. A 'paid' the OLDER rules stored is never
+ * carried into the step-5a pin: before v1.1.1 a line whose listing was not
+ * found was priced at the BUYER's own unit_price, so a buyer's replacement
+ * naming an unknown listing was 'paid' (and, with fbb2c3d, pinned through
+ * paid_order_event_id). Every such row is judged again by step 5 — shipped
+ * or not — and the ones it does not pay are listed for Brilly.
+ */
+describe('third review — an older \'paid\' is judged again, never pinned', () => {
+  const REF = `30901:${owner.pk}:${UNIT}`;
+  const GOLD = `36502:${owner.pk}:gold`;
+  /** The listing as a relay returns it, with the display fields (so the app keeps a snapshot). */
+  const listed = (prices: Record<string, string>, createdAt: number, down: string[] = []): ListingFetcher => async (a: string) =>
+    prices[a] && !down.includes(a)
+      ? { price: prices[a], currency: 'EUR', status: 'active', createdAt, unitRef: REF, eventId: crypto.createHash('sha256').update(a + prices[a] + createdAt).digest('hex'), title: 'Jabolka', unit: 'kg' }
+      : null;
+  /** What the older code left in the row (probe x1/p1m "old 2"): paid and pending, maybe pinned the old way. */
+  function asOlderRulesLeftIt(d: string, o: { oldPin?: boolean; pending?: 0 | 1 } = {}) {
+    const pay = db.prepare('SELECT * FROM shop_order_payments WHERE invoice_number = ?').get(d) as any;
+    db.prepare(`
+      UPDATE shop_orders SET payment_state = 'paid', expected_total = ?, effective_status = 'paid', pending = ?,
+        paid_signer_hex = ?, paid_tx_id = ?, paid_event_id = ?, paid_amount = ?, paid_at = ?,
+        paid_order_event_id = ${o.oldPin === false ? 'NULL' : 'event_id'}, resolved_at = ?
+      WHERE order_id = ?
+    `).run(pay.amount, o.pending ?? 1, pay.pubkey, pay.tx_id, pay.event_id, pay.amount, pay.created_at, now(), d);
+  }
+  /** …and before this code ran at all: no v1.1.2 pin, no price memory. */
+  function fromBeforeThisCode(d: string) {
+    db.prepare('UPDATE shop_orders SET settled_order_event_id = NULL WHERE order_id = ?').run(d);
+    db.prepare('DELETE FROM shop_order_listing_prices').run();
+  }
+  const review = (d: string) => db.prepare('SELECT verdict, expected_total, old_paid_amount, cleared_at FROM shop_order_settle_review WHERE order_id = ?').get(d) as any;
+
+  it('brain key rotation: the NEW trusted key\'s cancel of the same tx id un-pays what the OLD key paid (p2)', async () => {
+    const p = await paidApples();
+    const newBrain = mk();
+    const both = new Set([brain.pk, newBrain.pk]);
+    const cancel = sign(newBrain.sk, 30933, [
+      ['d', p.txId], ['p', 'f'.repeat(64)], ['unit_id', UNIT], ['payment_type', 'lana'], ['customer_hex', 'f'.repeat(64)],
+      ['merchant_hex', owner.pk], ['amount', '12.50'], ['currency', 'EUR'], ['status', 'cancelled'], ['invoice_number', p.d],
+    ], '', now() - 10);
+    expect(ingestEvent(db, cancel, both)).toBe(p.d);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM shop_order_payments WHERE tx_id = ?').get(p.txId) as any).n).toBe(2);
+    await resolveOrders(db, { orderIds: [p.d], trusted: both, fetchListing: fetcher(), now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'unpaid', pending: 0, settled_order_event_id: null });
+  });
+
+  it('the replacement that named an unknown listing at the buyer\'s price is not paid after deploy, also when the real listing lands (x1/p1m)', async () => {
+    const p = await paidApples();
+    const e2 = orderEvent(p.buyer, p.d, [['item', GOLD, '2', 'kg', '5.00', 'EUR']], '12.50', p.t0 + 5);
+    expect(ingestEvent(db, e2, trusted)).toBe(p.d);
+    await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: fetcher(), now: now() });
+    expect(row(p.d).payment_state).toBe('amount_mismatch');
+    // the older rules priced gold at the buyer's 5.00: paid, pending and pinned to E2 (old 2)
+    asOlderRulesLeftIt(p.d);
+    expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, paid_order_event_id: e2.id });
+    expect(activeOrderIds(db)).toContain(p.d);
+    // until the next sync has judged it, the merchant cannot ship it either
+    const early = await post(`/api/orders/${p.d}/fulfillment`, { hex: owner.pk, event: fulfillmentEvent(row(p.d), 'shipped') });
+    expect(early.status).toBe(409);
+    expect(early.json).toMatchObject({ error: 'NOT_PAID', paymentState: 'not_judged_yet' });
+    await resolveOrders(db, { trusted, fetchListing: fetcher(), now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '' });
+    expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '12.50', cleared_at: null });
+    // the merchant's real gold at 500.00 (new 4 / control 4)
+    const gold: ListingFetcher = async (a: string) => a === GOLD
+      ? { price: '500.00', currency: 'EUR', status: 'active', createdAt: now() - 60, unitRef: REF }
+      : fetcher()(a);
+    await resolveOrders(db, { trusted, fetchListing: gold, now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '1002.50', settled_order_event_id: null });
+    const ship = await post(`/api/orders/${p.d}/fulfillment`, { hex: owner.pk, event: fulfillmentEvent(row(p.d), 'shipped') });
+    expect(ship.status).toBe(409);
+  });
+
+  it('an honest older \'paid\' with no pin, repriced since: paid by step 5 at the price live when it was ordered, then pinned', async () => {
+    const t0 = now() - 120;
+    const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400));
+    expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1 });
+    asOlderRulesLeftIt(p.d, { oldPin: false }); // before fbb2c3d: no paid_order_event_id either
+    fromBeforeThisCode(p.d);
+    // the merchant has raised apples to 6.00 since
+    clearListingCache();
+    const now6 = listed({ [APPLES]: '6.00' }, now() - 60);
+    await resolveOrders(db, { trusted, fetchListing: now6, now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50' });
+    expect(row(p.d).settled_order_event_id).toBe(row(p.d).event_id);
+    expect(review(p.d)).toBeUndefined();
+    // from now on the pin holds it, judged on today's 6.00
+    await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: now6, now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50' });
+  });
+
+  it('a shipped (not pending) older \'paid\' is judged once at deploy too, so a later touch cannot flip it', async () => {
+    const t0 = now() - 120;
+    const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400));
+    asOlderRulesLeftIt(p.d, { oldPin: false, pending: 0 });
+    fromBeforeThisCode(p.d);
+    db.prepare(`UPDATE shop_orders SET fulfillment_status = 'shipped', effective_status = 'shipped' WHERE order_id = ?`).run(p.d);
+    db.prepare(`INSERT INTO shop_order_fulfillments (order_id, event_id, pubkey, created_at, status, raw_event, published) VALUES (?, ?, ?, ?, 'shipped', '{}', 1)`)
+      .run(p.d, 'f'.repeat(64), owner.pk, t0 + 600);
+    clearListingCache();
+    const now6 = listed({ [APPLES]: '6.00' }, now() - 60);
+    expect(activeOrderIds(db)).toContain(p.d);
+    await resolveOrders(db, { trusted, fetchListing: now6, now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 0, effective_status: 'shipped' });
+    expect(row(p.d).settled_order_event_id).toBe(row(p.d).event_id);
+    expect(activeOrderIds(db)).not.toContain(p.d);
+    // e.g. a delivery event touches it later: still paid on the pin
+    await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: now6, now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'paid', expected_total: '12.50' });
+  });
+
+  it('an older \'paid\' step 5 cannot price at deploy (listing REQ failed) is listed, not paid — and cleared once the listing answers', async () => {
+    const p = await placeApples(listed({ [APPLES]: '5.00' }, now() - 86_400));
+    asOlderRulesLeftIt(p.d);
+    fromBeforeThisCode(p.d);
+    db.prepare('DELETE FROM shop_order_item_snapshots').run();
+    clearListingCache();
+    await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '5.00' }, now() - 86_400, [APPLES]), now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '' });
+    expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '12.50', cleared_at: null });
+    expect(activeOrderIds(db)).toContain(p.d);
+    await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '5.00' }, now() - 86_400), now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50' });
+    expect(row(p.d).settled_order_event_id).toBe(row(p.d).event_id);
+    expect(review(p.d).cleared_at).toBeGreaterThan(0);
+  });
+
+  it('a snapshot prices an older \'paid\' only when it was live at order time, in the shop\'s currency, while the listing still names this shop', async () => {
+    const t0 = now() - 120;
+    // the snapshot is a version published AFTER the order: not the price the broker checked
+    const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 + 30));
+    asOlderRulesLeftIt(p.d);
+    fromBeforeThisCode(p.d);
+    clearListingCache();
+    await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60), now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', expected_total: '14.50' });
+    // a live snapshot, but the listing at that address now names ANOTHER shop
+    const q = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400));
+    asOlderRulesLeftIt(q.d);
+    fromBeforeThisCode(q.d);
+    clearListingCache();
+    const moved: ListingFetcher = async () => ({ price: '6.00', currency: 'EUR', status: 'active', createdAt: now() - 60, unitRef: `30901:${owner.pk}:${'f'.repeat(32)}` });
+    await resolveOrders(db, { orderIds: [q.d], trusted, fetchListing: moved, now: now() });
+    expect(row(q.d)).toMatchObject({ payment_state: 'amount_mismatch', expected_total: '' });
+    expect(orderTimeSnapshotPrice({ price: '5.00', currency: 'EUR', listing_created_at: 100, source: 'listing' }, 100, 'EUR')).toEqual({ price: '5.00', createdAt: 100 });
+    expect(orderTimeSnapshotPrice({ price: '5.00', currency: 'EUR', listing_created_at: 101, source: 'listing' }, 100, 'EUR')).toBeNull();
+    expect(orderTimeSnapshotPrice({ price: '5.00', currency: 'EUR', listing_created_at: 90, source: 'receipt' }, 100, 'EUR')).toBeNull();
+    expect(orderTimeSnapshotPrice({ price: '5.00', currency: 'HUF', listing_created_at: 90, source: 'listing' }, 100, 'EUR')).toBeNull();
+    expect(orderTimeSnapshotPrice({ price: '0.00', currency: 'EUR', listing_created_at: 90, source: 'listing' }, 100, 'EUR')).toBeNull();
+    expect(orderTimeSnapshotPrice(undefined, 100, 'EUR')).toBeNull();
   });
 });

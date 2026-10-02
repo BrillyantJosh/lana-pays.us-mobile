@@ -419,13 +419,41 @@ describe('resolveOrder — fail-closed money rules (review 2 Oct 2026)', () => {
     expect(resolveOrder(paidApples({ purchases: [processing, cancelled], now: 5000 })).paymentState).toBe('expired');
   });
 
-  it('versions are per (signer, tx id): another tx id, or a stranger\'s copy, cancels nothing', () => {
+  it('versions are per tx id: another tx id, or a stranger\'s copy, cancels nothing', () => {
     const paying = purchase({ eventId: 'v1', createdAt: 1200 });
     const otherTx = purchase({ eventId: 'o1', txId: 'tx2', createdAt: 1300, status: 'cancelled' });
     const stranger = purchase({ eventId: 's1', pubkey: 'x'.repeat(64), createdAt: 1400, status: 'cancelled' });
     const r = resolveOrder(paidApples({ purchases: [paying, otherTx, stranger] }));
     expect(r.paymentState).toBe('paid');
     expect(r.paidBy?.eventId).toBe('v1');
+  });
+
+  it('brain key rotation: the NEW trusted key\'s cancel of the same tx id un-pays what the OLD key paid (third review)', () => {
+    const NEW_BRAIN = '7'.repeat(64);
+    const both = new Set([BRAIN, NEW_BRAIN]);
+    const oldPaid = purchase({ eventId: 'old1', createdAt: 1200 });
+    const newCancel = purchase({ eventId: 'new1', pubkey: NEW_BRAIN, createdAt: 1300, status: 'cancelled', receiptDescription: '' });
+    for (const purchases of [[oldPaid, newCancel], [newCancel, oldPaid]]) {
+      const r = resolveOrder(paidApples({ purchases, trustedSigners: both }));
+      expect(r.paymentState).toBe('unpaid');
+      expect(r.pending).toBe(false);
+      // …also against the pin of the old key's payment
+      expect(resolveOrder(paidApples({ purchases, trustedSigners: both, settledPurchase: { txId: 'tx1', amount: '12.50' } })).paymentState).toBe('unpaid');
+    }
+    // same second: the not-paid version, whichever key signed it
+    const sameSecond = purchase({ eventId: '0-new', pubkey: NEW_BRAIN, createdAt: 1200, status: 'cancelled', receiptDescription: '' });
+    expect(resolveOrder(paidApples({ purchases: [oldPaid, sameSecond], trustedSigners: both })).paymentState).toBe('unpaid');
+    // the new key re-signing the payment keeps it paid
+    const newPaid = purchase({ eventId: 'new2', pubkey: NEW_BRAIN, createdAt: 1300 });
+    const r2 = resolveOrder(paidApples({ purchases: [oldPaid, newPaid], trustedSigners: both, settledPurchase: { txId: 'tx1', amount: '12.50' } }));
+    expect(r2.paymentState).toBe('paid');
+    expect(r2.paidBy?.eventId).toBe('new2');
+    // the old key still trusted, the new key NOT (yet): its cancel is a stranger's
+    expect(resolveOrder(paidApples({ purchases: [oldPaid, newCancel] })).paymentState).toBe('paid');
+    // a newer untrusted 'processing' never shadows a trusted cancel either
+    const strangerPaid = purchase({ eventId: 's2', pubkey: 'x'.repeat(64), createdAt: 1400 });
+    expect(resolveOrder(paidApples({ purchases: [oldPaid, newCancel, strangerPaid], trustedSigners: both })).paymentState).toBe('unpaid');
+    expect(latestPurchaseVersions([oldPaid, newCancel]).map(p => p.eventId)).toEqual(['new1']);
   });
 
   it('two versions in the same second: the not-paid one is kept, whichever id is lower (fail-closed)', () => {

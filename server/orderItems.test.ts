@@ -58,14 +58,14 @@ function sign(sk: Uint8Array, kind: number, tags: string[][], content = '', crea
 }
 
 /** A Živa-shaped KIND 36502 (lana-pays-feed import): per-package price, unit 'g', size in `weight`. */
-function listingEvent(signer: { sk: Uint8Array }, d: string, createdAt: number, over: Partial<{ title: string; sku: string; weight: string; price: string }> = {}) {
+function listingEvent(signer: { sk: Uint8Array }, d: string, createdAt: number, over: Partial<{ title: string; sku: string; weight: string; price: string; unit: string }> = {}) {
   return sign(signer.sk, 36502, [
     ['d', d],
     ['a', `30901:${owner.pk}:${UNIT}`],
     ['title', over.title ?? 'TARTEN S PETERŠILJEM BIO 200g'],
     ['type', 'product'],
     ['price', over.price ?? '4.08', 'EUR'],
-    ['unit', 'g'],
+    ['unit', over.unit ?? 'g'],
     ['status', 'active'],
     ['sku', over.sku ?? '321'],
     ['weight', over.weight ?? '200 g'],
@@ -251,6 +251,39 @@ describe('order items carry the listing the buyer saw', () => {
     expect(snapRow(o.order_id)).toMatchObject({ listing_event_id: before.id, title: 'TARTEN S PETERŠILJEM BIO 200g', sku: '321' });
     const r = await get(`/api/orders/${o.order_id}?hex=${owner.pk}`);
     expect(r.json.items[0]).toMatchObject({ title: 'TARTEN S PETERŠILJEM BIO 200g', sku: '321' });
+  });
+
+  it('(b) a paid order whose only snapshot is a version from AFTER the order shows the buyer\'s checked line, not the later sale unit or price (third review)', async () => {
+    const t0 = now() - 120;
+    // edited: 4.08 kos — the relays only ever had the version published after the order
+    const sameD = hex32();
+    relayEvents = [listingEvent(owner, sameD, t0 + 30, { unit: 'kos' })];
+    const o1 = await placeAndPay(mk(), sameD, makeListingFetcher([relayUrl], 3000), 1, t0);
+    expect(o1.payment_state).toBe('paid');
+    expect(snapRow(o1.order_id)).toMatchObject({ sale_unit: 'kos', listing_created_at: t0 + 30 });
+    const v1 = await get(`/api/orders/${o1.order_id}?hex=${owner.pk}`);
+    expect(v1.json.items.map((i: any) => [i.qty, i.saleUnit, i.unitPrice, i.lineTotal, i.saleUnitChanged, i.listingSaleUnit]))
+      .toEqual([[1, 'g', '4.08', '4.08', true, 'kos']]);
+
+    // edited: 5.00 kos — paid at 4.08 (and pinned), the first snapshot is of the edit
+    const editD = hex32();
+    relayEvents = [];
+    const o2 = await placeAndPay(mk(), editD, priceOnly, 1, t0);
+    expect(o2.payment_state).toBe('paid');
+    relayEvents = [listingEvent(owner, editD, t0 + 30, { unit: 'kos', price: '5.00' })];
+    clearListingCache();
+    await resolveOrders(db, { orderIds: [o2.order_id], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    expect(snapRow(o2.order_id)).toMatchObject({ sale_unit: 'kos', price: '5.00' });
+    const v2 = await get(`/api/orders/${o2.order_id}?hex=${owner.pk}`);
+    expect(v2.json).toMatchObject({ paymentState: 'paid', total: '4.08', shipping: '0.00' });
+    expect(v2.json.items.map((i: any) => [i.qty, i.saleUnit, i.unitPrice, i.lineTotal, i.saleUnitChanged])).toEqual([[1, 'g', '4.08', '4.08', true]]);
+
+    // a snapshot live at order time is the merchant's line, as before
+    const liveD = hex32();
+    relayEvents = [listingEvent(owner, liveD, t0 - 86_400, { unit: 'g' })];
+    const o3 = await placeAndPay(mk(), liveD, makeListingFetcher([relayUrl], 3000), 1, t0);
+    const v3 = await get(`/api/orders/${o3.order_id}?hex=${owner.pk}`);
+    expect(v3.json.items.map((i: any) => [i.saleUnit, i.unitPrice, i.saleUnitChanged, i.listingSaleUnit])).toEqual([['g', '4.08', false, null]]);
   });
 
   it('(b) …and a version that was live at order time replaces one fetched from after it', () => {

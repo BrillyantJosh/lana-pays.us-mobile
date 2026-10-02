@@ -31,6 +31,13 @@ export interface OrderItem {
    */
   buyerUnitPrice?: string | null;
   buyerSaleUnit?: string | null;
+  /**
+   * A PAID order whose only listing snapshot is a version published after
+   * the order shows the buyer's checked line; the later listing's sale unit,
+   * when it differs, is reported here.
+   */
+  saleUnitChanged?: boolean;
+  listingSaleUnit?: string | null;
 }
 
 /**
