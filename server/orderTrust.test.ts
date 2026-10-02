@@ -31,7 +31,7 @@ import { initializeSchema } from './db/schema.js';
 import { registerOrderRoutes } from './orders.js';
 import {
   ingestEvent, resolveOrders, activeOrderIds, syncShopOrders, parseOrderEvent, clearListingCache, makeListingFetcher,
-  unitToResolver, unitRow, orderTimeSnapshotPrice, type ListingFetcher,
+  unitToResolver, unitRow, confirmSettleReview, listSettleReview, listingDeletedBy, type ListingFetcher,
 } from './lib/orderSync.js';
 import { bindingString } from './lib/orderResolver.js';
 
@@ -89,7 +89,7 @@ function fulfillmentEvent(order: any, status: string) {
   ]);
 }
 
-// ── loopback relay stub: honours kinds, authors and #d; records every REQ ──
+// ── loopback relay stub: honours kinds, authors and #<tag> (every filter of a REQ); records every filter ──
 let relayEvents: any[] = [];
 const reqs: any[] = [];
 let relay: WebSocketServer;
@@ -98,6 +98,10 @@ function matches(ev: any, f: any): boolean {
   if (Array.isArray(f.kinds) && !f.kinds.includes(ev.kind)) return false;
   if (Array.isArray(f.authors) && !f.authors.includes(ev.pubkey)) return false;
   if (Array.isArray(f['#d']) && !f['#d'].includes(ev.tags.find((t: string[]) => t[0] === 'd')?.[1])) return false;
+  for (const k of Object.keys(f)) {
+    if (!k.startsWith('#') || k === '#d' || !Array.isArray(f[k])) continue;
+    if (!ev.tags.some((t: string[]) => t[0] === k.slice(1) && f[k].includes(t[1]))) return false;
+  }
   return true;
 }
 
@@ -148,9 +152,9 @@ beforeAll(async () => {
       try {
         const m = JSON.parse(raw.toString());
         if (m[0] === 'REQ') {
-          const [, sub, filter] = m;
-          reqs.push(filter);
-          for (const ev of relayEvents) if (matches(ev, filter)) socket.send(JSON.stringify(['EVENT', sub, ev]));
+          const [, sub, ...filters] = m;
+          reqs.push(...filters);
+          for (const ev of relayEvents) if (filters.some((f: any) => matches(ev, f))) socket.send(JSON.stringify(['EVENT', sub, ev]));
           socket.send(JSON.stringify(['EOSE', sub]));
         } else if (m[0] === 'EVENT') {
           socket.send(JSON.stringify(['OK', m[1].id, true, '']));
@@ -555,25 +559,38 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     expect(ship.status).toBe(409);
   });
 
-  it('an honest older \'paid\' with no pin, repriced since: paid by step 5 at the price live when it was ordered, then pinned', async () => {
+  it('an honest older \'paid\' with no pin, repriced since: listed, not paid — paid and pinned again once Brilly confirms exactly that event (round 3)', async () => {
     const t0 = now() - 120;
     const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400));
     expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1 });
     asOlderRulesLeftIt(p.d, { oldPin: false }); // before fbb2c3d: no paid_order_event_id either
     fromBeforeThisCode(p.d);
+    // the order-time snapshot says 5.00 — display only, it records no sale status (x3/m1)
+    expect(db.prepare("SELECT price FROM shop_order_item_snapshots WHERE order_id = ? AND source = 'listing'").get(p.d)).toEqual({ price: '5.00' });
     // the merchant has raised apples to 6.00 since
     clearListingCache();
     const now6 = listed({ [APPLES]: '6.00' }, now() - 60);
     await resolveOrders(db, { trusted, fetchListing: now6, now: now() });
-    expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50' });
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '14.50', settled_order_event_id: null });
+    expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '12.50', cleared_at: null });
+    expect(listSettleReview(db).map(e => ({ id: e.order_id, ev: e.order_event_id, now: e.current_event_id, tx: e.old_paid_tx_id })))
+      .toEqual([{ id: p.d, ev: row(p.d).event_id, now: row(p.d).event_id, tx: p.txId }]);
+    // Brilly checked it against what the broker took at order time and confirms THIS event
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() })).toEqual({ ok: true, paymentState: 'paid', expected: '12.50' });
+    expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50', paid_tx_id: p.txId });
     expect(row(p.d).settled_order_event_id).toBe(row(p.d).event_id);
-    expect(review(p.d)).toBeUndefined();
+    expect(review(p.d).cleared_at).toBeGreaterThan(0);
+    expect((db.prepare('SELECT confirmed_at FROM shop_order_settle_review WHERE order_id = ?').get(p.d) as any).confirmed_at).toBeGreaterThan(0);
+    expect(listSettleReview(db)).toEqual([]);
     // from now on the pin holds it, judged on today's 6.00
-    await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: now6, now: now() });
+    clearListingCache();
+    await resolveOrders(db, { trusted, fetchListing: now6, now: now() + 60 });
     expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50' });
+    const ship = await post(`/api/orders/${p.d}/fulfillment`, { hex: owner.pk, event: fulfillmentEvent(row(p.d), 'shipped') });
+    expect(ship.status).not.toBe(409);
   });
 
-  it('a shipped (not pending) older \'paid\' is judged once at deploy too, so a later touch cannot flip it', async () => {
+  it('a shipped (not pending) older \'paid\' is judged once at deploy too: listed, and a confirmation keeps it paid and shipped (round 3)', async () => {
     const t0 = now() - 120;
     const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400));
     asOlderRulesLeftIt(p.d, { oldPin: false, pending: 0 });
@@ -585,12 +602,40 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     const now6 = listed({ [APPLES]: '6.00' }, now() - 60);
     expect(activeOrderIds(db)).toContain(p.d);
     await resolveOrders(db, { trusted, fetchListing: now6, now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, effective_status: 'shipped', settled_order_event_id: null });
+    expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '12.50', cleared_at: null });
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() })).toMatchObject({ ok: true, expected: '12.50' });
     expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 0, effective_status: 'shipped' });
     expect(row(p.d).settled_order_event_id).toBe(row(p.d).event_id);
     expect(activeOrderIds(db)).not.toContain(p.d);
     // e.g. a delivery event touches it later: still paid on the pin
     await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: now6, now: now() });
     expect(row(p.d)).toMatchObject({ payment_state: 'paid', expected_total: '12.50' });
+  });
+
+  it('a confirmation pays only the event that was listed, and only while its old purchase still stands (round 3)', async () => {
+    const t0 = now() - 120;
+    const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400));
+    asOlderRulesLeftIt(p.d, { oldPin: false });
+    fromBeforeThisCode(p.d);
+    // nothing listed yet: nothing to confirm, nothing written
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() })).toEqual({ ok: false, reason: 'no_open_entry' });
+    expect(row(p.d)).toMatchObject({ payment_state: 'paid', settled_order_event_id: null });
+    clearListingCache();
+    const now6 = listed({ [APPLES]: '6.00' }, now() - 60);
+    await resolveOrders(db, { trusted, fetchListing: now6, now: now() });
+    expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', cleared_at: null });
+    // another event id than the one stored (and checked): refused, nothing written
+    expect(await confirmSettleReview(db, p.d, 'a'.repeat(64), { trusted, now: now() })).toEqual({ ok: false, reason: 'event_mismatch' });
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', settled_order_event_id: null });
+    // the brain has cancelled that purchase since: a confirmation does not pay it
+    expect(ingestEvent(db, cancelledPurchaseEvent(p.d, p.txId, now()), trusted)).toBe(p.d);
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() })).toEqual({ ok: false, reason: 'not_paid', paymentState: 'unpaid' });
+    expect(row(p.d)).toMatchObject({ payment_state: 'unpaid', pending: 0, settled_order_event_id: null });
+    expect(review(p.d).cleared_at).toBeNull();
+    expect((db.prepare('SELECT confirmed_at FROM shop_order_settle_review WHERE order_id = ?').get(p.d) as any).confirmed_at).toBeNull();
+    const ship = await post(`/api/orders/${p.d}/fulfillment`, { hex: owner.pk, event: fulfillmentEvent(row(p.d), 'shipped') });
+    expect(ship.status).toBe(409);
   });
 
   it('an older \'paid\' step 5 cannot price at deploy (listing REQ failed) is listed, not paid — and cleared once the listing answers', async () => {
@@ -609,32 +654,26 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     expect(review(p.d).cleared_at).toBeGreaterThan(0);
   });
 
-  it('a snapshot prices an older \'paid\' only when it was live at order time, in the shop\'s currency, while the listing still names this shop', async () => {
+  it('the order-time snapshot is no money: live at order time, published after it, or with the listing moved to another shop — all listed, none paid (round 3)', async () => {
     const t0 = now() - 120;
-    // the snapshot is a version published AFTER the order: not the price the broker checked
-    const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 + 30));
-    asOlderRulesLeftIt(p.d);
-    fromBeforeThisCode(p.d);
-    clearListingCache();
-    await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60), now: now() });
-    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', expected_total: '14.50' });
-    // a live snapshot, but the listing at that address now names ANOTHER shop
-    const q = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400));
-    asOlderRulesLeftIt(q.d);
-    fromBeforeThisCode(q.d);
-    clearListingCache();
     const moved: ListingFetcher = async () => ({ price: '6.00', currency: 'EUR', status: 'active', createdAt: now() - 60, unitRef: `30901:${owner.pk}:${'f'.repeat(32)}` });
-    await resolveOrders(db, { orderIds: [q.d], trusted, fetchListing: moved, now: now() });
-    expect(row(q.d)).toMatchObject({ payment_state: 'amount_mismatch', expected_total: '' });
-    expect(orderTimeSnapshotPrice({ price: '5.00', currency: 'EUR', listing_created_at: 100, source: 'listing' }, 100, 'EUR')).toEqual({ price: '5.00', createdAt: 100 });
-    expect(orderTimeSnapshotPrice({ price: '5.00', currency: 'EUR', listing_created_at: 101, source: 'listing' }, 100, 'EUR')).toBeNull();
-    expect(orderTimeSnapshotPrice({ price: '5.00', currency: 'EUR', listing_created_at: 90, source: 'receipt' }, 100, 'EUR')).toBeNull();
-    expect(orderTimeSnapshotPrice({ price: '5.00', currency: 'HUF', listing_created_at: 90, source: 'listing' }, 100, 'EUR')).toBeNull();
-    expect(orderTimeSnapshotPrice({ price: '0.00', currency: 'EUR', listing_created_at: 90, source: 'listing' }, 100, 'EUR')).toBeNull();
-    expect(orderTimeSnapshotPrice(undefined, 100, 'EUR')).toBeNull();
+    const cases: Array<[string, number, ListingFetcher, string]> = [
+      ['live at order time, repriced since', t0 - 86_400, listed({ [APPLES]: '6.00' }, now() - 60), '14.50'],
+      ['published after the order', t0 + 30, listed({ [APPLES]: '6.00' }, now() - 60), '14.50'],
+      ['the address now names another shop', t0 - 86_400, moved, ''],
+    ];
+    for (const [label, snapAt, fetchNow, expected] of cases) {
+      const p = await placeApples(listed({ [APPLES]: '5.00' }, snapAt));
+      asOlderRulesLeftIt(p.d);
+      fromBeforeThisCode(p.d);
+      clearListingCache();
+      await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: fetchNow, now: now() });
+      expect(row(p.d), label).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: expected, settled_order_event_id: null });
+      expect(review(p.d), label).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '12.50', cleared_at: null });
+    }
   });
 
-  it('an older \'paid\' whose first judgement found no listing keeps its order-time price on the next tick (fourth review, mob-mig fail-first)', async () => {
+  it('an older \'paid\' whose first judgement found no listing is listed once; its listing answering repriced does not pay it (fourth review, mob-mig fail-first; round 3)', async () => {
     const t0 = now() - 120;
     const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400)); // the snapshot: live at order time
     asOlderRulesLeftIt(p.d, { oldPin: false });
@@ -649,15 +688,16 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     // it fails again a tick later: still listed ONCE — listed_at and the old paid amount stay, so the 7-day window ends
     clearListingCache();
     await resolveOrders(db, { trusted, fetchListing: failing, now: now() + 60 });
-    expect(db.prepare('SELECT listed_at, old_paid_amount, old_paid_tx_id, verdict FROM shop_order_settle_review WHERE order_id = ?').get(p.d))
-      .toEqual({ listed_at: listedAt, old_paid_amount: '12.50', old_paid_tx_id: p.txId, verdict: 'amount_mismatch' });
+    const entry = () => db.prepare('SELECT listed_at, old_paid_amount, old_paid_tx_id, verdict, expected_total, cleared_at FROM shop_order_settle_review WHERE order_id = ?').get(p.d);
+    expect(entry()).toEqual({ listed_at: listedAt, old_paid_amount: '12.50', old_paid_tx_id: p.txId, verdict: 'amount_mismatch', expected_total: '', cleared_at: null });
     expect(activeOrderIds(db, listedAt + 8 * 86_400)).not.toContain(p.d);
-    // the listing answers, repriced to 6.00 since: judged at the price that was live when it was ordered
+    // the listing answers, repriced to 6.00 since: judged at today's price — never at the snapshot's 5.00
     clearListingCache();
     await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60), now: now() + 120 });
-    expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50' });
-    expect(row(p.d).settled_order_event_id).toBe(row(p.d).event_id);
-    expect(review(p.d).cleared_at).toBeGreaterThan(0);
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '14.50', settled_order_event_id: null });
+    expect(entry()).toEqual({ listed_at: listedAt, old_paid_amount: '12.50', old_paid_tx_id: p.txId, verdict: 'amount_mismatch', expected_total: '14.50', cleared_at: null });
+    // the old payment is kept on the entry, so Brilly can still confirm it
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() + 180 })).toMatchObject({ ok: true, expected: '12.50' });
   });
 
   it('…but a buyer\'s replacement of a listed older \'paid\' is judged afresh, never at the old order\'s price', async () => {
@@ -673,6 +713,9 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     clearListingCache();
     await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60), now: now() + 60 });
     expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '14.50' });
+    // the entry Brilly could confirm was E1's: E2 is another order, refused (round 3)
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() + 120 })).toEqual({ ok: false, reason: 'order_replaced' });
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', settled_order_event_id: null });
   });
 });
 
@@ -740,5 +783,146 @@ describe('fourth review — only a listing on sale prices an order; one qty shap
     await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: fetcher(), now: now() });
     expect(row(p.d)).toMatchObject({ event_id: e1, payment_state: 'paid', pending: 1, expected_total: '12.50' });
     expect(JSON.parse(row(p.d).items_json)[0].qty).toBe(2);
+  });
+});
+
+/**
+ * Round 3 of 2 Oct 2026 (x3/m1). An order-time snapshot in
+ * shop_order_item_snapshots records a price but never the listing's sale
+ * status, so it cannot tell an honest order from a buyer's replacement that
+ * the OLDER rules paid with an off-sale listing at its old price. It is no
+ * money input any more: an older 'paid' is judged by step 5 alone, exactly as
+ * the portal judges it, and what step 5 does not pay is listed for Brilly.
+ */
+describe('round 3 — an older \'paid\' is judged by step 5 alone; the snapshot is no money input', () => {
+  const REF = `30901:${owner.pk}:${UNIT}`;
+  const HONEY = `36502:${owner.pk}:honey-2026`;
+  const OLD = `36502:${owner.pk}:honey-2024`;
+  const shop = (status: string): ListingFetcher => async (a: string) =>
+    a === HONEY ? { price: '50.00', currency: 'EUR', status: 'active', createdAt: now() - 86_400, unitRef: REF }
+      : a === OLD ? { price: '5.00', currency: 'EUR', status, createdAt: now() - 90_000, unitRef: REF }
+        : null;
+  const review = (d: string) => db.prepare('SELECT verdict, expected_total, old_paid_amount, old_paid_tx_id, cleared_at FROM shop_order_settle_review WHERE order_id = ?').get(d) as any;
+  /** What origin/main left after judging the current 36520 'paid' (probe x3/m1 "OLD code after replacement"). */
+  function asOriginMainLeftIt(d: string, snapshots: Array<{ a: string; price: string; createdAt: number }>) {
+    const pay = db.prepare('SELECT * FROM shop_order_payments WHERE invoice_number = ?').get(d) as any;
+    db.prepare(`
+      UPDATE shop_orders SET payment_state = 'paid', expected_total = ?, effective_status = 'paid', pending = 1,
+        paid_signer_hex = ?, paid_tx_id = ?, paid_event_id = ?, paid_amount = ?, paid_at = ?,
+        paid_order_event_id = event_id, settled_order_event_id = NULL, resolved_at = ?
+      WHERE order_id = ?
+    `).run(pay.amount, pay.pubkey, pay.tx_id, pay.event_id, pay.amount, pay.created_at, now(), d);
+    db.prepare('DELETE FROM shop_order_item_snapshots WHERE order_id = ?').run(d);
+    for (const s of snapshots) {
+      db.prepare(`
+        INSERT INTO shop_order_item_snapshots (order_id, item_a, listing_event_id, listing_created_at, title, price, currency, source, fetched_at)
+        VALUES (?, ?, ?, ?, 'Med', ?, 'EUR', 'listing', ?)
+      `).run(d, s.a, crypto.randomBytes(32).toString('hex'), s.createdAt, s.price, now());
+    }
+    db.prepare('DELETE FROM shop_order_listing_prices').run();
+  }
+
+  it('a replacement the older rules paid with an off-sale listing (inactive, sold_out, deleted) is not paid, not pinned, listed and not fulfillable (x3/m1)', async () => {
+    for (const status of ['inactive', 'sold_out', 'deleted']) {
+      const buyer = mk();
+      const d = orderIdFor(buyer.pk);
+      const t0 = now() - 120;
+      expect(ingestEvent(db, orderEvent(buyer, d, [['item', HONEY, '1', 'kg', '50.00', 'EUR']], '52.50', t0), trusted)).toBe(d);
+      expect(ingestEvent(db, purchaseEvent(d, buyer.pk, crypto.randomUUID(), '52.50'), trusted)).toBe(d);
+      // the buyer's replacement: 10 × honey-2024 at its old 5.00 (live at order time, off sale)
+      expect(ingestEvent(db, orderEvent(buyer, d, [['item', OLD, '10', 'kg', '5.00', 'EUR']], '52.50', t0 + 5), trusted)).toBe(d);
+      asOriginMainLeftIt(d, [{ a: HONEY, price: '50.00', createdAt: now() - 86_400 }, { a: OLD, price: '5.00', createdAt: now() - 90_000 }]);
+      clearListingCache();
+      expect(activeOrderIds(db), status).toContain(d);
+      for (const tick of [0, 60]) {
+        await resolveOrders(db, { trusted, fetchListing: shop(status), now: now() + tick });
+        expect(row(d), `${status} tick ${tick}`).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '', settled_order_event_id: null });
+        expect(review(d), `${status} tick ${tick}`).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '52.50', cleared_at: null });
+      }
+      const ship = await post(`/api/orders/${d}/fulfillment`, { hex: owner.pk, event: fulfillmentEvent(row(d), 'shipped') });
+      expect(ship.status, status).toBe(409);
+    }
+  });
+});
+
+/**
+ * Round 3 of 2 Oct 2026 (x3/m3). A listing its merchant deleted with a NIP-09
+ * KIND 5 is gone for the portal (tombstone) and the broker (listing_deletions)
+ * — the order route refuses it, so an order naming it is the buyer's own
+ * replacement. A relay may still serve the listing beside the KIND 5 (it does
+ * not apply deletions, or someone re-broadcast it); this app must not take it
+ * as a live price either. Real fetcher, loopback relay.
+ */
+describe('round 3 — a listing its merchant deleted (KIND 5) prices nothing, also while a relay still serves it', () => {
+  const REF = `30901:${owner.pk}:${UNIT}`;
+  const HONEY = `36502:${owner.pk}:honey-2026`;
+  const OLD = `36502:${owner.pk}:honey-2024`;
+  const honey = () => sign(owner.sk, 36502, [['d', 'honey-2026'], ['a', REF], ['title', 'Med'], ['price', '50.00', 'EUR'], ['unit', 'kg'], ['status', 'active']], '', now() - 86_400);
+  const old = (createdAt = now() - 90_000) => sign(owner.sk, 36502, [['d', 'honey-2024'], ['a', REF], ['title', 'Med'], ['price', '5.00', 'EUR'], ['unit', 'kg'], ['status', 'active']], '', createdAt);
+
+  it('a replacement naming a KIND-5-deleted listing the relay still serves is not paid, not pinned, not fulfillable (x3/m3)', async () => {
+    const buyer = mk();
+    const d = orderIdFor(buyer.pk);
+    const t0 = now() - 120;
+    const oldEv = old();
+    relayEvents = [honey(), oldEv, sign(owner.sk, 5, [['a', OLD], ['k', '36502']], 'deleted', now() - 80_000)];
+    const f = makeListingFetcher([relayUrl], 2000);
+    expect(ingestEvent(db, orderEvent(buyer, d, [['item', HONEY, '1', 'kg', '50.00', 'EUR']], '52.50', t0), trusted)).toBe(d);
+    expect(ingestEvent(db, purchaseEvent(d, buyer.pk, crypto.randomUUID(), '52.50'), trusted)).toBe(d);
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: f, now: now() });
+    expect(row(d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '52.50' });
+    // the buyer's replacement: 10 × the deleted honey-2024 at its last price
+    expect(ingestEvent(db, orderEvent(buyer, d, [['item', OLD, '10', 'kg', '5.00', 'EUR']], '52.50', t0 + 5), trusted)).toBe(d);
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: f, now: now() });
+    expect(row(d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '', settled_order_event_id: null });
+    const ship = await post(`/api/orders/${d}/fulfillment`, { hex: owner.pk, event: fulfillmentEvent(row(d), 'shipped') });
+    expect(ship.status).toBe(409);
+    // the deletion was read for that listing, by its author and address
+    expect(reqs.some(r => Array.isArray(r.kinds) && r.kinds.includes(5) && JSON.stringify(r['#a']) === JSON.stringify([OLD]) && JSON.stringify(r.authors) === JSON.stringify([owner.pk]))).toBe(true);
+  });
+
+  it('the fetcher follows NIP-09 as the broker reads it: own author only, `e` = this version, `a` up to its created_at; an unread deletion is not "none"', async () => {
+    const stranger = mk();
+    const oldEv = old();
+    const f = () => { clearListingCache(); return makeListingFetcher([relayUrl], 2000); };
+    // a stranger's KIND 5 deletes nothing
+    relayEvents = [oldEv, sign(stranger.sk, 5, [['a', OLD], ['e', oldEv.id]], '', now() - 100)];
+    expect((await f()(OLD))?.price).toBe('5.00');
+    // the author's KIND 5 by event id
+    relayEvents = [oldEv, sign(owner.sk, 5, [['e', oldEv.id]], '', now() - 100)];
+    expect(await f()(OLD)).toBeNull();
+    // the author's KIND 5 by address, signed after this version
+    relayEvents = [oldEv, sign(owner.sk, 5, [['a', OLD]], '', oldEv.created_at)];
+    expect(await f()(OLD)).toBeNull();
+    // …a version re-published after that deletion is live again
+    const again = old(now() - 50);
+    relayEvents = [again, sign(owner.sk, 5, [['a', OLD]], '', now() - 100)];
+    expect((await f()(OLD))?.eventId).toBe(again.id);
+    // a forged KIND 5 (bad signature) deletes nothing
+    // (a JSON copy, as a relay delivers it: nostr-tools caches "verified" on the signed object, and a spread keeps it)
+    const forged = { ...JSON.parse(JSON.stringify(sign(owner.sk, 5, [['a', OLD]], '', now() - 10))), sig: 'f'.repeat(128) };
+    relayEvents = [again, forged];
+    expect((await f()(OLD))?.price).toBe('5.00');
+    expect(listingDeletedBy({ id: again.id, pubkey: owner.pk, kind: 36502, d: 'honey-2024', created_at: again.created_at }, [forged as any])).toBe(false);
+    // the deletion read does not finish (a relay that never ends it with EOSE): no price
+    const silent = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+    await new Promise<void>(r => silent.once('listening', r));
+    silent.on('connection', (socket) => {
+      socket.on('message', (raw: Buffer) => {
+        const m = JSON.parse(raw.toString());
+        if (m[0] !== 'REQ') return;
+        const [, sub, ...filters] = m;
+        if (filters.some((x: any) => Array.isArray(x.kinds) && x.kinds.includes(5))) return; // no answer to the deletion read
+        socket.send(JSON.stringify(['EVENT', sub, again]));
+        socket.send(JSON.stringify(['EOSE', sub]));
+      });
+    });
+    try {
+      clearListingCache();
+      const url = `ws://127.0.0.1:${(silent.address() as AddressInfo).port}`;
+      expect(await makeListingFetcher([url], 500)(OLD)).toBeNull();
+    } finally {
+      await new Promise<void>(r => silent.close(() => r()));
+    }
   });
 });

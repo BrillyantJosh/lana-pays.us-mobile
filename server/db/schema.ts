@@ -487,6 +487,11 @@ export function initializeSchema(db: Database.Database): void {
       cleared_at INTEGER
     );
   `);
+  // Round 3 (2 Oct 2026): when Brilly confirmed an entry as honest
+  // (orderSync.confirmSettleReview — the purchase it was paid with became
+  // the step-5a pin of exactly that 36520 event). NULL = cleared by a later
+  // step-5 'paid', or still open.
+  try { db.exec(`ALTER TABLE shop_order_settle_review ADD COLUMN confirmed_at INTEGER`); } catch { /* column exists */ }
 
   // SPEC v1.1.2 step 2: the last MERCHANT-signed price this app saw for a
   // listing while judging one exact 36520 event — keyed by that event's id,

@@ -422,7 +422,9 @@ describe('order items carry the listing the buyer saw', () => {
     const fetchListing = makeListingFetcher([relayUrl], 3000);
     reqCount = 0;
     await placeAndPay(mk(), listingD, fetchListing);
-    expect(reqCount).toBe(1); // prefetch REQ; the per-order fetch and the snapshot reuse it
+    // prefetch: the listing REQ + the REQ for the KIND 5s naming it (round 3,
+    // NIP-09); the per-order fetch and the snapshot reuse both
+    expect(reqCount).toBe(2);
   });
 });
 
