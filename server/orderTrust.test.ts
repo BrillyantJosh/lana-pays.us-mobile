@@ -633,4 +633,112 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     expect(orderTimeSnapshotPrice({ price: '0.00', currency: 'EUR', listing_created_at: 90, source: 'listing' }, 100, 'EUR')).toBeNull();
     expect(orderTimeSnapshotPrice(undefined, 100, 'EUR')).toBeNull();
   });
+
+  it('an older \'paid\' whose first judgement found no listing keeps its order-time price on the next tick (fourth review, mob-mig fail-first)', async () => {
+    const t0 = now() - 120;
+    const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400)); // the snapshot: live at order time
+    asOlderRulesLeftIt(p.d, { oldPin: false });
+    fromBeforeThisCode(p.d);
+    clearListingCache();
+    // the first sync after deploy: the listing REQ fails
+    const failing = listed({ [APPLES]: '6.00' }, now() - 60, [APPLES]);
+    await resolveOrders(db, { trusted, fetchListing: failing, now: now() });
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '' });
+    expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '12.50', cleared_at: null });
+    const listedAt = (db.prepare('SELECT listed_at FROM shop_order_settle_review WHERE order_id = ?').get(p.d) as any).listed_at;
+    // it fails again a tick later: still listed ONCE — listed_at and the old paid amount stay, so the 7-day window ends
+    clearListingCache();
+    await resolveOrders(db, { trusted, fetchListing: failing, now: now() + 60 });
+    expect(db.prepare('SELECT listed_at, old_paid_amount, old_paid_tx_id, verdict FROM shop_order_settle_review WHERE order_id = ?').get(p.d))
+      .toEqual({ listed_at: listedAt, old_paid_amount: '12.50', old_paid_tx_id: p.txId, verdict: 'amount_mismatch' });
+    expect(activeOrderIds(db, listedAt + 8 * 86_400)).not.toContain(p.d);
+    // the listing answers, repriced to 6.00 since: judged at the price that was live when it was ordered
+    clearListingCache();
+    await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60), now: now() + 120 });
+    expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50' });
+    expect(row(p.d).settled_order_event_id).toBe(row(p.d).event_id);
+    expect(review(p.d).cleared_at).toBeGreaterThan(0);
+  });
+
+  it('…but a buyer\'s replacement of a listed older \'paid\' is judged afresh, never at the old order\'s price', async () => {
+    const t0 = now() - 120;
+    const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400));
+    asOlderRulesLeftIt(p.d, { oldPin: false });
+    fromBeforeThisCode(p.d);
+    clearListingCache();
+    await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60, [APPLES]), now: now() });
+    expect(review(p.d)).toMatchObject({ cleared_at: null });
+    // E2: the same line, a new event — the snapshot of E1 must not price it
+    expect(ingestEvent(db, orderEvent(p.buyer, p.d, [['item', APPLES, '2', 'kg', '5.00', 'EUR']], '12.50', p.t0 + 5), trusted)).toBe(p.d);
+    clearListingCache();
+    await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60), now: now() + 60 });
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '14.50' });
+  });
+});
+
+/**
+ * Fourth review of 2 Oct 2026. A shop keeps old, merchant-signed listings it
+ * has taken off sale (x2/p2); the order route refuses them, so an order that
+ * names one is the buyer's own replacement. And a qty the portal and the
+ * broker refuse is not mirrored here either (x2/p4), so the two mirrors never
+ * show different "paid" orders for one order id.
+ */
+describe('fourth review — only a listing on sale prices an order; one qty shape for every mirror', () => {
+  const REF = `30901:${owner.pk}:${UNIT}`;
+  const HONEY = `36502:${owner.pk}:honey-2026`;
+  const OLD = `36502:${owner.pk}:honey-2024`;
+  const shop = (status: string): ListingFetcher => async (a: string) =>
+    a === HONEY ? { price: '50.00', currency: 'EUR', status: 'active', createdAt: now() - 86_400, unitRef: REF }
+      : a === OLD ? { price: '5.00', currency: 'EUR', status, createdAt: now() - 90_000, unitRef: REF }
+        : null;
+
+  it('a replacement naming the shop\'s off-sale cheaper listing is not paid, pending or fulfillable (inactive, sold_out, deleted, draft)', async () => {
+    for (const status of ['inactive', 'sold_out', 'deleted', 'draft', 'published']) {
+      const buyer = mk();
+      const d = orderIdFor(buyer.pk);
+      const t0 = now() - 120;
+      expect(ingestEvent(db, orderEvent(buyer, d, [['item', HONEY, '1', 'kg', '50.00', 'EUR']], '52.50', t0), trusted)).toBe(d);
+      expect(ingestEvent(db, purchaseEvent(d, buyer.pk, crypto.randomUUID(), '52.50'), trusted)).toBe(d);
+      await resolveOrders(db, { orderIds: [d], trusted, fetchListing: shop(status), now: now() });
+      expect(row(d), status).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '52.50' });
+      expect(ingestEvent(db, orderEvent(buyer, d, [['item', OLD, '10', 'kg', '5.00', 'EUR']], '52.50', t0 + 5), trusted)).toBe(d);
+      await resolveOrders(db, { orderIds: [d], trusted, fetchListing: shop(status), now: now() });
+      expect(row(d), status).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '', settled_order_event_id: null });
+      const ship = await post(`/api/orders/${d}/fulfillment`, { hex: owner.pk, event: fulfillmentEvent(row(d), 'shipped') });
+      expect(ship.status, status).toBe(409);
+    }
+  });
+
+  it('the listing fetcher reads the sale status the order route reads (KIND 31923: lana-status, absent = published)', async () => {
+    relayEvents = [
+      sign(owner.sk, 31923, [['d', 'ev1'], ['a', REF], ['title', 'Delavnica'], ['t', 'lana-event'], ['price', '5.00', 'EUR']], '', now() - 100),
+      sign(owner.sk, 31923, [['d', 'ev2'], ['a', REF], ['title', 'Delavnica'], ['price', '5.00', 'EUR'], ['lana-status', 'active']], '', now() - 100),
+      sign(owner.sk, 31923, [['d', 'ev3'], ['a', REF], ['title', 'Delavnica'], ['price', '5.00', 'EUR'], ['status', 'active'], ['lana-status', 'draft']], '', now() - 100),
+      sign(owner.sk, 36502, [['d', 'off'], ['a', REF], ['title', 'Med'], ['price', '5.00', 'EUR'], ['status', 'inactive']], '', now() - 100),
+      sign(owner.sk, 36502, [['d', 'bare'], ['a', REF], ['title', 'Med'], ['price', '5.00', 'EUR']], '', now() - 100),
+    ];
+    const f = makeListingFetcher([relayUrl], 2000);
+    expect((await f(`31923:${owner.pk}:ev1`))?.status).toBe('published');
+    expect((await f(`31923:${owner.pk}:ev2`))?.status).toBe('active');
+    expect((await f(`31923:${owner.pk}:ev3`))?.status).toBe('draft');
+    expect((await f(`36502:${owner.pk}:off`))?.status).toBe('inactive');
+    expect((await f(`36502:${owner.pk}:bare`))?.status).toBe('active');
+  });
+
+  it('a qty the portal and the broker refuse (1e1, 0x0a, " 10", 10.0, …) is not mirrored: the paid order stays as it was (x2/p4)', async () => {
+    const b = mk();
+    const d = orderIdFor(b.pk);
+    for (const q of ['1e1', '0x0a', ' 10', '10 ', '10.0', '+10', '010', '0', '-1', '1234567890', '']) {
+      expect(parseOrderEvent(orderEvent(b, d, [['item', APPLES, q, 'kg', '5.00', 'EUR']], '52.50', now() - 60)), JSON.stringify(q)).toBeNull();
+    }
+    for (const q of ['1', '10', '123456789']) {
+      expect(parseOrderEvent(orderEvent(b, d, [['item', APPLES, q, 'kg', '5.00', 'EUR']], '52.50', now() - 60))?.items[0].qty, q).toBe(Number(q));
+    }
+    const p = await paidApples();
+    const e1 = row(p.d).event_id;
+    expect(ingestEvent(db, orderEvent(p.buyer, p.d, [['item', APPLES, '1e1', 'kg', '5.00', 'EUR']], '52.50', p.t0 + 5), trusted)).toBeNull();
+    await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: fetcher(), now: now() });
+    expect(row(p.d)).toMatchObject({ event_id: e1, payment_state: 'paid', pending: 1, expected_total: '12.50' });
+    expect(JSON.parse(row(p.d).items_json)[0].qty).toBe(2);
+  });
 });

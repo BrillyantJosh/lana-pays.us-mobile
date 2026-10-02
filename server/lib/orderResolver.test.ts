@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import {
-  resolveOrder, bindingString, toCents, centsToString, orderIdMatchesPubkey, usableListingPrice, purchaseVersionWins, latestPurchaseVersions,
+  resolveOrder, bindingString, toCents, centsToString, orderIdMatchesPubkey, usableListingPrice, listingSaleStatus, purchaseVersionWins, latestPurchaseVersions,
   type ResolverInput,
 } from './orderResolver';
 
@@ -597,7 +597,7 @@ describe('resolveOrder — a paid order carries the merchant\'s numbers (SPEC v1
   });
 
   it('usableListingPrice: positive price, the shop\'s currency, the order\'s own shop', () => {
-    const l = { price: '5.00', currency: 'EUR', unitRef: UNIT_REF };
+    const l = { price: '5.00', currency: 'EUR', unitRef: UNIT_REF, status: 'active' };
     expect(usableListingPrice(l, 'EUR', UNIT_REF)).toBe('5.00');
     expect(usableListingPrice({ ...l, currency: 'eur' }, 'EUR', UNIT_REF)).toBe('5.00');
     expect(usableListingPrice(null, 'EUR', UNIT_REF)).toBeNull();
@@ -614,5 +614,30 @@ describe('resolveOrder — a paid order carries the merchant\'s numbers (SPEC v1
     expect(usableListingPrice({ ...l, unitRef: `30901:${'x'.repeat(64)}:${UNIT}` }, 'EUR', UNIT_REF)).toBeNull();
     expect(usableListingPrice({ ...l, unitRef: '' }, 'EUR', UNIT_REF)).toBeNull();
     expect(usableListingPrice({ ...l, unitRef: undefined }, 'EUR', '')).toBeNull();
+  });
+
+  it('usableListingPrice: only a listing on sale (status \'active\') prices an order — fourth review, x2/p1', () => {
+    // The order route refuses a listing that is not on sale (SPEC §6, §10), so
+    // an order naming one is the buyer's own replacement: the shop's old
+    // 5.00 listing it took off sale must not price 10 kg of today's honey.
+    const l = { price: '5.00', currency: 'EUR', unitRef: UNIT_REF, status: 'active' };
+    expect(usableListingPrice(l, 'EUR', UNIT_REF)).toBe('5.00');
+    for (const status of ['inactive', 'sold_out', 'deleted', 'draft', 'seasonal', 'archived', 'published', 'Active', ' active', '', null, undefined]) {
+      expect(usableListingPrice({ ...l, status }, 'EUR', UNIT_REF), String(status)).toBeNull();
+    }
+  });
+
+  it('listingSaleStatus: the status the order routes read — `status` (absent = active); KIND 31923 `lana-status` (absent = published)', () => {
+    expect(listingSaleStatus({ kind: 36502, tags: [['status', 'active']] })).toBe('active');
+    expect(listingSaleStatus({ kind: 36502, tags: [] })).toBe('active');
+    expect(listingSaleStatus({ kind: 36502, tags: [['status', '']] })).toBe('active');
+    expect(listingSaleStatus({ kind: 36511, tags: [['status', 'sold_out'], ['status', 'active']] })).toBe('sold_out');
+    expect(listingSaleStatus({ kind: 36502, tags: [['lana-status', 'active'], ['status', 'inactive']] })).toBe('inactive');
+    // the broker's listings cache: a calendar listing sells only with lana-status 'active'
+    expect(listingSaleStatus({ kind: 31923, tags: [] })).toBe('published');
+    expect(listingSaleStatus({ kind: 31923, tags: [['status', 'active']] })).toBe('published');
+    expect(listingSaleStatus({ kind: 31923, tags: [['lana-status', 'draft']] })).toBe('draft');
+    expect(listingSaleStatus({ kind: 31923, tags: [['lana-status', 'active']] })).toBe('active');
+    expect(listingSaleStatus({ kind: 36502, tags: [['status']] as unknown as string[][] })).toBe('active');
   });
 });

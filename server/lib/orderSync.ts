@@ -28,7 +28,7 @@ import { queryEvents, type SignedEvent } from './dm.js';
 import { getLanaRelays, broadcastEvent } from './nostr.js';
 import { SIMPLE_UNIT_SQL } from './unitOrigin.js';
 import {
-  resolveOrder, ORDER_ID_RE, orderIdMatchesPubkey, toCents, bindingString, usableListingPrice, purchaseVersionWins,
+  resolveOrder, ORDER_ID_RE, orderIdMatchesPubkey, toCents, bindingString, usableListingPrice, listingSaleStatus, purchaseVersionWins,
   type ResolverOrder, type ResolverPurchase, type ResolverFulfillment, type ResolverUnit, type SettledPurchase,
 } from './orderResolver.js';
 
@@ -167,6 +167,16 @@ export const ORDER_ITEM_KINDS: ReadonlySet<number> = new Set([
   31923, ...Array.from({ length: 17 }, (_, i) => 36500 + i),
 ]);
 
+/**
+ * A whole, positive quantity exactly as the order route writes it — the
+ * portal's rule (lanaeco-shop orderShapeProblem QTY_RE), which the broker's
+ * shares: no '1e1', '0x0a', ' 10', '10.0', '010' or '+10'. Number() takes
+ * all of those, so a buyer's replacement carrying one was mirrored here but
+ * refused by the portal, and the two showed different "paid" orders for one
+ * order id (fourth review, x2/p4).
+ */
+const QTY_RE = /^[1-9]\d{0,8}$/;
+
 export interface ParsedOrder {
   d: string; pubkey: string; eventId: string; createdAt: number;
   unitId: string; unitOwnerHex: string;
@@ -194,6 +204,7 @@ export function parseOrderEvent(ev: SignedEvent): ParsedOrder | null {
     // `<listing kind>:<owner>:<listing d>` exactly, as the broker takes it.
     const parts = String(addr || '').split(':');
     const [kindS, owner, listingD] = parts;
+    if (!QTY_RE.test(String(qtyS ?? ''))) return null;
     const qty = Number(qtyS);
     if (parts.length !== 3 || !/^[1-9]\d*$/.test(kindS || '') || !ORDER_ITEM_KINDS.has(Number(kindS)) || !listingD) return null;
     if (!HEX64.test(owner || '') || !Number.isInteger(qty) || qty <= 0) return null;
@@ -460,7 +471,8 @@ export interface ListingInfo {
   /**
    * Money fields — the ONLY ones the resolver's caller reads: price, the
    * currency the price is signed in, the listing's `a` tag (which shop it
-   * belongs to — usableListingPrice) and createdAt.
+   * belongs to), its sale status (listingSaleStatus: only 'active' is on
+   * sale — both read by usableListingPrice) and createdAt.
    */
   price: string | null; currency: string; status: string; createdAt: number; unitRef?: string;
   /**
@@ -509,7 +521,8 @@ export function makeListingFetcher(relays: string[], timeout = 6000): ListingFet
           // KIND 36511 (Body Arts) signs its currency in a separate tag — as the broker reads it.
           currency: price?.[2] || (best.kind === 36511 ? tag(best, 'currency') || '' : ''),
           unitRef: tag(best, 'a') || '',
-          status: tag(best, 'status') || 'active',
+          // as the order route reads it: KIND 31923 signs it in lana-status
+          status: listingSaleStatus(best),
           createdAt: best.created_at,
           eventId: best.id,
           title: displayTag(best, 'title', 200),
@@ -799,6 +812,12 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
       expected_total = excluded.expected_total, listed_at = excluded.listed_at, cleared_at = NULL
   `);
   const clearReview = db.prepare('UPDATE shop_order_settle_review SET cleared_at = ? WHERE order_id = ? AND cleared_at IS NULL');
+  // An older 'paid' that step 5 has already judged once and did not pay: its
+  // open entry, for exactly the order event that was paid.
+  const getOpenReview = db.prepare('SELECT 1 AS open FROM shop_order_settle_review WHERE order_id = ? AND order_event_id = ? AND cleared_at IS NULL');
+  // A later judgement of that entry: the verdict moves, the entry (when it was
+  // listed, what the older rules had paid) stays — so its 7 days end.
+  const rejudgeReview = db.prepare('UPDATE shop_order_settle_review SET verdict = ?, expected_total = ? WHERE order_id = ? AND order_event_id = ? AND cleared_at IS NULL');
 
   // Warm the listing cache for every distinct address up front, a few at a
   // time. The loop below awaits one fetch per order; with a dead relay set
@@ -839,10 +858,11 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
     // EVERY item is priced by its own current listing (SPEC v1.1.0): the
     // first item's price applied to all would judge a correctly paid cart
     // amount_mismatch. A listing prices an item only when it is usable for
-    // THIS order (SPEC v1.1.2 step 2: a positive price in the shop's
+    // THIS order (SPEC v1.1.2 step 2: on sale, a positive price in the shop's
     // currency, its `a` naming the order's shop). Otherwise the last usable
     // price seen for it while judging this very 36520 event counts (an
-    // honest order whose listing was deleted, or whose listing REQ failed);
+    // honest order whose listing was deleted or went off sale, or whose
+    // listing REQ failed);
     // else null — the order is then not paid until it is (SPEC v1.1.1): the
     // buyer's own unit_price is never money.
     const resolverUnit = unitToResolver(unit);
@@ -855,7 +875,15 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
     // price the broker checked at order time — but only while the same
     // listing address still names this shop now (the snapshot does not
     // record the listing's `a` tag). Everything else is priced as usual.
-    const legacyPaid = row.payment_state === 'paid' && row.settled_order_event_id !== row.event_id;
+    //
+    // It stays such an order — judged with the snapshot — while its entry in
+    // shop_order_settle_review is open for this same event, not only while
+    // payment_state still says 'paid': the first judgement after deploy
+    // writes the new verdict, and when that tick's listing REQ failed every
+    // later tick judged it at today's price for good (fourth review,
+    // mob-mig fail-first). A buyer's replacement is another event: afresh.
+    const reviewOpen = !!getOpenReview.get(row.order_id, row.event_id);
+    const legacyPaid = row.settled_order_event_id !== row.event_id && (row.payment_state === 'paid' || reviewOpen);
     order.items = order.items.map((it, i) => {
       const l = listings[i];
       if (legacyPaid && l && l.unitRef === orderUnitRef) {
@@ -903,8 +931,12 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
     // An older 'paid' that step 5 does not pay is listed for Brilly, not
     // paid; a later paid verdict clears the entry.
     if (legacyPaid && !paidNow) {
-      listForReview.run(row.order_id, row.event_id, row.paid_tx_id ?? null, row.paid_amount ?? null, r.paymentState, r.expected, now);
-      console.warn(`[orders] order ${String(row.order_id).slice(0, 12)}…: 'paid' under the older rules, ${r.paymentState} under SPEC v1.1.2 — not paid, listed in shop_order_settle_review`);
+      if (reviewOpen) {
+        rejudgeReview.run(r.paymentState, r.expected, row.order_id, row.event_id);
+      } else {
+        listForReview.run(row.order_id, row.event_id, row.paid_tx_id ?? null, row.paid_amount ?? null, r.paymentState, r.expected, now);
+        console.warn(`[orders] order ${String(row.order_id).slice(0, 12)}…: 'paid' under the older rules, ${r.paymentState} under SPEC v1.1.2 — not paid, listed in shop_order_settle_review`);
+      }
     } else if (paidNow) {
       clearReview.run(now, row.order_id);
     }

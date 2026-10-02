@@ -51,6 +51,14 @@
  *  - a step-5a pin is only one this rule set wrote: a consumer upgrading
  *    from an older resolver re-judges its stored 'paid' verdicts without a
  *    pin (before v1.1.1 an unknown listing was priced by the buyer).
+ *
+ * SPEC v1.1.2 (fourth review 2 Oct 2026):
+ *  - a listing prices an item only while it is ON SALE (usableListingPrice:
+ *    sale status 'active', read by listingSaleStatus exactly as the order
+ *    routes read it). A shop keeps old, merchant-signed listings it took off
+ *    sale (inactive / sold_out / deleted / draft) — often at an older, lower
+ *    price; the order route refuses them, so an order naming one is the
+ *    buyer's own replacement.
  */
 
 export type PaymentState = 'unpaid' | 'paid' | 'amount_mismatch' | 'expired' | 'cancelled';
@@ -248,18 +256,46 @@ export interface ListingPriceSource {
   currency: string | null | undefined;
   /** the listing's `a` tag: '30901:<owner>:<unit_id>' (absent = names no shop) */
   unitRef?: string | null;
+  /**
+   * the listing's sale status as the order routes read it — listingSaleStatus
+   * of the listing event; only 'active' is on sale (SPEC §6, §10)
+   */
+  status: string | null | undefined;
+}
+
+/** NIP-52 calendar listing (lana-events): it signs its sale status in `lana-status`. */
+const CALENDAR_LISTING_KIND = 31923;
+
+/**
+ * SPEC §6 — a listing's sale status, read the way the order routes read it
+ * (the broker's listings cache, the portal's isBuyable): the first `status`
+ * tag, absent or empty = 'active'; a KIND 31923 calendar listing signs it in
+ * `lana-status` instead, absent or empty = 'published'. Only 'active' is on
+ * sale: inactive, sold_out, deleted, draft, published or any other value is
+ * not.
+ */
+export function listingSaleStatus(ev: { kind: number; tags: string[][] }): string {
+  const tag = (name: string): string => {
+    const t = (ev.tags || []).find((x) => Array.isArray(x) && x[0] === name);
+    return typeof t?.[1] === 'string' ? t[1] : '';
+  };
+  return ev.kind === CALENDAR_LISTING_KIND ? (tag('lana-status') || 'published') : (tag('status') || 'active');
 }
 
 /**
  * SPEC §8 step 2 — the price a merchant-signed listing may give an item of
- * THIS order, or null (= unknown): its price must be a positive 2-decimal
- * amount in the shop's currency, and its `a` tag must name the order's own
- * shop (`orderUnitRef` = the 36520 `a`, '30901:<owner>:<unit_id>'). The order
- * route refuses every other listing, so an order that names one never passed
- * it — it is the buyer's own replacement.
+ * THIS order, or null (= unknown): the listing must be on sale (status
+ * 'active', listingSaleStatus), its price must be a positive 2-decimal amount
+ * in the shop's currency, and its `a` tag must name the order's own shop
+ * (`orderUnitRef` = the 36520 `a`, '30901:<owner>:<unit_id>'). The order route
+ * refuses every other listing, so an order that names one never passed it —
+ * it is the buyer's own replacement. An honest order whose listing goes off
+ * sale after it was placed keeps the price the caller saw for it while
+ * judging that same 36520 event (or its step-5a pin).
  */
 export function usableListingPrice(listing: ListingPriceSource | null | undefined, unitCurrency: string, orderUnitRef: string): string | null {
   if (!listing) return null;
+  if (listing.status !== 'active') return null;
   const price = String(listing.price ?? '').trim();
   const cents = toCents(price);
   if (cents === null || cents <= 0) return null;
