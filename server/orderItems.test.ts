@@ -39,7 +39,7 @@ vi.mock('./lib/orderResolver.js', async (importOriginal) => {
 import { initializeSchema } from './db/schema.js';
 import { registerOrderRoutes } from './orders.js';
 import {
-  ingestEvent, ingestFulfillment, resolveOrders, activeOrderIds, makeListingFetcher, clearListingCache,
+  ingestEvent, ingestFulfillment, resolveOrders, activeOrderIds, makeListingFetcher,
   backfillItemSnapshots, snapshotItem, syncShopOrders, type ListingFetcher, type ListingInfo,
 } from './lib/orderSync.js';
 import { bindingString, resolveOrder } from './lib/orderResolver.js';
@@ -180,11 +180,12 @@ beforeAll(async () => {
 
   db = new Database(':memory:');
   initializeSchema(db);
+  // the unit's KIND 30901 as the heartbeat stores it: signed by the owner (orderSync moneyUnit verifies it)
+  const unitEv = sign(owner.sk, 30901, [['d', UNIT], ['unit_id', UNIT], ['online_shop', 'true'], ['online_shop_pickup', 'true']], '', now() - 86_400);
   db.prepare(`
     INSERT INTO business_units (unit_id, event_id, pubkey, created_at, name, owner_hex, authorized_hex, currency, status, raw_event)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'EUR', 'active', ?)
-  `).run(UNIT, 'e'.repeat(64), owner.pk, now(), 'Eko veganska trgovina Živa Center', owner.pk, JSON.stringify([owner.pk]),
-    JSON.stringify({ kind: 30901, pubkey: owner.pk, tags: [['d', UNIT], ['unit_id', UNIT], ['online_shop', 'true'], ['online_shop_pickup', 'true']], content: '' }));
+  `).run(UNIT, unitEv.id, owner.pk, unitEv.created_at, 'Eko veganska trgovina Živa Center', owner.pk, JSON.stringify([owner.pk]), JSON.stringify(unitEv));
 
   const app = express();
   app.use(express.json());
@@ -204,7 +205,6 @@ afterAll(async () => {
 
 beforeEach(() => {
   relayEvents = [];
-  clearListingCache();
   vi.mocked(resolveOrder).mockClear();
 });
 
@@ -244,7 +244,6 @@ describe('order items carry the listing the buyer saw', () => {
     // Relays keep only the newest version (NIP-33).
     const after = listingEvent(owner, listingD, now() + 60, { title: 'TARTEN S PETERŠILJEM 250g', sku: '999' });
     relayEvents = [after];
-    clearListingCache();
     expect(activeOrderIds(db)).toContain(o.order_id); // paid + pending → re-resolved every tick
     await resolveOrders(db, { orderIds: [o.order_id], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
 
@@ -271,7 +270,6 @@ describe('order items carry the listing the buyer saw', () => {
     const o2 = await placeAndPay(mk(), editD, priceOnly, 1, t0);
     expect(o2.payment_state).toBe('paid');
     relayEvents = [listingEvent(owner, editD, t0 + 30, { unit: 'kos', price: '5.00' })];
-    clearListingCache();
     await resolveOrders(db, { orderIds: [o2.order_id], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
     expect(snapRow(o2.order_id)).toMatchObject({ sale_unit: 'kos', price: '5.00' });
     const v2 = await get(`/api/orders/${o2.order_id}?hex=${owner.pk}`);
@@ -358,7 +356,6 @@ describe('order items carry the listing the buyer saw', () => {
 
     // The listing shows up again: the next resolve pays the order and upgrades the receipt title.
     relayEvents = [listingEvent(owner, listingD, now() - 86_400)];
-    clearListingCache();
     expect(activeOrderIds(db, now())).toContain(o.order_id);
     await resolveOrders(db, { orderIds: [o.order_id], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
     expect(snapRow(o.order_id)).toMatchObject({ source: 'listing', sku: '321' });
@@ -496,7 +493,6 @@ describe('cart orders: several products of one shop in ONE order (SPEC v1.1.0)',
 
     // Next day the merchant republishes the second product at 4.20.
     relayEvents = [listings()[0], listingEvent(owner, L2, now() - 10, { title: 'HUMUS KLASIČNI BIO 180g', sku: '777', weight: '180 g', price: '4.20' })];
-    clearListingCache();
     expect(activeOrderIds(db, now())).toContain(d);
     await resolveOrders(db, { trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
     const after = db.prepare('SELECT payment_state, pending, expected_total, price_changed FROM shop_orders WHERE order_id = ?').get(d);
@@ -505,7 +501,6 @@ describe('cart orders: several products of one shop in ONE order (SPEC v1.1.0)',
 
     // The buyer replaces the 36520 afterwards: that new event is judged afresh at today's prices.
     expect(ingestEvent(db, cartOrderEvent(buyer, d, items(), '20.10', now() - 5), trusted)).toBe(d);
-    clearListingCache();
     await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
     expect(db.prepare('SELECT payment_state, pending, paid_order_event_id FROM shop_orders WHERE order_id = ?').get(d))
       .toEqual({ payment_state: 'amount_mismatch', pending: 0, paid_order_event_id: null });

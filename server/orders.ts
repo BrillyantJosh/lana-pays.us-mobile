@@ -20,12 +20,20 @@ import { broadcastEvent } from './lib/nostr.js';
 import { gate } from './lib/exclusionGate.js';
 import {
   KIND_FULFILLMENT, FULFILLMENT_RANK, parseFulfillmentEvent, upsertFulfillmentRow, readRelays, unitRow, unitSigners,
-  paidReceiptTitle,
+  paidReceiptTitle, moneyUnit, readTrustedSigners, refreshPurchaseByTx, resolveOrders, makeListingFetcher,
 } from './lib/orderSync.js';
-import { toCents, centsToString } from './lib/orderResolver.js';
+import { ordersSchemaOk } from './db/schema.js';
+import { toCents, centsToString, purchaseVersionWins } from './lib/orderResolver.js';
 import type { SignedEvent } from './lib/dm.js';
 
 const TERMINAL = new Set(['shipped', 'delivered', 'completed', 'rejected', 'refunded']);
+/**
+ * Statuses after which goods or money have left the merchant: before one of
+ * these is accepted, the order's 30933 is read from the relays again, live
+ * (round 5, F5) — a brain cancellation the sync has not seen yet must not be
+ * shipped, handed over (pickup 'delivered') or refunded.
+ */
+const LIVE_PAYMENT_CHECK = new Set(['shipped', 'delivered', 'refunded']);
 const CREATED_AT_SKEW = 10 * 60; // seconds
 
 /**
@@ -195,6 +203,14 @@ export function transitionAllowed(from: string | null, to: string): boolean {
 }
 
 export function registerOrderRoutes(app: Express, db: Database.Database): void {
+  // A failed migration (schema.ts assertOrdersSchema) closes the orders, not
+  // the app: every order route answers 503 until a restart finds the tables
+  // complete. The till and everything else keep working.
+  app.use('/api/orders', (req, res, next) => {
+    if (ordersSchemaOk(db)) return next();
+    res.status(503).json({ success: false, error: 'ORDERS_UNAVAILABLE' });
+  });
+
   /** Working counter for the home badge: paid ∧ not yet shipped/delivered/…
    *  across every unit the hex owns or staffs (SIMPLE units excluded). No
    *  mark-seen — the badge clears when the order ships. */
@@ -283,10 +299,15 @@ export function registerOrderRoutes(app: Express, db: Database.Database): void {
     if (event.kind !== KIND_FULFILLMENT) return res.status(400).json({ success: false, error: 'INVALID_KIND' });
     if (event.pubkey !== hex) return res.status(403).json({ success: false, error: 'SIGNER_MISMATCH' });
 
-    const row = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(orderId) as any;
+    let row = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(orderId) as any;
     if (!row) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
     const unit = unitForMerchant(db, hex, row.unit_id);
     if (!unit) return res.status(403).json({ success: false, error: 'NOT_AUTHORIZED' });
+    // The unit row must be a verified 30901 of the shop this order names
+    // (orderSync moneyUnit) — the same rule the sync judges the order by.
+    if (!moneyUnit(unitRow(db, row.unit_id), row.unit_owner_hex)) {
+      return res.status(409).json({ success: false, error: 'UNIT_NOT_VERIFIED' });
+    }
 
     const f = parseFulfillmentEvent(event);
     if (!f) return res.status(400).json({ success: false, error: 'INVALID_EVENT' });
@@ -304,6 +325,36 @@ export function registerOrderRoutes(app: Express, db: Database.Database): void {
     if (event.content !== '') return res.status(400).json({ success: false, error: 'CONTENT_NOT_EMPTY' });
     const now = Math.floor(Date.now() / 1000);
     if (Math.abs(event.created_at - now) > CREATED_AT_SKEW) return res.status(400).json({ success: false, error: 'STALE_EVENT' });
+
+    // Before goods or money leave: the purchase as the relays hold it NOW. A
+    // cancellation the sync has not read yet (it re-reads shipped / rejected
+    // orders only every 5th tick) re-judges the order here, and the money
+    // gate below then refuses it. No relay finished the read ⇒ 503, nothing
+    // written: not knowing is not "still paid".
+    if (LIVE_PAYMENT_CHECK.has(f.status) && row.payment_state === 'paid' && row.paid_tx_id) {
+      const trusted = readTrustedSigners(db);
+      const relays = readRelays(db);
+      const read = await refreshPurchaseByTx(db, relays, trusted, String(row.paid_tx_id));
+      if (read === 'unreadable') {
+        return res.status(503).json({ success: false, error: 'PAYMENT_CHECK_UNAVAILABLE' });
+      }
+      // The verdict stands only while the version of this purchase it was
+      // reached with (paid_event_id) is still the one that counts — the
+      // resolver's own version rule, over every trusted signer's copy. A
+      // newer one (a cancellation, a re-sign) — just read, or stored by a
+      // sync that has not judged it yet — means: judge again first.
+      let newest: { createdAt: number; status: string; eventId: string } | null = null;
+      for (const p of db.prepare('SELECT pubkey, event_id, created_at, status FROM shop_order_payments WHERE tx_id = ?').all(row.paid_tx_id) as any[]) {
+        if (!trusted.has(p.pubkey)) continue;
+        const cand = { createdAt: p.created_at, status: p.status || '', eventId: p.event_id };
+        if (!newest || purchaseVersionWins(cand, newest)) newest = cand;
+      }
+      if (!newest || newest.eventId !== row.paid_event_id) {
+        await resolveOrders(db, { orderIds: [orderId], trusted, fetchListing: makeListingFetcher(relays) });
+        row = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(orderId) as any;
+        if (!row) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+      }
+    }
 
     // Money gate: only a brain-signed 30933 (resolver: payment_state === 'paid') can be fulfilled.
     if (row.payment_state !== 'paid') return res.status(409).json({ success: false, error: 'NOT_PAID', paymentState: row.payment_state });

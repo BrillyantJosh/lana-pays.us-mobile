@@ -26,7 +26,8 @@ import type Database from 'better-sqlite3';
 import WebSocket from 'ws';
 import { verifyEvent } from 'nostr-tools/pure';
 import { queryEvents, type SignedEvent } from './dm.js';
-import { getLanaRelays, broadcastEvent } from './nostr.js';
+import { getLanaRelays, broadcastEvent, verifyNostrEvent } from './nostr.js';
+import { ordersSchemaOk } from '../db/schema.js';
 import { SIMPLE_UNIT_SQL } from './unitOrigin.js';
 import {
   resolveOrder, ORDER_ID_RE, orderIdMatchesPubkey, toCents, bindingString, usableListingPrice, listingSaleStatus, purchaseVersionWins,
@@ -129,6 +130,36 @@ export function unitSigners(u: UnitRow): string[] {
   const set = new Set<string>([u.owner_hex, u.pubkey].filter(Boolean));
   try { for (const h of JSON.parse(u.authorized_hex || '[]')) if (typeof h === 'string') set.add(h); } catch { /* ignore */ }
   return [...set];
+}
+
+/**
+ * The unit as a MONEY and ACCESS input for one order, or null.
+ *
+ * Its stored KIND 30901 (business_units.raw_event — where the shipping fee,
+ * free-shipping threshold and pickup that judge the order are read, and the
+ * owner and staff who may act on it) must be a signature-verified kind-30901
+ * event whose `d` is this unit id, signed by the key the order's own `a` tag
+ * names (`30901:<that key>:<unit id>`), and the row's pubkey must be that
+ * key. heartbeat.ts syncBusinessUnits already refuses other authors; this
+ * holds the order path to the same rule whatever filled the row (log-only
+ * mode KIND_30901_AUTHOR_PIN=0, or a row written before the pin existed).
+ *
+ * NOT "author == owner_hex": owner_hex is a tag, written by whoever signs.
+ *
+ * A caller that gets null SKIPS the order — it does not judge it with a blank
+ * or foreign unit: a verdict other than 'paid' clears settled_order_event_id,
+ * the step-5a pin of an order that was honestly paid.
+ */
+export function moneyUnit(u: UnitRow | null, orderOwnerHex: string | null | undefined): UnitRow | null {
+  if (!u || !HEX64.test(orderOwnerHex || '')) return null;
+  let ev: any = null;
+  try { ev = u.raw_event ? JSON.parse(u.raw_event) : null; } catch { return null; }
+  if (!verifyNostrEvent(ev, [30901])) return null;
+  const d = tag(ev, 'd');
+  const unitIdTag = tag(ev, 'unit_id');
+  if (d !== u.unit_id || (unitIdTag !== undefined && unitIdTag !== d)) return null;
+  if (ev.pubkey !== orderOwnerHex || u.pubkey !== orderOwnerHex) return null;
+  return u;
 }
 
 /** KIND 30901 v1.2.0 online-shop tags (SPEC §6) → resolver unit. Absent fee == '0.00', absent pickup == not offered. */
@@ -317,10 +348,11 @@ export function parsePurchaseEvent(ev: SignedEvent): ParsedPurchase | null {
 export function ingestOrder(db: Database.Database, ev: SignedEvent): string | null {
   const o = parseOrderEvent(ev);
   if (!o) return null;
-  const unit = unitRow(db, o.unitId);
-  if (!unit) return null; // not our unit (or a simple.lanapays.us one)
-  // Poisoned-mirror defence: the order must point at the identity that signed the 30901.
-  if (o.unitOwnerHex !== unit.owner_hex && o.unitOwnerHex !== unit.pubkey) return null;
+  // Not our unit (or a simple.lanapays.us one) — or a unit row that is not a
+  // verified 30901 signed by the key this order's `a` names (moneyUnit): the
+  // order must point at the identity that signed the shop it is judged by.
+  const unit = moneyUnit(unitRow(db, o.unitId), o.unitOwnerHex);
+  if (!unit) return null;
 
   const existing = db.prepare('SELECT buyer_pubkey, created_at, event_id FROM shop_orders WHERE order_id = ?').get(o.d) as any;
   if (existing) {
@@ -362,10 +394,14 @@ export function ingestOrder(db: Database.Database, ev: SignedEvent): string | nu
 export function ingestFulfillment(db: Database.Database, ev: SignedEvent): string | null {
   const f = parseFulfillmentEvent(ev);
   if (!f) return null;
-  const unit = unitRow(db, f.unitId);
-  if (!unit || !unitSigners(unit).includes(f.pubkey)) return null;
-  const order = db.prepare('SELECT unit_id, buyer_pubkey FROM shop_orders WHERE order_id = ?').get(f.d) as any;
+  const order = db.prepare('SELECT unit_id, buyer_pubkey, unit_owner_hex FROM shop_orders WHERE order_id = ?').get(f.d) as any;
   if (order && order.unit_id !== f.unitId) return null;
+  // Owner and staff come from a unit row this app may believe (moneyUnit):
+  // for a stored order, signed by the key its `a` names; before the order is
+  // stored, at least a verified 30901 of its own signer.
+  const row = unitRow(db, f.unitId);
+  const unit = moneyUnit(row, order ? order.unit_owner_hex : row?.pubkey);
+  if (!unit || !unitSigners(unit).includes(f.pubkey)) return null;
   if (order && f.buyerRef && order.buyer_pubkey !== f.buyerRef) return null;
 
   const existing = db.prepare('SELECT event_id, created_at, published FROM shop_order_fulfillments WHERE order_id = ?').get(f.d) as any;
@@ -492,9 +528,6 @@ function displayTag(ev: { tags: string[][] }, name: string, max: number): string
   return s ? s.slice(0, max) : undefined;
 }
 
-const listingCache = new Map<string, { info: ListingInfo | null; fetchedAt: number }>();
-const LISTING_TTL_MS = 10 * 60 * 1000;
-
 /**
  * One REQ carrying `filters` to one relay. The events count only when the
  * relay ends the REQ with EOSE: null when it fails, closes the subscription
@@ -568,61 +601,69 @@ export function listingDeletedBy(
  * (round 3, x3/m3).
  */
 export function makeListingFetcher(relays: string[], timeout = 6000): ListingFetcher {
-  return async (address: string) => {
-    const cached = listingCache.get(address);
-    if (cached && Date.now() - cached.fetchedAt < LISTING_TTL_MS) return cached.info;
-    const [kindS, pubkey, ...rest] = address.split(':');
-    const d = rest.join(':');
-    const kind = Number(kindS);
-    if (!Number.isInteger(kind) || !HEX64.test(pubkey || '') || !d) return null;
-    let info: ListingInfo | null = null;
-    try {
-      const events = await queryEvents(relays, { kinds: [kind], authors: [pubkey], '#d': [d] }, timeout);
-      let best: SignedEvent | null = null;
-      for (const ev of events) {
-        if (ev.pubkey !== pubkey || ev.kind !== kind || tag(ev, 'd') !== d) continue;
-        let ok = false;
-        try { ok = verifyEvent(ev as any); } catch { ok = false; }
-        if (!ok) continue;
-        if (!best || ev.created_at > best.created_at) best = ev;
-      }
-      if (best) {
-        const found = best;
-        const reads = await Promise.all(relays.map(url => reqUntilEose(url, [
-          { kinds: [5], authors: [pubkey], '#a': [`${kind}:${pubkey}:${d}`] },
-          { kinds: [5], authors: [pubkey], '#e': [found.id] },
-        ], timeout)));
-        const finished = reads.filter((r): r is SignedEvent[] => r !== null);
-        if (finished.length === 0 || listingDeletedBy({ id: found.id, pubkey, kind, d, created_at: found.created_at }, finished.flat())) best = null;
-      }
-      if (best) {
-        const price = tagRow(best, 'price');
-        info = {
-          price: price && toCents(price[1]) !== null ? price[1] : null,
-          // KIND 36511 (Body Arts) signs its currency in a separate tag — as the broker reads it.
-          currency: price?.[2] || (best.kind === 36511 ? tag(best, 'currency') || '' : ''),
-          unitRef: tag(best, 'a') || '',
-          // as the order route reads it: KIND 31923 signs it in lana-status
-          status: listingSaleStatus(best),
-          createdAt: best.created_at,
-          eventId: best.id,
-          title: displayTag(best, 'title', 200),
-          sku: displayTag(best, 'sku', 64),
-          weight: displayTag(best, 'weight', 40),
-          unit: displayTag(best, 'unit', 40),
-        };
-      }
-    } catch { info = null; }
-    // Not found (deleted, or the REQ failed) is null — never the last cached
-    // price, which outlived a deleted listing for as long as the process ran
-    // (review 2 Oct 2026). resolveOrders falls back to the price it saw while
-    // judging the same 36520 event (shop_order_listing_prices), nothing else.
-    listingCache.set(address, { info, fetchedAt: Date.now() });
-    return info;
+  // The cache lives exactly as long as this fetcher: syncShopOrders makes one
+  // per tick (1 min), the fulfillment route one per request. It used to be
+  // one module-wide Map with a 10-minute TTL, so a price the merchant changed
+  // was still the old one for up to ten ticks of judging money (round 5, F2).
+  // It holds the promise, so the prefetch, the per-order read and the item
+  // snapshot of one tick share one REQ per address.
+  const cache = new Map<string, Promise<ListingInfo | null>>();
+  return (address: string) => {
+    let p = cache.get(address);
+    if (!p) { p = fetchListingOnce(relays, timeout, address); cache.set(address, p); }
+    return p;
   };
 }
 
-export function clearListingCache(): void { listingCache.clear(); }
+async function fetchListingOnce(relays: string[], timeout: number, address: string): Promise<ListingInfo | null> {
+  const [kindS, pubkey, ...rest] = address.split(':');
+  const d = rest.join(':');
+  const kind = Number(kindS);
+  if (!Number.isInteger(kind) || !HEX64.test(pubkey || '') || !d) return null;
+  let info: ListingInfo | null = null;
+  try {
+    const events = await queryEvents(relays, { kinds: [kind], authors: [pubkey], '#d': [d] }, timeout);
+    let best: SignedEvent | null = null;
+    for (const ev of events) {
+      if (ev.pubkey !== pubkey || ev.kind !== kind || tag(ev, 'd') !== d) continue;
+      let ok = false;
+      try { ok = verifyEvent(ev as any); } catch { ok = false; }
+      if (!ok) continue;
+      if (!best || ev.created_at > best.created_at) best = ev;
+    }
+    if (best) {
+      const found = best;
+      const reads = await Promise.all(relays.map(url => reqUntilEose(url, [
+        { kinds: [5], authors: [pubkey], '#a': [`${kind}:${pubkey}:${d}`] },
+        { kinds: [5], authors: [pubkey], '#e': [found.id] },
+      ], timeout)));
+      const finished = reads.filter((r): r is SignedEvent[] => r !== null);
+      if (finished.length === 0 || listingDeletedBy({ id: found.id, pubkey, kind, d, created_at: found.created_at }, finished.flat())) best = null;
+    }
+    if (best) {
+      const price = tagRow(best, 'price');
+      info = {
+        price: price && toCents(price[1]) !== null ? price[1] : null,
+        // KIND 36511 (Body Arts) signs its currency in a separate tag — as the broker reads it.
+        currency: price?.[2] || (best.kind === 36511 ? tag(best, 'currency') || '' : ''),
+        unitRef: tag(best, 'a') || '',
+        // as the order route reads it: KIND 31923 signs it in lana-status
+        status: listingSaleStatus(best),
+        createdAt: best.created_at,
+        eventId: best.id,
+        title: displayTag(best, 'title', 200),
+        sku: displayTag(best, 'sku', 64),
+        weight: displayTag(best, 'weight', 40),
+        unit: displayTag(best, 'unit', 40),
+      };
+    }
+  } catch { info = null; }
+  // Not found (deleted, or the REQ failed) is null — never the last cached
+  // price, which outlived a deleted listing for as long as the process ran
+  // (review 2 Oct 2026). resolveOrders falls back to the price it saw while
+  // judging the same 36520 event (shop_order_listing_prices), nothing else.
+  return info;
+}
 
 // ─── What was ordered — display only, never read by the resolver ────────
 //
@@ -764,7 +805,7 @@ const backfillTried = new Map<string, number>();
  * before this table existed. Bounded per tick; an order that found neither a
  * listing nor a receipt is retried after BACKFILL_RETRY_MS (so a few such
  * orders cannot starve the rest). Listing REQs are #d-filtered and go through
- * the same 10-min cache as the resolver's.
+ * the same fetcher (one tick's cache) as the resolver's.
  */
 export async function backfillItemSnapshots(db: Database.Database, fetchListing: ListingFetcher, limit = 20): Promise<number> {
   const nowMs = Date.now();
@@ -902,11 +943,29 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
     await Promise.all(addrList.slice(i, i + PREFETCH_CONCURRENCY).map(a => opts.fetchListing(a).catch(() => null)));
   }
 
+  // The unit each order is judged by, checked once per (unit, owner) per
+  // call: a verified 30901 of the shop the order names, or the order is
+  // skipped — left exactly as stored, never judged with a foreign or blank
+  // unit (moneyUnit).
+  const unitsSeen = new Map<string, UnitRow | null>();
+  const trustedUnitFor = (unitId: string, ownerHex: string): UnitRow | null => {
+    const k = `${unitId}:${ownerHex}`;
+    if (!unitsSeen.has(k)) {
+      const stored = unitRow(db, unitId);
+      const u = moneyUnit(stored, ownerHex);
+      if (!u && stored) {
+        console.warn(`[orders] unit ${String(unitId).slice(0, 12)}… is not a verified 30901 of the shop its orders name — those orders are not judged`);
+      }
+      unitsSeen.set(k, u);
+    }
+    return unitsSeen.get(k)!;
+  };
+
   let resolved = 0;
   for (const id of ids) {
     const row = getOrder.get(id) as any;
     if (!row) continue;
-    const unit = unitRow(db, row.unit_id);
+    const unit = trustedUnitFor(row.unit_id, row.unit_owner_hex);
     if (!unit) continue;
     const order = orderFromRow(row);
     const purchases: ResolverPurchase[] = (getPurchases.all(row.unit_id, row.order_id) as any[]).map(p => ({
@@ -1076,7 +1135,7 @@ export async function confirmSettleReview(
   if (expectEventId !== row.event_id) return { ok: false, reason: 'event_mismatch' };
   const cents = toCents(entry.old_paid_amount);
   if (!entry.old_paid_tx_id || cents === null || cents <= 0) return { ok: false, reason: 'no_old_payment' };
-  if (!unitRow(db, row.unit_id)) return { ok: false, reason: 'unit_unknown' };
+  if (!moneyUnit(unitRow(db, row.unit_id), row.unit_owner_hex)) return { ok: false, reason: 'unit_unknown' };
   await resolveOrders(db, {
     orderIds: [orderId], trusted: opts.trusted, now,
     // the pin needs no listing; nothing is fetched for a confirmation
@@ -1116,6 +1175,10 @@ const SAFETY_NET_EVERY = 60;         // ticks (≈ hourly at the 1-min heartbeat
 const CURSOR_OVERLAP = 6 * 3600;     // tolerate late-published events + relay clock skew
 const PAGE_HINT = 300;               // a relay that returns this many probably capped the REQ
 const TX_IDS_PER_REQ = 100;          // #d values per 30933 REQ (each has ≤ 1 version per signer on a relay)
+const TERMINAL_RECHECK_EVERY = 5;    // ticks between re-reads of rejected/shipped/delivered orders' 30933
+const TERMINAL_RECHECK_DAYS = 60;    // …paid (brain-signed paid_at) at most this long ago
+const TERMINAL_RECHECK_LIMIT = 2000; // …newest first, at most this many tx ids per tick
+const BY_TX_PARALLEL = 4;            // 30933 by-tx REQ chunks in flight at once (a dead relay costs ≤ ⌈chunks/4⌉ timeouts)
 
 function readState(db: Database.Database, key: string): string | null {
   return (db.prepare('SELECT value FROM shop_order_sync_state WHERE key = ?').get(key) as any)?.value ?? null;
@@ -1158,15 +1221,72 @@ async function fetchKind(relays: string[], filter: Record<string, any>, timeout:
 
 export interface SyncStats {
   relays: number; trusted: number; fetched: Record<string, number>; touched: number; resolved: number; backfilled: number; republished: number; safetyNet: boolean;
+  /** set when nothing was synced because the orders schema check failed (schema.ts assertOrdersSchema) */
+  skipped?: 'orders_schema';
+}
+
+/**
+ * The tx ids whose 30933 step 2b re-reads this tick: every paid order still
+ * pending; and, every TERMINAL_RECHECK_EVERY-th tick, the paid orders the
+ * merchant may still refund or has handed over — rejected, shipped, delivered
+ * (OrderDetailSheet CAN_REFUND) — paid within TERMINAL_RECHECK_DAYS by the
+ * brain-signed paid_at (never the buyer's created_at alone), newest first,
+ * at most TERMINAL_RECHECK_LIMIT.
+ */
+export function txIdsToRecheck(db: Database.Database, now: number, withTerminal: boolean): string[] {
+  const out = new Set<string>();
+  for (const r of db.prepare(`
+    SELECT DISTINCT paid_tx_id AS tx FROM shop_orders
+    WHERE payment_state = 'paid' AND pending = 1 AND paid_tx_id IS NOT NULL AND paid_tx_id != ''
+  `).all() as Array<{ tx: string }>) out.add(r.tx);
+  if (withTerminal) {
+    for (const r of db.prepare(`
+      SELECT paid_tx_id AS tx FROM shop_orders
+      WHERE payment_state = 'paid' AND effective_status IN ('rejected', 'shipped', 'delivered')
+        AND paid_tx_id IS NOT NULL AND paid_tx_id != ''
+        AND COALESCE(paid_at, created_at) > ?
+      GROUP BY paid_tx_id
+      ORDER BY MAX(COALESCE(paid_at, created_at)) DESC
+      LIMIT ?
+    `).all(now - TERMINAL_RECHECK_DAYS * DAY, TERMINAL_RECHECK_LIMIT) as Array<{ tx: string }>) out.add(r.tx);
+  }
+  return [...out];
+}
+
+/**
+ * Read ONE purchase's 30933 (d = tx id, trusted signers only) from the relays
+ * now and ingest whatever version they hold. 'read' when at least one relay
+ * finished the REQ (EOSE) — what it served is ingested; 'unreadable' when
+ * none did (or there is no relay, tx id or trusted signer): then the caller
+ * cannot know whether the brain cancelled it and must not act on money.
+ */
+export async function refreshPurchaseByTx(
+  db: Database.Database, relays: string[], trusted: Set<string>, txId: string, timeout = 6000,
+): Promise<'read' | 'unreadable'> {
+  if (!txId || trusted.size === 0 || relays.length === 0) return 'unreadable';
+  const reads = await Promise.all(relays.map(url => reqUntilEose(url, [
+    { kinds: [KIND_PURCHASE], authors: [...trusted], '#d': [txId] },
+  ], timeout)));
+  const finished = reads.filter((r): r is SignedEvent[] => r !== null);
+  if (finished.length === 0) return 'unreadable';
+  for (const ev of finished.flat()) {
+    if (ev && ev.kind === KIND_PURCHASE && tag(ev, 'd') === txId) ingestEvent(db, ev, trusted);
+  }
+  return 'read';
 }
 
 export async function syncShopOrders(db: Database.Database, relaysFromHeartbeat?: string[]): Promise<SyncStats> {
+  if (!ordersSchemaOk(db)) {
+    console.error('[orders] sync SKIPPED — the orders schema check failed at startup (see the ERROR line from assertOrdersSchema)');
+    return { relays: 0, trusted: 0, fetched: {}, touched: 0, resolved: 0, backfilled: 0, republished: 0, safetyNet: false, skipped: 'orders_schema' };
+  }
   const relays = readRelays(db, relaysFromHeartbeat);
   const trusted = readTrustedSigners(db);
   const now = nowUnix();
   const tick = (parseInt(readState(db, 'tick') || '0', 10) || 0) + 1;
   writeState(db, 'tick', String(tick));
   const safetyNet = tick % SAFETY_NET_EVERY === 1;
+  const terminalTick = tick % TERMINAL_RECHECK_EVERY === 1;
 
   const sinceFor = (kind: number): number => {
     const cursor = parseInt(readState(db, `since_${kind}`) || '', 10);
@@ -1220,19 +1340,26 @@ export async function syncShopOrders(db: Database.Database, relaysFromHeartbeat?
     //     cancels a purchase it republishes that d with status 'cancelled';
     //     the window read above only runs while some order is unpaid, so a
     //     cancellation published while none is would be missed for good and
-    //     the merchant could ship a cancelled order. Exact #d reads, chunked
-    //     (a relay answers ≤ 500 per REQ); the cursor is not moved by them.
-    const paidTx = (db.prepare(`
-      SELECT DISTINCT paid_tx_id AS tx FROM shop_orders
-      WHERE payment_state = 'paid' AND pending = 1 AND paid_tx_id IS NOT NULL AND paid_tx_id != ''
-    `).all() as Array<{ tx: string }>).map(r => r.tx);
+    //     the merchant could ship a cancelled order. Every 5th tick also the
+    //     rejected / shipped / delivered ones (txIdsToRecheck): the merchant
+    //     can still refund those, and a refund of a cancelled payment pays
+    //     out money that never came in (round 5, F5). Exact #d reads, chunked
+    //     (a relay answers ≤ 500 per REQ), a few chunks at a time; the cursor
+    //     is not moved by them.
+    const paidTx = txIdsToRecheck(db, now, terminalTick);
+    const chunks: string[][] = [];
+    for (let i = 0; i < paidTx.length; i += TX_IDS_PER_REQ) chunks.push(paidTx.slice(i, i + TX_IDS_PER_REQ));
     let byTx = 0;
-    for (let i = 0; i < paidTx.length; i += TX_IDS_PER_REQ) {
-      const evs = await fetchKind(relays, { kinds: [KIND_PURCHASE], authors: [...trusted], '#d': paidTx.slice(i, i + TX_IDS_PER_REQ) }, 15000);
-      byTx += evs.length;
-      for (const ev of evs) { const id = ingestEvent(db, ev, trusted); if (id) touched.add(id); }
+    for (let i = 0; i < chunks.length; i += BY_TX_PARALLEL) {
+      const lists = await Promise.all(chunks.slice(i, i + BY_TX_PARALLEL).map(ids =>
+        fetchKind(relays, { kinds: [KIND_PURCHASE], authors: [...trusted], '#d': ids }, 15000)));
+      for (const evs of lists) {
+        byTx += evs.length;
+        for (const ev of evs) { const id = ingestEvent(db, ev, trusted); if (id) touched.add(id); }
+      }
     }
     fetched['30933_by_tx'] = byTx;
+    fetched['30933_by_tx_ids'] = paidTx.length;
   } else {
     console.warn('[orders] no trusted signers in KIND 38888 — purchases are NOT synced (fail-closed)');
   }

@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { getDb, closeDb } from './db/connection.js';
+import { ordersSchemaStatus } from './db/schema.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, fetchBalancesBatch, electrumCall, type ElectrumServer } from './lib/electrum.js';
 import { SIMPLE_UNIT_SQL } from './lib/unitOrigin.js';
@@ -129,6 +130,9 @@ app.get('/health', (req, res) => {
   ).get() as any;
 
   const userCount = (db.prepare('SELECT COUNT(*) as count FROM users').get() as any)?.count || 0;
+  // Whether the orders tables passed the startup check (schema.ts
+  // assertOrdersSchema). ok:false = orders closed (503), the till still works.
+  const orders = ordersSchemaStatus(db);
 
   res.json({
     status: 'ok',
@@ -141,6 +145,7 @@ app.get('/health', (req, res) => {
       error: lastHeartbeat.error,
     } : null,
     userCount,
+    orders_schema: { ok: orders.ok, marker: orders.marker, missing: orders.missing },
   });
 });
 

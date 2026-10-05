@@ -30,7 +30,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import { initializeSchema } from './db/schema.js';
 import { registerOrderRoutes } from './orders.js';
 import {
-  ingestEvent, resolveOrders, activeOrderIds, syncShopOrders, parseOrderEvent, clearListingCache, makeListingFetcher,
+  ingestEvent, resolveOrders, activeOrderIds, syncShopOrders, parseOrderEvent, makeListingFetcher,
   unitToResolver, unitRow, confirmSettleReview, listSettleReview, listingDeletedBy, type ListingFetcher,
 } from './lib/orderSync.js';
 import { bindingString } from './lib/orderResolver.js';
@@ -168,11 +168,12 @@ beforeAll(async () => {
 
   db = new Database(':memory:');
   initializeSchema(db);
+  // the unit's KIND 30901 as the heartbeat stores it: signed by the owner (orderSync moneyUnit verifies it)
+  const unitEv = sign(owner.sk, 30901, [['d', UNIT], ['unit_id', UNIT], ['online_shop', 'true'], ['online_shop_shipping_fee', '2.50'], ['online_shop_pickup', 'true']], '', now() - 86_400);
   db.prepare(`
     INSERT INTO business_units (unit_id, event_id, pubkey, created_at, name, owner_hex, authorized_hex, currency, status, raw_event)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'EUR', 'active', ?)
-  `).run(UNIT, 'e'.repeat(64), owner.pk, now(), 'Trgovina', owner.pk, JSON.stringify([owner.pk]),
-    JSON.stringify({ kind: 30901, pubkey: owner.pk, tags: [['d', UNIT], ['unit_id', UNIT], ['online_shop', 'true'], ['online_shop_shipping_fee', '2.50'], ['online_shop_pickup', 'true']], content: '' }));
+  `).run(UNIT, unitEv.id, owner.pk, unitEv.created_at, 'Trgovina', owner.pk, JSON.stringify([owner.pk]), JSON.stringify(unitEv));
 
   const app = express();
   app.use(express.json());
@@ -197,7 +198,6 @@ beforeEach(() => {
   }
   relayEvents = [];
   reqs.length = 0;
-  clearListingCache();
 });
 
 describe('(1) a buyer-signed replacement 36520 never prices itself', () => {
@@ -389,8 +389,9 @@ describe('SPEC v1.1.2 — the merchant app pays and shows only the merchant\'s n
   it('E: pickup at a shop that does not offer it is not computable', async () => {
     const raw = JSON.parse(unitRow(db, UNIT)!.raw_event!);
     expect(unitToResolver(unitRow(db, UNIT)!).pickup).toBe(true);
+    // the merchant republishes the unit without pickup (signed: orderSync moneyUnit verifies the stored 30901)
     db.prepare('UPDATE business_units SET raw_event = ? WHERE unit_id = ?')
-      .run(JSON.stringify({ ...raw, tags: raw.tags.filter((t: string[]) => t[0] !== 'online_shop_pickup') }), UNIT);
+      .run(JSON.stringify(sign(owner.sk, 30901, raw.tags.filter((t: string[]) => t[0] !== 'online_shop_pickup'), '', raw.created_at + 1)), UNIT);
     try {
       expect(unitToResolver(unitRow(db, UNIT)!).pickup).toBe(false);
       const p = await paidApples();
@@ -412,7 +413,6 @@ describe('SPEC v1.1.2 — the merchant app pays and shows only the merchant\'s n
     await resolveOrders(db, { orderIds: [d], trusted, fetchListing: fetcher(), now: now() });
     expect(row(d)).toMatchObject({ payment_state: 'unpaid', expected_total: '12.50' });
     // the merchant deletes the product while the buyer is paying; the app restarts (no cache)
-    clearListingCache();
     expect(ingestEvent(db, purchaseEvent(d, buyer.pk, crypto.randomUUID()), trusted)).toBe(d);
     await resolveOrders(db, { orderIds: [d], trusted, fetchListing: fetcher([APPLES]), now: now() });
     expect(row(d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50' });
@@ -432,7 +432,6 @@ describe('SPEC v1.1.2 — the merchant app pays and shows only the merchant\'s n
     const p = await paidApples();
     LISTED[APPLES] = '6.00';
     try {
-      clearListingCache();
       // newer copy of the same 30933 (same d = tx id, same amount), signed 60 s later
       expect(ingestEvent(db, purchaseEvent(p.d, p.buyer.pk, p.txId, '12.50', now()), trusted)).toBe(p.d);
       await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: fetcher(), now: now() });
@@ -473,15 +472,9 @@ describe('SPEC v1.1.2 — the merchant app pays and shows only the merchant\'s n
     expect((await f(a))?.price).toBe('1.00');
     expect((await f(a))?.unitRef).toBe(REF());
     relayEvents = []; // the merchant deleted it: the relay answers EOSE with no event
-    const realNow = Date.now;
-    try {
-      Date.now = () => realNow() + 11 * 60 * 1000; // past the 10-min cache
-      expect(await f(a)).toBeNull();
-      Date.now = () => realNow() + 3 * 86_400 * 1000;
-      expect(await f(a)).toBeNull();
-    } finally {
-      Date.now = realNow;
-    }
+    // The next tick makes a new fetcher (round 5, F2: a fetcher's cache lives
+    // one tick): nothing the last tick read carries over.
+    expect(await makeListingFetcher([relayUrl], 2000)(a)).toBeNull();
   });
 });
 
@@ -568,7 +561,6 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     // the order-time snapshot says 5.00 — display only, it records no sale status (x3/m1)
     expect(db.prepare("SELECT price FROM shop_order_item_snapshots WHERE order_id = ? AND source = 'listing'").get(p.d)).toEqual({ price: '5.00' });
     // the merchant has raised apples to 6.00 since
-    clearListingCache();
     const now6 = listed({ [APPLES]: '6.00' }, now() - 60);
     await resolveOrders(db, { trusted, fetchListing: now6, now: now() });
     expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '14.50', settled_order_event_id: null });
@@ -583,7 +575,6 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     expect((db.prepare('SELECT confirmed_at FROM shop_order_settle_review WHERE order_id = ?').get(p.d) as any).confirmed_at).toBeGreaterThan(0);
     expect(listSettleReview(db)).toEqual([]);
     // from now on the pin holds it, judged on today's 6.00
-    clearListingCache();
     await resolveOrders(db, { trusted, fetchListing: now6, now: now() + 60 });
     expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50' });
     const ship = await post(`/api/orders/${p.d}/fulfillment`, { hex: owner.pk, event: fulfillmentEvent(row(p.d), 'shipped') });
@@ -598,7 +589,6 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     db.prepare(`UPDATE shop_orders SET fulfillment_status = 'shipped', effective_status = 'shipped' WHERE order_id = ?`).run(p.d);
     db.prepare(`INSERT INTO shop_order_fulfillments (order_id, event_id, pubkey, created_at, status, raw_event, published) VALUES (?, ?, ?, ?, 'shipped', '{}', 1)`)
       .run(p.d, 'f'.repeat(64), owner.pk, t0 + 600);
-    clearListingCache();
     const now6 = listed({ [APPLES]: '6.00' }, now() - 60);
     expect(activeOrderIds(db)).toContain(p.d);
     await resolveOrders(db, { trusted, fetchListing: now6, now: now() });
@@ -621,7 +611,6 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     // nothing listed yet: nothing to confirm, nothing written
     expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() })).toEqual({ ok: false, reason: 'no_open_entry' });
     expect(row(p.d)).toMatchObject({ payment_state: 'paid', settled_order_event_id: null });
-    clearListingCache();
     const now6 = listed({ [APPLES]: '6.00' }, now() - 60);
     await resolveOrders(db, { trusted, fetchListing: now6, now: now() });
     expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', cleared_at: null });
@@ -643,7 +632,6 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     asOlderRulesLeftIt(p.d);
     fromBeforeThisCode(p.d);
     db.prepare('DELETE FROM shop_order_item_snapshots').run();
-    clearListingCache();
     await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '5.00' }, now() - 86_400, [APPLES]), now: now() });
     expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '' });
     expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '12.50', cleared_at: null });
@@ -666,7 +654,6 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
       const p = await placeApples(listed({ [APPLES]: '5.00' }, snapAt));
       asOlderRulesLeftIt(p.d);
       fromBeforeThisCode(p.d);
-      clearListingCache();
       await resolveOrders(db, { orderIds: [p.d], trusted, fetchListing: fetchNow, now: now() });
       expect(row(p.d), label).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: expected, settled_order_event_id: null });
       expect(review(p.d), label).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '12.50', cleared_at: null });
@@ -678,7 +665,6 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400)); // the snapshot: live at order time
     asOlderRulesLeftIt(p.d, { oldPin: false });
     fromBeforeThisCode(p.d);
-    clearListingCache();
     // the first sync after deploy: the listing REQ fails
     const failing = listed({ [APPLES]: '6.00' }, now() - 60, [APPLES]);
     await resolveOrders(db, { trusted, fetchListing: failing, now: now() });
@@ -686,13 +672,11 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '12.50', cleared_at: null });
     const listedAt = (db.prepare('SELECT listed_at FROM shop_order_settle_review WHERE order_id = ?').get(p.d) as any).listed_at;
     // it fails again a tick later: still listed ONCE — listed_at and the old paid amount stay, so the 7-day window ends
-    clearListingCache();
     await resolveOrders(db, { trusted, fetchListing: failing, now: now() + 60 });
     const entry = () => db.prepare('SELECT listed_at, old_paid_amount, old_paid_tx_id, verdict, expected_total, cleared_at FROM shop_order_settle_review WHERE order_id = ?').get(p.d);
     expect(entry()).toEqual({ listed_at: listedAt, old_paid_amount: '12.50', old_paid_tx_id: p.txId, verdict: 'amount_mismatch', expected_total: '', cleared_at: null });
     expect(activeOrderIds(db, listedAt + 8 * 86_400)).not.toContain(p.d);
     // the listing answers, repriced to 6.00 since: judged at today's price — never at the snapshot's 5.00
-    clearListingCache();
     await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60), now: now() + 120 });
     expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '14.50', settled_order_event_id: null });
     expect(entry()).toEqual({ listed_at: listedAt, old_paid_amount: '12.50', old_paid_tx_id: p.txId, verdict: 'amount_mismatch', expected_total: '14.50', cleared_at: null });
@@ -705,12 +689,10 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     const p = await placeApples(listed({ [APPLES]: '5.00' }, t0 - 86_400));
     asOlderRulesLeftIt(p.d, { oldPin: false });
     fromBeforeThisCode(p.d);
-    clearListingCache();
     await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60, [APPLES]), now: now() });
     expect(review(p.d)).toMatchObject({ cleared_at: null });
     // E2: the same line, a new event — the snapshot of E1 must not price it
     expect(ingestEvent(db, orderEvent(p.buyer, p.d, [['item', APPLES, '2', 'kg', '5.00', 'EUR']], '12.50', p.t0 + 5), trusted)).toBe(p.d);
-    clearListingCache();
     await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60), now: now() + 60 });
     expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '14.50' });
     // the entry Brilly could confirm was E1's: E2 is another order, refused (round 3)
@@ -832,7 +814,6 @@ describe('round 3 — an older \'paid\' is judged by step 5 alone; the snapshot 
       // the buyer's replacement: 10 × honey-2024 at its old 5.00 (live at order time, off sale)
       expect(ingestEvent(db, orderEvent(buyer, d, [['item', OLD, '10', 'kg', '5.00', 'EUR']], '52.50', t0 + 5), trusted)).toBe(d);
       asOriginMainLeftIt(d, [{ a: HONEY, price: '50.00', createdAt: now() - 86_400 }, { a: OLD, price: '5.00', createdAt: now() - 90_000 }]);
-      clearListingCache();
       expect(activeOrderIds(db), status).toContain(d);
       for (const tick of [0, 60]) {
         await resolveOrders(db, { trusted, fetchListing: shop(status), now: now() + tick });
@@ -884,7 +865,7 @@ describe('round 3 — a listing its merchant deleted (KIND 5) prices nothing, al
   it('the fetcher follows NIP-09 as the broker reads it: own author only, `e` = this version, `a` up to its created_at; an unread deletion is not "none"', async () => {
     const stranger = mk();
     const oldEv = old();
-    const f = () => { clearListingCache(); return makeListingFetcher([relayUrl], 2000); };
+    const f = () => makeListingFetcher([relayUrl], 2000);
     // a stranger's KIND 5 deletes nothing
     relayEvents = [oldEv, sign(stranger.sk, 5, [['a', OLD], ['e', oldEv.id]], '', now() - 100)];
     expect((await f()(OLD))?.price).toBe('5.00');
@@ -918,7 +899,6 @@ describe('round 3 — a listing its merchant deleted (KIND 5) prices nothing, al
       });
     });
     try {
-      clearListingCache();
       const url = `ws://127.0.0.1:${(silent.address() as AddressInfo).port}`;
       expect(await makeListingFetcher([url], 500)(OLD)).toBeNull();
     } finally {

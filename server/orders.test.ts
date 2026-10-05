@@ -107,15 +107,17 @@ const listing: ListingFetcher = async (a: string) => ({
   unitRef: `30901:${owner.pk}:${String(a.split(':')[2]).slice(4).repeat(32)}`,
 });
 
-const unitRaw = (unitId: string, extraTags: string[][] = []) => JSON.stringify({
-  kind: 30901, pubkey: owner.pk, tags: [['d', unitId], ['unit_id', unitId], ['online_shop', 'true'], ['online_shop_shipping_fee', '2.50'], ...extraTags], content: '',
-});
+/** The unit's KIND 30901 as the heartbeat stores it: signed by the owner (orderSync moneyUnit verifies it). */
+const unitEvent = (unitId: string, extraTags: string[][] = []) => sign(owner.sk, 30901, [
+  ['d', unitId], ['unit_id', unitId], ['online_shop', 'true'], ['online_shop_shipping_fee', '2.50'], ...extraTags,
+], '', now() - 3600);
 
 function insertUnit(unitId: string, name: string, authorized: string[], simple = false) {
+  const ev = unitEvent(unitId, simple ? [['unit_type', 'simple.lanapays.us']] : []);
   db.prepare(`
     INSERT INTO business_units (unit_id, event_id, pubkey, created_at, name, owner_hex, authorized_hex, currency, status, raw_event, unit_type, lana_only)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'EUR', 'active', ?, ?, ?)
-  `).run(unitId, 'e'.repeat(64), owner.pk, now(), name, owner.pk, JSON.stringify(authorized), unitRaw(unitId, simple ? [['unit_type', 'simple.lanapays.us']] : []), simple ? 'simple.lanapays.us' : null, simple ? 1 : 0);
+  `).run(unitId, ev.id, owner.pk, ev.created_at, name, owner.pk, JSON.stringify(authorized), JSON.stringify(ev), simple ? 'simple.lanapays.us' : null, simple ? 1 : 0);
 }
 
 async function placeAndPay(b: { sk: Uint8Array; pk: string }, unitId: string, amount = '12.50') {
@@ -133,12 +135,19 @@ const post = async (path: string, body: any) => {
 };
 
 beforeAll(async () => {
-  // Relay stub: accepts every EVENT (OK true) so the fulfillment POST publishes.
+  // Relay stub: accepts every EVENT (OK true) so the fulfillment POST
+  // publishes, and answers every REQ with an empty EOSE — the route reads the
+  // order's 30933 live before shipping or refunding (round 5, F5), and a relay
+  // that holds nothing new leaves the stored purchase as it is.
   relay = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await new Promise<void>(r => relay.once('listening', r));
   relay.on('connection', (socket) => {
     socket.on('message', (raw: Buffer) => {
-      try { const m = JSON.parse(raw.toString()); if (m[0] === 'EVENT') socket.send(JSON.stringify(['OK', m[1].id, true, ''])); } catch { /* ignore */ }
+      try {
+        const m = JSON.parse(raw.toString());
+        if (m[0] === 'EVENT') socket.send(JSON.stringify(['OK', m[1].id, true, '']));
+        else if (m[0] === 'REQ') socket.send(JSON.stringify(['EOSE', m[1]]));
+      } catch { /* ignore */ }
     });
   });
   process.env.LANA_RELAYS_OVERRIDE = `ws://127.0.0.1:${(relay.address() as AddressInfo).port}`;

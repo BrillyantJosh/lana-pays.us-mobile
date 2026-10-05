@@ -377,6 +377,7 @@ describe('no route lands ungated by accident', () => {
     // Mounts, not routes — now that the regex can see app.use() with a path.
     '/api': 'the rate limiter, mounted in front of the API; it judges IPs, not people',
     '/uploads': 'express.static for already-accepted images; the routes that WRITE them are gated',
+    '/api/orders': 'the orders-schema mount (503 ORDERS_UNAVAILABLE after a failed migration); it judges the database, not people — every order route behind it is gated',
 
     // Gated inside the handler rather than on the registration line.
     '/api/admin/settings': 'requireAdmin() folds excludedNow() in — pinned separately below',

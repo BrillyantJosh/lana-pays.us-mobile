@@ -232,6 +232,40 @@ export function initializeSchema(db: Database.Database): void {
   }
 
 
+  // ── KIND 30901 author pin (trust on first use) — 5 Oct 2026 ────────────
+  // The key that established a business unit. A later 30901 for the same
+  // unit_id is taken only from this key (heartbeat.ts syncBusinessUnits,
+  // nostr.ts selectKind30901 — lana-brain a0d7cdb, ported).
+  //
+  // Its own column, and NEVER in the heartbeat's ON CONFLICT … DO UPDATE:
+  // that statement rewrites `pubkey` from the incoming event, so a pin on
+  // `pubkey` would be an anchor the forger's own write replaces. And not
+  // `owner_hex`: that is read from a TAG the signer chooses, so "author ==
+  // owner_hex" holds for any forger who simply names himself.
+  //
+  // Backfilled from the stored pubkey only where no pin exists yet — a pin
+  // already set is never rewritten here, on any later boot either.
+  try { db.exec(`ALTER TABLE business_units ADD COLUMN author_pin TEXT`); } catch { /* column exists */ }
+  try { db.exec(`ALTER TABLE business_units ADD COLUMN author_pin_set_at TEXT`); } catch { /* column exists */ }
+  try {
+    db.exec(`
+      UPDATE business_units SET author_pin = pubkey, author_pin_set_at = datetime('now')
+      WHERE (author_pin IS NULL OR author_pin = '') AND pubkey <> ''
+    `);
+  } catch { /* no column: assertOrdersSchema says so */ }
+  // Every move of a pin by a person (server/scripts/unit-author-pin.ts): it
+  // is exactly as sensitive as the takeover the pin refuses, so it is kept.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS business_unit_pin_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      unit_id TEXT NOT NULL,
+      previous_pin TEXT,
+      new_pin TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   // Migration: add max_single_budget to fund_capacity
   const fcCols = db.pragma('table_info(fund_capacity)') as any[];
   if (fcCols.length > 0 && !fcCols.some((c: any) => c.name === 'max_single_budget')) {
@@ -512,5 +546,124 @@ export function initializeSchema(db: Database.Database): void {
     );
   `);
 
+  // Last: say out loud whether the orders tables are what this code needs.
+  // Every ALTER above swallows its error, so without this a failed
+  // migration is silent until an order is judged on a missing column.
+  assertOrdersSchema(db);
+
   console.log('Database schema initialized');
+}
+
+/**
+ * Written into shop_order_sync_state (key 'schema') once a database has
+ * passed assertOrdersSchema with this code: which rule set last checked it.
+ */
+export const ORDERS_SCHEMA_MARKER = 'v1.1.2-r5';
+
+/**
+ * Every table and column the Lana Online Shop order code reads or writes
+ * (orderSync.ts, orders.ts, heartbeat.ts syncBusinessUnits). Kept by hand:
+ * order code that starts using a new column or table adds it here, with the
+ * migration that creates it.
+ */
+export const ORDERS_SCHEMA_REQUIRED: Readonly<Record<string, readonly string[]>> = {
+  business_units: [
+    'unit_id', 'event_id', 'pubkey', 'created_at', 'name', 'owner_hex', 'authorized_hex', 'currency', 'status',
+    'raw_event', 'unit_type', 'lana_only', 'author_pin', 'author_pin_set_at',
+  ],
+  shop_orders: [
+    'order_id', 'event_id', 'buyer_pubkey', 'created_at', 'unit_id', 'unit_owner_hex', 'items_json', 'shipping', 'total',
+    'currency', 'fulfillment', 'order_status', 'pay_by', 'client', 'supersedes', 'raw_event', 'payment_state',
+    'expected_total', 'price_changed', 'effective_status', 'pending', 'paid_signer_hex', 'paid_tx_id', 'paid_event_id',
+    'paid_customer_hex', 'paid_amount', 'paid_lana_amount', 'paid_at', 'paid_order_event_id', 'settled_order_event_id',
+    'fulfillment_status', 'fulfillment_event_id', 'fulfillment_pubkey', 'fulfillment_created_at', 'fulfillment_carrier',
+    'fulfillment_tracking', 'fulfillment_published', 'resolved_at', 'updated_at',
+  ],
+  shop_order_fulfillments: [
+    'order_id', 'event_id', 'pubkey', 'created_at', 'status', 'payment_ref', 'carrier', 'tracking', 'shipped_at',
+    'delivered_at', 'eta', 'content', 'raw_event', 'published', 'updated_at',
+  ],
+  shop_order_payments: [
+    'pubkey', 'tx_id', 'event_id', 'created_at', 'unit_id', 'invoice_number', 'receipt_description', 'amount', 'currency',
+    'lana_amount', 'payment_type', 'status', 'customer_hex', 'raw_event',
+  ],
+  shop_order_delivery: ['d', 'order_id', 'recipient_hex', 'buyer_pubkey', 'unit_id', 'event_id', 'created_at', 'raw_event'],
+  shop_order_sync_state: ['key', 'value', 'updated_at'],
+  shop_order_item_snapshots: [
+    'order_id', 'item_a', 'listing_event_id', 'listing_created_at', 'title', 'sku', 'weight', 'sale_unit', 'price',
+    'currency', 'source', 'fetched_at',
+  ],
+  shop_order_settle_review: [
+    'order_id', 'order_event_id', 'old_paid_tx_id', 'old_paid_amount', 'verdict', 'expected_total', 'listed_at',
+    'cleared_at', 'confirmed_at',
+  ],
+  shop_order_listing_prices: ['order_event_id', 'item_a', 'price', 'listing_created_at', 'seen_at'],
+};
+
+export interface OrdersSchemaStatus {
+  ok: boolean;
+  /** `table` or `table.column` this code needs and the database lacks */
+  missing: string[];
+  /** shop_order_sync_state 'schema' after the check (null when unreadable) */
+  marker: string | null;
+  checkedAt: string;
+}
+
+const ordersSchemaByDb = new WeakMap<Database.Database, OrdersSchemaStatus>();
+
+/**
+ * Check, with PRAGMA table_info, that every table and column in
+ * ORDERS_SCHEMA_REQUIRED exists. On success the marker
+ * ORDERS_SCHEMA_MARKER is written (only when it changes — a second boot
+ * writes nothing). On failure: an ERROR line naming what is missing, and
+ * ordersSchemaOk(db) = false — the order sync is skipped and the order
+ * routes answer 503 ORDERS_UNAVAILABLE. It never throws: this app is also
+ * the merchant's till, which must keep working without the orders.
+ */
+export function assertOrdersSchema(db: Database.Database): OrdersSchemaStatus {
+  const missing: string[] = [];
+  for (const [table, columns] of Object.entries(ORDERS_SCHEMA_REQUIRED)) {
+    let have: Set<string>;
+    try {
+      have = new Set((db.pragma(`table_info(${table})`) as Array<{ name: string }>).map(c => c.name));
+    } catch {
+      have = new Set();
+    }
+    if (have.size === 0) { missing.push(table); continue; }
+    for (const c of columns) if (!have.has(c)) missing.push(`${table}.${c}`);
+  }
+  let marker: string | null = null;
+  if (missing.length === 0) {
+    try {
+      db.prepare(`
+        INSERT INTO shop_order_sync_state (key, value, updated_at) VALUES ('schema', ?, datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        WHERE shop_order_sync_state.value IS NOT excluded.value
+      `).run(ORDERS_SCHEMA_MARKER);
+    } catch (e: any) {
+      missing.push(`shop_order_sync_state (marker not written: ${e?.message || e})`);
+    }
+  }
+  try {
+    marker = (db.prepare("SELECT value FROM shop_order_sync_state WHERE key = 'schema'").get() as any)?.value ?? null;
+  } catch { marker = null; }
+  const status: OrdersSchemaStatus = { ok: missing.length === 0, missing, marker, checkedAt: new Date().toISOString() };
+  ordersSchemaByDb.set(db, status);
+  if (!status.ok) {
+    console.error(
+      `[orders] ERROR orders schema is NOT what this code needs — missing: ${missing.join(', ')}. ` +
+      'Orders are NOT synced and the order routes answer 503 ORDERS_UNAVAILABLE until a restart finds it complete; the till works as before.'
+    );
+  }
+  return status;
+}
+
+/** The last assertOrdersSchema result for this database (checked now if it never was). */
+export function ordersSchemaStatus(db: Database.Database): OrdersSchemaStatus {
+  return ordersSchemaByDb.get(db) ?? assertOrdersSchema(db);
+}
+
+/** May the order code touch this database? (ordersSchemaOk = false ⇒ no.) */
+export function ordersSchemaOk(db: Database.Database): boolean {
+  return ordersSchemaStatus(db).ok;
 }

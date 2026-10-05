@@ -4,6 +4,7 @@
  */
 
 import WebSocket from 'ws';
+import { verifyEvent } from 'nostr-tools/pure';
 import { devRelays, devKind38888Signer } from './devOverrides.js';
 
 // Dev-only escape hatches (SPEC §12) — see ./devOverrides.ts for why the gate
@@ -339,11 +340,54 @@ export interface Kind30901Event {
   raw_event: string;
 }
 
+/**
+ * Is this a genuine, correctly signed event of a kind we asked for?
+ *
+ * Until 5 Oct 2026 nothing checked a KIND 30901 here: the heartbeat took the
+ * newest event per `d` from ANY author, unsigned objects included, and wrote
+ * it over the unit — shipping fee, pickup, owner and staff (who may act for
+ * the unit in this app) and payout fields. lana-brain closed the same hole on
+ * 23 Jul 2026 (a0d7cdb); this is its rule.
+ *
+ * The check runs on a FRESHLY BUILT object of the seven NIP-01 fields:
+ * nostr-tools caches a "verified" flag on the object it is handed, and an
+ * object spread from a verified one would carry the flag along and be
+ * believed unchecked (see nip98.ts verifySignature). `created_at` is bounded
+ * at now + 300 s: it decides newest-wins, so a far-future date would win
+ * every later sync; 300 s covers honest clock drift.
+ */
+export function verifyNostrEvent(event: any, allowedKinds?: number[], nowSec = Math.floor(Date.now() / 1000)): boolean {
+  try {
+    if (!event || typeof event !== 'object') return false;
+    const { id, pubkey, created_at, kind, tags, content, sig } = event;
+    if (typeof id !== 'string' || !/^[0-9a-f]{64}$/.test(id)) return false;
+    if (typeof pubkey !== 'string' || !/^[0-9a-f]{64}$/.test(pubkey)) return false;
+    if (typeof sig !== 'string' || !/^[0-9a-f]{128}$/.test(sig)) return false;
+    if (typeof created_at !== 'number' || !Number.isInteger(created_at) || created_at < 0) return false;
+    if (typeof kind !== 'number' || !Array.isArray(tags) || typeof content !== 'string') return false;
+    if (!tags.every((t: unknown) => Array.isArray(t) && t.every(x => typeof x === 'string'))) return false;
+    if (allowedKinds && allowedKinds.length > 0 && !allowedKinds.includes(kind)) return false;
+    if (created_at > nowSec + 300) return false;
+    return verifyEvent({ id, pubkey, created_at, kind, tags, content, sig } as any);
+  } catch {
+    return false;
+  }
+}
+
 function parseKind30901Event(event: NostrEvent): Kind30901Event | null {
   const tags = event.tags;
   const getTag = (name: string) => tags.find(t => t[0] === name)?.[1];
 
-  const unit_id = getTag('unit_id') || getTag('d');
+  // The `d` tag IS the unit id, and a `unit_id` tag, when there is one, must
+  // say the same. Relays keep a replaceable event per (kind, pubkey, d) while
+  // this app keys the unit by unit_id: an event with d=<anything> and
+  // unit_id=<another shop's id> would get its own uncontested relay slot and
+  // its own newest-wins slot here, and then land on that shop's row by
+  // primary key, where the winner is merely the order relays answered in.
+  const dTag = getTag('d');
+  const unitIdTag = getTag('unit_id');
+  if (!dTag || (unitIdTag !== undefined && unitIdTag !== dTag)) return null;
+  const unit_id = dTag;
   const name = getTag('name');
 
   // All p tags = authorized personnel (owner + staff)
@@ -400,11 +444,105 @@ function parseKind30901Event(event: NostrEvent): Kind30901Event | null {
   };
 }
 
-export async function fetchKind30901(sinceTimestamp?: number, relays?: string[]): Promise<Kind30901Event[]> {
+/**
+ * The author a unit's KIND 30901 must come from, or null when this app has
+ * never stored the unit (first sighting: trust on first use). Supplied by the
+ * caller, because the pin lives in the database (business_units.author_pin)
+ * and this module holds no db handle.
+ */
+export type ResolveAuthorPin = (unitId: string) => string | null;
+
+/** KIND_30901_AUTHOR_PIN=0 → log-only (revert with one restart, no redeploy). */
+export function kind30901AuthorPinEnforced(): boolean {
+  return (process.env.KIND_30901_AUTHOR_PIN ?? '1') !== '0';
+}
+
+/**
+ * Pick, per unit, the newest KIND 30901 this app may believe (pure; exported
+ * for tests). Every rule is applied PER CANDIDATE, BEFORE newest-wins:
+ *
+ *  - signature and id verified (verifyNostrEvent), kind 30901, created_at at
+ *    most now + 300 s, `d` === unit_id (parseKind30901Event);
+ *  - a unit this app already stores is taken only from its pinned author
+ *    (business_units.author_pin — the key that established it, never the
+ *    `owner_hex` TAG: that is written by whoever signs, so "author ==
+ *    owner_hex" holds for any forger who names himself);
+ *  - a unit not stored yet that two different keys publish is taken from
+ *    neither: there is no "first" author to trust, so a person must look.
+ *
+ * Filtering the WINNER instead would let a stranger's event dated now+1 win
+ * the selection, be rejected, and take the merchant's real event down with
+ * it — silently freezing that shop's updates for good.
+ */
+export function selectKind30901(
+  events: unknown[],
+  resolveAuthorPin?: ResolveAuthorPin,
+  opts: { enforced?: boolean; nowSec?: number } = {},
+): { units: Kind30901Event[]; rejectedSig: number; rejectedPin: number; ambiguous: number } {
+  const enforced = opts.enforced ?? kind30901AuthorPinEnforced();
+  const nowSec = opts.nowSec ?? Math.floor(Date.now() / 1000);
+  const seen = new Set<string>();
+  const candidates = new Map<string, Kind30901Event[]>();
+  let rejectedSig = 0;
+  let rejectedPin = 0;
+  let ambiguous = 0;
+
+  for (const raw of events) {
+    if (!verifyNostrEvent(raw, [30901], nowSec)) {
+      rejectedSig++;
+      console.warn(`[30901] rejected an unverifiable event (id=${String((raw as any)?.id).slice(0, 12)}…)`);
+      continue;
+    }
+    const event = raw as NostrEvent;
+    if (seen.has(event.id)) continue; // the same event from another relay
+    seen.add(event.id);
+    const parsed = parseKind30901Event(event);
+    if (!parsed) continue;
+    const pin = resolveAuthorPin ? resolveAuthorPin(parsed.unit_id) : null;
+    if (pin && pin !== parsed.pubkey) {
+      // Someone other than the key that established this unit publishes for
+      // it: a takeover attempt or a key rotation — both need a person
+      // (server/scripts/unit-author-pin.ts), never a silent accept.
+      console.warn(
+        `[30901-pin] ${enforced ? 'REJECTED' : 'WOULD-REJECT'} unit=${parsed.unit_id} `
+        + `pinned=${pin.slice(0, 12)}… author=${parsed.pubkey.slice(0, 12)}…`,
+      );
+      rejectedPin++;
+      if (enforced) continue;
+    }
+    const list = candidates.get(parsed.unit_id) || [];
+    list.push(parsed);
+    candidates.set(parsed.unit_id, list);
+  }
+
+  const units: Kind30901Event[] = [];
+  for (const [unitId, list] of candidates) {
+    const pinned = resolveAuthorPin ? resolveAuthorPin(unitId) : null;
+    if (!pinned && new Set(list.map(u => u.pubkey)).size > 1) {
+      console.error(
+        `[30901-pin] ${enforced ? 'NOT STORED' : 'WOULD-NOT-STORE'} new unit=${unitId}: `
+        + `${new Set(list.map(u => u.pubkey)).size} different keys publish it and none is pinned yet`,
+      );
+      ambiguous++;
+      if (enforced) continue;
+    }
+    // NIP-01: newest created_at; in the same second the lowest id.
+    let best: Kind30901Event | null = null;
+    for (const u of list) {
+      if (!best || u.created_at > best.created_at || (u.created_at === best.created_at && u.event_id < best.event_id)) best = u;
+    }
+    if (best) units.push(best);
+  }
+  return { units, rejectedSig, rejectedPin, ambiguous };
+}
+
+export async function fetchKind30901(
+  sinceTimestamp?: number,
+  relays?: string[],
+  resolveAuthorPin?: ResolveAuthorPin,
+): Promise<Kind30901Event[]> {
   const useRelays = relays && relays.length > 0 ? relays : LANA_RELAYS;
   console.log(`Fetching KIND 30901 from ${useRelays.length} relays${sinceTimestamp ? ` (since ${sinceTimestamp})` : ' (full history)'}...`);
-
-  const allEvents: Kind30901Event[] = [];
 
   const fetchFromRelayKind30901 = (relayUrl: string, timeout = 15000): Promise<NostrEvent[]> => {
     return new Promise((resolve) => {
@@ -462,26 +600,14 @@ export async function fetchKind30901(sinceTimestamp?: number, relays?: string[])
     useRelays.map(relay => fetchFromRelayKind30901(relay))
   );
 
-  // Deduplicate by unit_id (d tag), keep newest event per unit_id
-  const byUnitId = new Map<string, NostrEvent>();
-  for (const relayEvents of results) {
-    for (const event of relayEvents) {
-      const dTag = event.tags.find(t => t[0] === 'd')?.[1];
-      if (!dTag) continue;
-      const existing = byUnitId.get(dTag);
-      if (!existing || event.created_at > existing.created_at) {
-        byUnitId.set(dTag, event);
-      }
-    }
-  }
-
-  for (const event of byUnitId.values()) {
-    const parsed = parseKind30901Event(event);
-    if (parsed) allEvents.push(parsed);
-  }
-
-  console.log(`KIND 30901: found ${allEvents.length} business units`);
-  return allEvents;
+  const { units, rejectedSig, rejectedPin, ambiguous } = selectKind30901(results.flat(), resolveAuthorPin);
+  const notes = [
+    rejectedSig ? `${rejectedSig} unverifiable` : '',
+    rejectedPin ? `${rejectedPin} by another author than the pinned one${kind30901AuthorPinEnforced() ? '' : ' (log-only)'}` : '',
+    ambiguous ? `${ambiguous} new unit(s) with several authors` : '',
+  ].filter(Boolean).join(', ');
+  console.log(`KIND 30901: found ${units.length} business units${notes ? ` (rejected: ${notes})` : ''}`);
+  return units;
 }
 
 /**

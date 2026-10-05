@@ -5,7 +5,7 @@
 
 import Database from 'better-sqlite3';
 import { bech32 } from 'bech32';
-import { fetchKind38888, fetchKind30901, fetchKind30902, fetchKind30903, fetchKind0Profile, type Kind38888Data, type Kind30901Event, type Kind30902Policy, type Kind30903Event } from './lib/nostr.js';
+import { fetchKind38888, fetchKind30901, fetchKind30902, fetchKind30903, fetchKind0Profile, kind30901AuthorPinEnforced, type Kind38888Data, type Kind30901Event, type Kind30902Policy, type Kind30903Event } from './lib/nostr.js';
 import { readUnitOrigin } from './lib/unitOrigin.js';
 import { syncShopOrders } from './lib/orderSync.js';
 import { refreshPersonExclusions } from './lib/exclusionGate.js';
@@ -209,6 +209,124 @@ export function quotaSnapshotForThisMonth(
   return { status, volumeUsed: s.quota_volume_used ?? 0, txUsed: s.quota_tx_used ?? 0, period };
 }
 
+/**
+ * Store the business units the relays hold — only what this app may believe.
+ *
+ * Until 5 Oct 2026 this took the newest KIND 30901 per `d` from ANY author,
+ * signature unchecked, and ON CONFLICT DO UPDATE wrote it over the unit: the
+ * shipping fee and pickup an order is judged by, owner_hex / authorized_hex
+ * (who may act for the unit here: merchantAuth.ts, the orders routes, payment
+ * requests) and the payout fields. Anyone able to write to a relay could set
+ * a shop's shipping to 0, offer pickup, or name himself staff.
+ *
+ * Now (lana-brain a0d7cdb, 23 Jul 2026, ported):
+ *  - fetchKind30901 keeps only verified kind-30901 events with d === unit_id,
+ *    from the unit's pinned author, filtered per candidate BEFORE newest-wins
+ *    (selectKind30901);
+ *  - business_units.author_pin is set when a unit is FIRST stored and is
+ *    deliberately ABSENT from DO UPDATE: an anchor the incoming row could
+ *    rewrite is moved by the very write it is there to refuse. Only a person
+ *    moves it (server/scripts/unit-author-pin.ts);
+ *  - DO UPDATE takes only a NEWER created_at, and only from the pinned author
+ *    (the same rule again, in the statement itself) — an older copy a relay
+ *    still serves never rolls a unit back.
+ *
+ * KIND_30901_AUTHOR_PIN=0 is log-only: other authors are logged and taken as
+ * before. Without the author_pin column (a migration that failed) nothing is
+ * written at all — the stored units stand — rather than run unpinned.
+ * Returns the number of rows inserted or updated.
+ */
+export async function syncBusinessUnits(db: Database.Database, relays?: string[]): Promise<number> {
+  const cols = (db.pragma('table_info(business_units)') as Array<{ name: string }>).map(c => c.name);
+  if (!cols.includes('author_pin') || !cols.includes('author_pin_set_at')) {
+    console.error('[30901-pin] business_units has no author_pin column (migration failed?) — KIND 30901 NOT synced; the stored units stand');
+    return 0;
+  }
+  const pinLookup = db.prepare('SELECT author_pin FROM business_units WHERE unit_id = ?');
+  const businessUnits = await fetchKind30901(undefined, relays, (unitId: string) => {
+    const row = pinLookup.get(unitId) as { author_pin?: string | null } | undefined;
+    return row?.author_pin || null;
+  });
+  if (businessUnits.length === 0) return 0;
+
+  const enforced = kind30901AuthorPinEnforced() ? 1 : 0;
+  const upsert = db.prepare(`
+    INSERT INTO business_units (
+      unit_id, event_id, pubkey, created_at, name, owner_hex, authorized_hex,
+      receiver_name, receiver_address, receiver_zip, receiver_city, receiver_country,
+      bank_name, bank_swift, bank_account, longitude, latitude,
+      country, currency, category, category_detail, image, logo,
+      status, lanapays_payout_method, lanapays_payout_wallet,
+      opening_hours_json, content, raw_event, unit_type, lana_only,
+      author_pin, author_pin_set_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    -- author_pin / author_pin_set_at are ABSENT from DO UPDATE on purpose:
+    -- set once, on first sighting; see syncBusinessUnits.
+    ON CONFLICT(unit_id) DO UPDATE SET
+      event_id = excluded.event_id,
+      pubkey = excluded.pubkey,
+      created_at = excluded.created_at,
+      name = excluded.name,
+      owner_hex = excluded.owner_hex,
+      authorized_hex = excluded.authorized_hex,
+      receiver_name = excluded.receiver_name,
+      receiver_address = excluded.receiver_address,
+      receiver_zip = excluded.receiver_zip,
+      receiver_city = excluded.receiver_city,
+      receiver_country = excluded.receiver_country,
+      bank_name = excluded.bank_name,
+      bank_swift = excluded.bank_swift,
+      bank_account = excluded.bank_account,
+      longitude = excluded.longitude,
+      latitude = excluded.latitude,
+      country = excluded.country,
+      currency = excluded.currency,
+      category = excluded.category,
+      category_detail = excluded.category_detail,
+      image = excluded.image,
+      logo = excluded.logo,
+      status = excluded.status,
+      lanapays_payout_method = excluded.lanapays_payout_method,
+      lanapays_payout_wallet = excluded.lanapays_payout_wallet,
+      opening_hours_json = excluded.opening_hours_json,
+      content = excluded.content,
+      raw_event = excluded.raw_event,
+      -- Sticky on purpose: shop's own edit form emits neither marker, so a
+      -- merchant editing a simple.lanapays.us shop there would otherwise
+      -- publish a replacement that quietly moves it into this app.
+      unit_type = COALESCE(excluded.unit_type, business_units.unit_type),
+      lana_only = MAX(excluded.lana_only, business_units.lana_only),
+      updated_at = datetime('now')
+    WHERE excluded.created_at > business_units.created_at
+      AND (? = 0 OR business_units.author_pin IS NULL OR business_units.author_pin = ''
+           OR business_units.author_pin = excluded.pubkey)
+  `);
+
+  let written = 0;
+  const insertMany = db.transaction((units: Kind30901Event[]) => {
+    for (const u of units) {
+      const origin = readUnitOrigin(u.raw_event);
+      const r = upsert.run(
+        u.unit_id, u.event_id, u.pubkey, u.created_at, u.name, u.owner_hex,
+        JSON.stringify(u.authorized_hex),
+        u.receiver_name, u.receiver_address, u.receiver_zip, u.receiver_city, u.receiver_country,
+        u.bank_name, u.bank_swift, u.bank_account, u.longitude, u.latitude,
+        u.country, u.currency, u.category, u.category_detail, u.image, u.logo,
+        u.status, u.lanapays_payout_method, u.lanapays_payout_wallet,
+        u.opening_hours_json, u.content, u.raw_event,
+        origin.unitType, origin.lanaOnly ? 1 : 0,
+        u.pubkey, // author_pin — first sighting only
+        enforced,
+      );
+      written += r.changes;
+    }
+  });
+
+  insertMany(businessUnits);
+  console.log(`KIND 30901: ${businessUnits.length} business units read, ${written} new or newer stored`);
+  return written;
+}
+
 export async function runHeartbeat(db: Database.Database): Promise<void> {
   if (isRunning) {
     const elapsed = Date.now() - heartbeatStartedAt;
@@ -290,75 +408,9 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
 
     console.log(`KIND 38888: split=${systemParams.split}, EUR=${systemParams.exchange_rates.EUR}, USD=${systemParams.exchange_rates.USD}, GBP=${systemParams.exchange_rates.GBP}`);
 
-    // Fetch KIND 30901 Business Units (always full — NIP-33 replaceable, small result set)
-    const businessUnits = await fetchKind30901(undefined, systemParams.relays);
-
-    if (businessUnits.length > 0) {
-      const upsert = db.prepare(`
-        INSERT INTO business_units (
-          unit_id, event_id, pubkey, created_at, name, owner_hex, authorized_hex,
-          receiver_name, receiver_address, receiver_zip, receiver_city, receiver_country,
-          bank_name, bank_swift, bank_account, longitude, latitude,
-          country, currency, category, category_detail, image, logo,
-          status, lanapays_payout_method, lanapays_payout_wallet,
-          opening_hours_json, content, raw_event, unit_type, lana_only, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(unit_id) DO UPDATE SET
-          event_id = excluded.event_id,
-          pubkey = excluded.pubkey,
-          created_at = excluded.created_at,
-          name = excluded.name,
-          owner_hex = excluded.owner_hex,
-          authorized_hex = excluded.authorized_hex,
-          receiver_name = excluded.receiver_name,
-          receiver_address = excluded.receiver_address,
-          receiver_zip = excluded.receiver_zip,
-          receiver_city = excluded.receiver_city,
-          receiver_country = excluded.receiver_country,
-          bank_name = excluded.bank_name,
-          bank_swift = excluded.bank_swift,
-          bank_account = excluded.bank_account,
-          longitude = excluded.longitude,
-          latitude = excluded.latitude,
-          country = excluded.country,
-          currency = excluded.currency,
-          category = excluded.category,
-          category_detail = excluded.category_detail,
-          image = excluded.image,
-          logo = excluded.logo,
-          status = excluded.status,
-          lanapays_payout_method = excluded.lanapays_payout_method,
-          lanapays_payout_wallet = excluded.lanapays_payout_wallet,
-          opening_hours_json = excluded.opening_hours_json,
-          content = excluded.content,
-          raw_event = excluded.raw_event,
-          -- Sticky on purpose: shop's own edit form emits neither marker, so a
-          -- merchant editing a simple.lanapays.us shop there would otherwise
-          -- publish a replacement that quietly moves it into this app.
-          unit_type = COALESCE(excluded.unit_type, business_units.unit_type),
-          lana_only = MAX(excluded.lana_only, business_units.lana_only),
-          updated_at = datetime('now')
-      `);
-
-      const insertMany = db.transaction((units: Kind30901Event[]) => {
-        for (const u of units) {
-          const origin = readUnitOrigin(u.raw_event);
-          upsert.run(
-            u.unit_id, u.event_id, u.pubkey, u.created_at, u.name, u.owner_hex,
-            JSON.stringify(u.authorized_hex),
-            u.receiver_name, u.receiver_address, u.receiver_zip, u.receiver_city, u.receiver_country,
-            u.bank_name, u.bank_swift, u.bank_account, u.longitude, u.latitude,
-            u.country, u.currency, u.category, u.category_detail, u.image, u.logo,
-            u.status, u.lanapays_payout_method, u.lanapays_payout_wallet,
-            u.opening_hours_json, u.content, u.raw_event,
-            origin.unitType, origin.lanaOnly ? 1 : 0
-          );
-        }
-      });
-
-      insertMany(businessUnits);
-      console.log(`KIND 30901: upserted ${businessUnits.length} business units`);
-    }
+    // Fetch KIND 30901 Business Units (always full — NIP-33 replaceable, small
+    // result set): verified, author-pinned, newer-only (syncBusinessUnits).
+    await syncBusinessUnits(db, systemParams.relays);
 
     // Fetch KIND 30903 — Merchant Registration Gateway status & quota
     const suspensions = await fetchKind30903(systemParams.relays);
