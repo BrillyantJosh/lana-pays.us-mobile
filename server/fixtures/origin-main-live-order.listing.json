@@ -1,0 +1,35 @@
+{
+  "kind": 36502,
+  "tags": [
+    [
+      "d",
+      "834390b217ee3c996161760e5b1cb7f7"
+    ],
+    [
+      "a",
+      "30901:a74090c27ad7814d71e0f35fdbc5a63fe2dba557b75135aae1330ea179e575f9:a5f7f91ca45d96e0237813fa8110a1fa"
+    ],
+    [
+      "title",
+      "Testni izdelek"
+    ],
+    [
+      "price",
+      "4.08",
+      "EUR"
+    ],
+    [
+      "unit",
+      "kos"
+    ],
+    [
+      "status",
+      "active"
+    ]
+  ],
+  "content": "",
+  "created_at": 1791019441,
+  "pubkey": "a74090c27ad7814d71e0f35fdbc5a63fe2dba557b75135aae1330ea179e575f9",
+  "id": "3151d7aba6160d14e04a696fae8463c057c2ae9e98aa8835e937941d6586fa79",
+  "sig": "8a47d81bffbf835f0da6b6fabb534270f5cb8ab6ab9310c4fdd904ddf6e362a481e9039aa3b55c6df9555d10adfd100d90e2173e8699b2cb3857ec30af31c269"
+}

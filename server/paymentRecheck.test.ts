@@ -163,7 +163,7 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  for (const t of ['shop_orders', 'shop_order_payments', 'shop_order_fulfillments', 'shop_order_delivery', 'shop_order_item_snapshots', 'shop_order_listing_prices', 'shop_order_sync_state', 'shop_order_settle_review']) {
+  for (const t of ['shop_orders', 'shop_order_payments', 'shop_order_fulfillments', 'shop_order_delivery', 'shop_order_item_snapshots', 'shop_order_listing_prices', 'shop_order_sync_state', 'shop_order_settle_review', 'shop_order_terms_seen', 'shop_listing_versions']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
   relayEvents = [];
@@ -181,7 +181,7 @@ async function paidThenRejected() {
   relayEvents = [listingEvent(listingD, '5.00', now() - 86_400)];
   expect(orderSync.ingestEvent(db, orderEvent(buyer, d, `36502:${owner.pk}:${listingD}`, '12.50', t0), trusted)).toBe(d);
   expect(orderSync.ingestEvent(db, purchaseEvent(d, buyer.pk, txId, t0 + 60), trusted)).toBe(d);
-  await orderSync.resolveOrders(db, { orderIds: [d], trusted, fetchListing: orderSync.makeListingFetcher([stub.url], 2000), now: now() });
+  await orderSync.resolveOrders(db, { orderIds: [d], trusted, fetchListing: orderSync.makeListingFetcher(db, [stub.url], 2000), now: now() });
   expect(row(d)).toMatchObject({ payment_state: 'paid', pending: 1 });
   const o = { d, buyerPk: buyer.pk, txId, listingD };
   const rej = await post(`/api/orders/${d}/fulfillment`, { hex: owner.pk, event: fulfillmentEvent(o, 'rejected', now() - 30) });
@@ -346,7 +346,7 @@ describe('F5 — which 30933 step 2b re-reads', () => {
       return new Set(byTxReqs(stub).flatMap(f => f['#d']));
     };
     db.prepare(`INSERT INTO shop_order_sync_state (key, value) VALUES ('tick', '1')`).run();
-    await orderSync.resolveOrders(db, { orderIds: [open], trusted, fetchListing: orderSync.makeListingFetcher([stub.url], 2000), now: now() });
+    await orderSync.resolveOrders(db, { orderIds: [open], trusted, fetchListing: orderSync.makeListingFetcher(db, [stub.url], 2000), now: now() });
     expect(row(open)).toMatchObject({ payment_state: 'paid', pending: 1 });
     for (const t of [2, 3, 4, 5]) {
       const ids = await readThisTick();

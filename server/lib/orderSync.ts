@@ -29,9 +29,10 @@ import { queryEvents, type SignedEvent } from './dm.js';
 import { getLanaRelays, broadcastEvent, verifyNostrEvent } from './nostr.js';
 import { ordersSchemaOk } from '../db/schema.js';
 import { SIMPLE_UNIT_SQL } from './unitOrigin.js';
+import { isOnlineShopUnit } from './unitFlags.js';
 import {
-  resolveOrder, ORDER_ID_RE, orderIdMatchesPubkey, toCents, bindingString, usableListingPrice, listingSaleStatus, purchaseVersionWins,
-  type ResolverOrder, type ResolverPurchase, type ResolverFulfillment, type ResolverUnit, type SettledPurchase,
+  resolveOrder, ORDER_ID_RE, orderIdMatchesPubkey, toCents, expectedCents, bindingString, usableListingPrice, listingSaleStatus, purchaseVersionWins,
+  type ResolverOrder, type ResolverPurchase, type ResolverFulfillment, type ResolverUnit, type SettledPurchase, type ResolverResult,
 } from './orderResolver.js';
 
 export const KIND_ORDER = 36520;
@@ -590,17 +591,76 @@ export function listingDeletedBy(
   return false;
 }
 
+// ─── Listing versions this app has seen (round 5, F1) ───────────────────
+//
+// The broker's rule (lana-pays-shop listingsCache.ts: isNewer,
+// listing_versions, listing_deletions): per listing address the NEWEST
+// version ever seen is known, and a version that is not newer never counts
+// again, whoever serves it. Without it a merchant who deleted the current
+// version by event id only (NIP-09 `e`) — the relays drop it — had the OLDER,
+// cheaper version back as soon as anyone re-broadcast it: no deletion names
+// that one (round 5, MW1).
+
+/** A listing version dated further ahead than this (seconds) is ignored, as the broker ignores it. */
+export const LISTING_MAX_FUTURE_SKEW_S = 600;
+
+/** NIP-01: of two versions of one address, the later created_at wins; on a tie, the lower id. */
+export function listingVersionNewer(a: { created_at: number; id: string }, b: { created_at: number; id: string } | null | undefined): boolean {
+  if (!b) return true;
+  if (a.created_at !== b.created_at) return a.created_at > b.created_at;
+  return a.id < b.id;
+}
+
+export interface KnownListingVersion { address: string; event_id: string; created_at: number; deleted: number }
+
+export function knownListingVersion(db: Database.Database, address: string): KnownListingVersion | null {
+  return (db.prepare('SELECT address, event_id, created_at, deleted FROM shop_listing_versions WHERE address = ?').get(address) as KnownListingVersion | undefined) ?? null;
+}
+
+/**
+ * Remember a version: only a NEWER one replaces the known one, and the same
+ * version may only go from live to deleted, never back. Returns true when
+ * the row changed.
+ */
+export function recordListingVersion(
+  db: Database.Database, address: string, v: { id: string; created_at: number }, deleted: boolean, now = nowUnix(),
+): boolean {
+  return db.prepare(`
+    INSERT INTO shop_listing_versions (address, event_id, created_at, deleted, updated_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(address) DO UPDATE SET
+      event_id = excluded.event_id, created_at = excluded.created_at, deleted = excluded.deleted, updated_at = excluded.updated_at
+    WHERE excluded.created_at > shop_listing_versions.created_at
+       OR (excluded.created_at = shop_listing_versions.created_at AND excluded.event_id < shop_listing_versions.event_id)
+       OR (excluded.event_id = shop_listing_versions.event_id AND excluded.deleted > shop_listing_versions.deleted)
+  `).run(address, v.id, v.created_at, deleted ? 1 : 0, now).changes > 0;
+}
+
+/** Signature check on a FRESH object (nostr-tools caches "verified" on the object, and a spread copy keeps it). */
+function signedOk(ev: any): boolean {
+  try {
+    return verifyEvent({ id: ev.id, pubkey: ev.pubkey, created_at: ev.created_at, kind: ev.kind, tags: ev.tags, content: ev.content, sig: ev.sig } as any);
+  } catch { return false; }
+}
+
 /**
  * REQ the listing event `<kind>:<pubkey>:<d>`; newest signed by that pubkey
- * wins — unless its author has deleted it (NIP-09, listingDeletedBy): the
- * KIND 5s naming it are read in a second REQ, and a listing is returned only
- * when at least one relay finished that read (fail-closed: a deletion that
- * could not be read is not taken as "none"). A relay that still serves a
+ * wins (NIP-01 order; one dated more than LISTING_MAX_FUTURE_SKEW_S ahead is
+ * ignored) — unless its author has deleted it (NIP-09, listingDeletedBy):
+ * the KIND 5s naming it are read in a second REQ, and a listing is returned
+ * only when at least one relay finished that read (fail-closed: a deletion
+ * that could not be read is not taken as "none"). A relay that still serves a
  * deleted listing (it does not apply KIND 5, or someone re-broadcast it) no
  * longer hands this app a live price the portal and the broker refuse
  * (round 3, x3/m3).
+ *
+ * And it is held to the version memory (shop_listing_versions, round 5, F1):
+ * null when the best version served is OLDER than the newest one this app
+ * has seen (here or by readListingVersions), or is that known version and its
+ * author deleted it — so a deletion seen once stays in force when a relay
+ * later serves the version without it. Otherwise the version served is
+ * recorded as the known one.
  */
-export function makeListingFetcher(relays: string[], timeout = 6000): ListingFetcher {
+export function makeListingFetcher(db: Database.Database, relays: string[], timeout = 6000): ListingFetcher {
   // The cache lives exactly as long as this fetcher: syncShopOrders makes one
   // per tick (1 min), the fulfillment route one per request. It used to be
   // one module-wide Map with a 10-minute TTL, so a price the merchant changed
@@ -610,12 +670,12 @@ export function makeListingFetcher(relays: string[], timeout = 6000): ListingFet
   const cache = new Map<string, Promise<ListingInfo | null>>();
   return (address: string) => {
     let p = cache.get(address);
-    if (!p) { p = fetchListingOnce(relays, timeout, address); cache.set(address, p); }
+    if (!p) { p = fetchListingOnce(db, relays, timeout, address); cache.set(address, p); }
     return p;
   };
 }
 
-async function fetchListingOnce(relays: string[], timeout: number, address: string): Promise<ListingInfo | null> {
+async function fetchListingOnce(db: Database.Database, relays: string[], timeout: number, address: string): Promise<ListingInfo | null> {
   const [kindS, pubkey, ...rest] = address.split(':');
   const d = rest.join(':');
   const kind = Number(kindS);
@@ -623,13 +683,21 @@ async function fetchListingOnce(relays: string[], timeout: number, address: stri
   let info: ListingInfo | null = null;
   try {
     const events = await queryEvents(relays, { kinds: [kind], authors: [pubkey], '#d': [d] }, timeout);
+    const latest = nowUnix() + LISTING_MAX_FUTURE_SKEW_S;
     let best: SignedEvent | null = null;
     for (const ev of events) {
-      if (ev.pubkey !== pubkey || ev.kind !== kind || tag(ev, 'd') !== d) continue;
-      let ok = false;
-      try { ok = verifyEvent(ev as any); } catch { ok = false; }
-      if (!ok) continue;
-      if (!best || ev.created_at > best.created_at) best = ev;
+      if (!ev || ev.pubkey !== pubkey || ev.kind !== kind || tag(ev, 'd') !== d) continue;
+      if (typeof ev.created_at !== 'number' || ev.created_at > latest) continue;
+      if (best && !listingVersionNewer(ev, best)) continue;
+      if (!signedOk(ev)) continue;
+      best = ev;
+    }
+    if (best) {
+      const known = knownListingVersion(db, address);
+      // an older version than one already seen, whoever serves it: never a price
+      if (known && known.event_id !== best.id && listingVersionNewer({ id: known.event_id, created_at: known.created_at }, best)) best = null;
+      // the known version, deleted by its author once: deleted for good
+      else if (known && known.event_id === best.id && known.deleted) best = null;
     }
     if (best) {
       const found = best;
@@ -638,7 +706,10 @@ async function fetchListingOnce(relays: string[], timeout: number, address: stri
         { kinds: [5], authors: [pubkey], '#e': [found.id] },
       ], timeout)));
       const finished = reads.filter((r): r is SignedEvent[] => r !== null);
-      if (finished.length === 0 || listingDeletedBy({ id: found.id, pubkey, kind, d, created_at: found.created_at }, finished.flat())) best = null;
+      const deleted = finished.length > 0 && listingDeletedBy({ id: found.id, pubkey, kind, d, created_at: found.created_at }, finished.flat());
+      // A signed version is known whether or not its deletions could be read.
+      recordListingVersion(db, address, found, deleted);
+      if (finished.length === 0 || deleted) best = null;
     }
     if (best) {
       const price = tagRow(best, 'price');
@@ -658,11 +729,107 @@ async function fetchListingOnce(relays: string[], timeout: number, address: stri
       };
     }
   } catch { info = null; }
-  // Not found (deleted, or the REQ failed) is null — never the last cached
-  // price, which outlived a deleted listing for as long as the process ran
-  // (review 2 Oct 2026). resolveOrders falls back to the price it saw while
-  // judging the same 36520 event (shop_order_listing_prices), nothing else.
+  // Not found (deleted, older than one seen, or the REQ failed) is null —
+  // never the last cached price, which outlived a deleted listing for as long
+  // as the process ran (review 2 Oct 2026). judgeRow then has only the terms
+  // this very 36520 event was once exactly right under (shop_order_terms_seen).
   return info;
+}
+
+/** Listing versions per REQ page (a relay answers at most 500 per REQ, whatever the limit). */
+const VERSION_PAGE = 300;
+/** Authors per proactive version REQ. */
+const VERSION_AUTHORS_PER_REQ = 50;
+
+/**
+ * The pubkeys whose listings this app's online shops sell: the signer of each
+ * stored unit 30901 that is verified (moneyUnit, signed by its own row's key)
+ * and has `online_shop` = 'true' — never a simple.lanapays.us unit.
+ */
+export function onlineShopAuthors(db: Database.Database): string[] {
+  const out = new Set<string>();
+  for (const u of db.prepare(`
+    SELECT unit_id, name, owner_hex, pubkey, authorized_hex, currency, raw_event
+    FROM business_units WHERE NOT ${SIMPLE_UNIT_SQL}
+  `).all() as UnitRow[]) {
+    if (isOnlineShopUnit(u.raw_event) !== true) continue;
+    if (!moneyUnit(u, u.pubkey)) continue;
+    out.add(u.pubkey);
+  }
+  return [...out].sort();
+}
+
+/**
+ * Round 5 (M-3): every 5th tick, read the listing VERSIONS of this app's
+ * online shops — {kinds: ORDER_ITEM_KINDS, authors: those shops' keys} — and
+ * remember the newest one per address (shop_listing_versions). It never
+ * prices anything: it only lets makeListingFetcher refuse an older version
+ * of a listing whose address no order has named yet (one the merchant
+ * replaced or deleted by event id before a buyer's replacement names it).
+ * Signature-checked, NIP-01 newest per address, dated at most
+ * LISTING_MAX_FUTURE_SKEW_S ahead; only a version newer than the known one is
+ * verified at all, so a steady state costs no signature checks. Paged per
+ * relay with an INCLUSIVE `until` and de-duplicated by id (a relay caps a REQ
+ * at 500). Returns the number of addresses whose known version moved.
+ */
+export async function readListingVersions(
+  db: Database.Database, relays: string[], timeout = 15000, maxPages = 20, now = nowUnix(),
+): Promise<number> {
+  const authors = onlineShopAuthors(db);
+  if (authors.length === 0 || relays.length === 0) return 0;
+  const authorSet = new Set(authors);
+  const kinds = [...ORDER_ITEM_KINDS].sort((a, b) => a - b);
+  const byId = new Map<string, SignedEvent>();
+  for (let i = 0; i < authors.length; i += VERSION_AUTHORS_PER_REQ) {
+    const filter = { kinds, authors: authors.slice(i, i + VERSION_AUTHORS_PER_REQ), limit: VERSION_PAGE };
+    await Promise.all(relays.map(async (url) => {
+      let until: number | undefined;
+      for (let page = 0; page < maxPages; page++) {
+        let events: SignedEvent[] = [];
+        try { events = await queryEvents([url], until !== undefined ? { ...filter, until } : filter, timeout); } catch { events = []; }
+        let oldest = Infinity;
+        let fresh = 0;
+        for (const ev of events) {
+          if (!ev || typeof ev.id !== 'string' || typeof ev.created_at !== 'number') continue;
+          if (!byId.has(ev.id)) { byId.set(ev.id, ev); fresh++; }
+          if (ev.created_at < oldest) oldest = ev.created_at;
+        }
+        // `until` is inclusive: the next page starts AT the oldest second seen
+        // (events of that second beyond the cap are not skipped); a page that
+        // brings nothing new is the end.
+        if (events.length < VERSION_PAGE || fresh === 0 || !Number.isFinite(oldest)) break;
+        until = oldest;
+      }
+    }));
+  }
+
+  // newest-first candidates per address
+  const latest = now + LISTING_MAX_FUTURE_SKEW_S;
+  const byAddress = new Map<string, SignedEvent[]>();
+  for (const ev of byId.values()) {
+    if (!ORDER_ITEM_KINDS.has(ev.kind) || !authorSet.has(ev.pubkey) || ev.created_at > latest) continue;
+    const d = tag(ev, 'd');
+    if (!d) continue;
+    const address = `${ev.kind}:${ev.pubkey}:${d}`;
+    const list = byAddress.get(address);
+    if (list) list.push(ev); else byAddress.set(address, [ev]);
+  }
+  let moved = 0;
+  let checked = 0;
+  for (const [address, list] of byAddress) {
+    list.sort((a, b) => (listingVersionNewer(a, b) ? -1 : 1));
+    const known = knownListingVersion(db, address);
+    const knownRef = known ? { id: known.event_id, created_at: known.created_at } : null;
+    for (const ev of list) {
+      if (knownRef && (ev.id === knownRef.id || !listingVersionNewer(ev, knownRef))) break; // nothing newer than what is known
+      checked++;
+      if (checked % 200 === 0) await new Promise<void>(r => setImmediate(r)); // let the till breathe on a first, large read
+      if (!signedOk(ev)) continue;
+      if (recordListingVersion(db, address, ev, false, now)) moved++;
+      break;
+    }
+  }
+  return moved;
 }
 
 // ─── What was ordered — display only, never read by the resolver ────────
@@ -843,13 +1010,6 @@ export interface ResolveOptions {
   trusted: Set<string>;
   fetchListing: ListingFetcher;
   now?: number;
-  /**
-   * Brilly's confirmation of ONE entry of shop_order_settle_review
-   * (confirmSettleReview): the purchase the older rules had paid it with is
-   * passed as the step-5a pin for exactly that 36520 event — the resolver
-   * still requires the NEWEST version of that 30933 to pay that amount.
-   */
-  confirmed?: { orderId: string; eventId: string; purchase: SettledPurchase };
 }
 
 function orderFromRow(r: any): ResolverOrder {
@@ -871,9 +1031,10 @@ function orderFromRow(r: any): ResolverOrder {
  *
  * Also every 'paid' row that holds a verdict of the OLDER rules (no
  * settled_order_event_id for its current event — see schema.ts), shipped or
- * not, until step 5 has judged it once; and for 7 days an older 'paid' that
- * step 5 did not pay (shop_order_settle_review), so a listing REQ that failed
- * on that first judgement cannot decide it for good.
+ * not, until step 5 has judged it once; and for 7 days every order with an
+ * open entry in shop_order_settle_review (an older 'paid' step 5 did not pay,
+ * or a verified payment of the order's total its terms do not reach), so a
+ * listing REQ that failed on that first judgement cannot decide it for good.
  */
 export function activeOrderIds(db: Database.Database, now = nowUnix()): string[] {
   return (db.prepare(`
@@ -886,45 +1047,339 @@ export function activeOrderIds(db: Database.Database, now = nowUnix()): string[]
   `).all(now - 7 * DAY, now - 7 * DAY) as any[]).map(r => r.order_id);
 }
 
+/**
+ * Round 5 (F3/F4): are `prices` the merchant's terms for THIS order, to the
+ * cent? `prices[i]` is item i's listing price as usableListingPrice gives it
+ * now (null = unknown or not usable). True only when every item has one and
+ * its unit_price is exactly that price, the order's total is the recomputed
+ * amount (the resolver's expectedCents: the shop's fee, free-from on the
+ * whole subtotal, none for pickup — pickup only where the shop offers it),
+ * its shipping is that total minus the subtotal, and the order, every item
+ * and the shop share one currency.
+ */
+export function termsPriceOrder(order: ResolverOrder, unit: ResolverUnit, prices: Array<string | null>): boolean {
+  if (!order.items.length || prices.length !== order.items.length) return false;
+  if (!unit.currency || order.currency !== unit.currency) return false;
+  let subtotal = 0;
+  for (let i = 0; i < order.items.length; i++) {
+    const it = order.items[i];
+    const p = toCents(prices[i]);
+    if (p === null || p <= 0 || it.currency !== order.currency) return false;
+    if (toCents(it.unitPrice) !== p || !Number.isInteger(it.qty) || it.qty <= 0) return false;
+    subtotal += p * it.qty;
+  }
+  const expected = expectedCents({
+    ...order,
+    items: order.items.map((it, i) => ({ ...it, listingPrice: prices[i], listingCreatedAt: null })),
+  }, unit);
+  if (expected === null || toCents(order.total) !== expected) return false;
+  return order.shipping !== undefined && toCents(order.shipping) === expected - subtotal;
+}
+
+/** One row of shop_order_terms_seen. */
+export interface OrderTermsSeen {
+  order_event_id: string; shipping_fee: string; free_from: string | null; pickup: number;
+  unit_event_id: string | null; prices_json: string; total: string; seen_at: number;
+}
+
+export function orderTermsSeen(db: Database.Database, orderEventId: string): OrderTermsSeen | null {
+  return (db.prepare('SELECT * FROM shop_order_terms_seen WHERE order_event_id = ?').get(orderEventId) as OrderTermsSeen | undefined) ?? null;
+}
+
+function termsPrices(json: string): Map<string, { price: string; listingCreatedAt: number | null }> {
+  const out = new Map<string, { price: string; listingCreatedAt: number | null }>();
+  try {
+    const v = JSON.parse(json || '[]');
+    if (Array.isArray(v)) {
+      for (const p of v) {
+        if (p && typeof p.a === 'string' && typeof p.price === 'string' && !out.has(p.a)) {
+          out.set(p.a, { price: p.price, listingCreatedAt: typeof p.listing_created_at === 'number' ? p.listing_created_at : null });
+        }
+      }
+    }
+  } catch { /* none */ }
+  return out;
+}
+
+/** Why an entry of shop_order_settle_review is open. NULL = listed before the column existed (always an older 'paid'). */
+export type SettleReviewReason = 'legacy_paid' | 'terms_mismatch' | 'not_computable';
+const LEGACY_REASON: SettleReviewReason = 'legacy_paid';
+const isLegacyEntry = (e: { reason?: string | null }): boolean => e.reason == null || e.reason === LEGACY_REASON;
+
+interface ReviewEntryRow {
+  order_id: string; order_event_id: string | null; old_paid_tx_id: string | null; old_paid_amount: string | null;
+  reason: string | null; cleared_at: number | null;
+}
+
+function unitEventId(u: UnitRow): string | null {
+  try { const ev = u.raw_event ? JSON.parse(u.raw_event) : null; return typeof ev?.id === 'string' ? ev.id : null; } catch { return null; }
+}
+
+const judgeStatements = new WeakMap<Database.Database, ReturnType<typeof prepareJudge>>();
+function prepareJudge(db: Database.Database) {
+  return {
+    getPurchases: db.prepare('SELECT * FROM shop_order_payments WHERE unit_id = ? AND invoice_number = ?'),
+    getFulfillment: db.prepare('SELECT * FROM shop_order_fulfillments WHERE order_id = ?'),
+    getTerms: db.prepare('SELECT * FROM shop_order_terms_seen WHERE order_event_id = ?'),
+    putTerms: db.prepare(`
+      INSERT INTO shop_order_terms_seen (order_event_id, shipping_fee, free_from, pickup, unit_event_id, prices_json, total, seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(order_event_id) DO NOTHING
+    `),
+    update: db.prepare(`
+      UPDATE shop_orders SET
+        payment_state = ?, expected_total = ?, price_changed = ?, effective_status = ?, pending = ?,
+        paid_signer_hex = ?, paid_tx_id = ?, paid_event_id = ?, paid_customer_hex = ?, paid_amount = ?, paid_lana_amount = ?, paid_at = ?,
+        paid_order_event_id = ?, settled_order_event_id = ?,
+        fulfillment_status = ?, fulfillment_event_id = ?, fulfillment_pubkey = ?, fulfillment_created_at = ?,
+        fulfillment_carrier = ?, fulfillment_tracking = ?, fulfillment_published = ?,
+        resolved_at = ?, updated_at = datetime('now')
+      WHERE order_id = ?
+    `),
+    // the open entry of an order, whichever event it was listed for
+    getOpenReview: db.prepare('SELECT order_id, order_event_id, old_paid_tx_id, old_paid_amount, reason, cleared_at FROM shop_order_settle_review WHERE order_id = ? AND cleared_at IS NULL'),
+    // an older 'paid' step 5 does not pay — as since round 3, now with its reason
+    listLegacy: db.prepare(`
+      INSERT INTO shop_order_settle_review (order_id, order_event_id, old_paid_tx_id, old_paid_amount, verdict, expected_total, listed_at, cleared_at, reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
+      ON CONFLICT(order_id) DO UPDATE SET
+        order_event_id = excluded.order_event_id, old_paid_tx_id = excluded.old_paid_tx_id,
+        old_paid_amount = excluded.old_paid_amount, verdict = excluded.verdict,
+        expected_total = excluded.expected_total, listed_at = excluded.listed_at, cleared_at = NULL,
+        reason = excluded.reason
+    `),
+    // A later judgement of a legacy entry: the verdict moves, the entry (when
+    // it was listed, what the older rules had paid) stays — so its 7 days end.
+    rejudgeLegacy: db.prepare('UPDATE shop_order_settle_review SET verdict = ?, expected_total = ? WHERE order_id = ? AND order_event_id = ? AND cleared_at IS NULL'),
+    // a verified payment of the order's total its terms do not reach: a fresh entry (new event or new pin)
+    listGeneral: db.prepare(`
+      INSERT INTO shop_order_settle_review (order_id, order_event_id, old_paid_tx_id, old_paid_amount, verdict, expected_total, listed_at, cleared_at, confirmed_at, reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+      ON CONFLICT(order_id) DO UPDATE SET
+        order_event_id = excluded.order_event_id, old_paid_tx_id = excluded.old_paid_tx_id,
+        old_paid_amount = excluded.old_paid_amount, verdict = excluded.verdict,
+        expected_total = excluded.expected_total, listed_at = excluded.listed_at, cleared_at = NULL,
+        confirmed_at = NULL, reason = excluded.reason
+    `),
+    // …the same event and pin judged again: listed_at stays
+    rejudgeGeneral: db.prepare('UPDATE shop_order_settle_review SET verdict = ?, expected_total = ?, reason = ? WHERE order_id = ? AND cleared_at IS NULL'),
+    clearReview: db.prepare('UPDATE shop_order_settle_review SET cleared_at = ? WHERE order_id = ? AND cleared_at IS NULL'),
+  };
+}
+function judgeStmts(db: Database.Database) {
+  let s = judgeStatements.get(db);
+  if (!s) { s = prepareJudge(db); judgeStatements.set(db, s); }
+  return s;
+}
+
+/** Units moneyUnit accepted, per row object and order key (one signature check per unit per tick). */
+const unitVerified = new WeakMap<UnitRow, Set<string>>();
+function unitTrustedFor(u: UnitRow, ownerHex: string): boolean {
+  let ok = unitVerified.get(u);
+  if (ok?.has(ownerHex)) return true;
+  if (moneyUnit(u, ownerHex) !== u) return false;
+  if (!ok) { ok = new Set(); unitVerified.set(u, ok); }
+  ok.add(ownerHex);
+  return true;
+}
+
+export interface JudgeContext {
+  /** the order's unit row (unitRow); judgeRow only judges with it when moneyUnit accepts it for this order */
+  unit: UnitRow;
+  trusted: Set<string>;
+  now: number;
+  /**
+   * confirmSettleReview only: the purchase Brilly confirmed for ONE entry of
+   * shop_order_settle_review, passed as the step-5a pin of exactly this event
+   * — the resolver still requires the NEWEST version of that 30933 to pay
+   * that amount.
+   */
+  confirmed?: SettledPurchase | null;
+}
+
+export interface JudgeOutcome {
+  result: ResolverResult;
+  /** 1 = by the merchant's terms now; 2 = by the terms this very event was once exactly right under */
+  attempt: 1 | 2;
+  /** an older rule set's 'paid' (or its open review entry): judged by step 5 alone, never by attempt 2 */
+  legacy: boolean;
+}
+
+/**
+ * Judge ONE stored order and write the verdict — synchronous, so a caller
+ * can run it inside a transaction. `listings[i]` is item i's listing as the
+ * fetcher found it this tick (null = unknown). Returns null, writing nothing,
+ * when the unit is not one moneyUnit accepts for this order: an order is
+ * never judged with a blank or foreign unit, because a verdict other than
+ * 'paid' clears the step-5a pin of an honestly paid order.
+ *
+ *  1. Every item is priced by its own listing, only while that listing is
+ *     usable for THIS order now (SPEC v1.1.2 step 2: on sale, a positive
+ *     price in the shop's currency, its `a` naming the order's shop) —
+ *     otherwise null, and the order is not computable (SPEC v1.1.1): the
+ *     buyer's own unit_price is never money.
+ *  2. When those current terms are exactly the order's numbers
+ *     (termsPriceOrder), they are kept for this 36520 event, once
+ *     (shop_order_terms_seen, ON CONFLICT DO NOTHING).
+ *  3. resolveOrder with the current terms. Only if that says amount_mismatch
+ *     — and the row is no older rule set's 'paid' and no confirmation — once
+ *     more with the kept terms of this event: their shipping fee, free-from,
+ *     pickup and item prices (by `a`), with the live owner, staff and
+ *     currency. An honest order whose merchant raised a price or the fee, or
+ *     turned pickup off, before the 30933 arrived is paid as it would have
+ *     been had the payment come first (step 5a). A buyer's replacement is
+ *     another event: it has kept terms only if it was itself once exactly the
+ *     merchant's.
+ *  4. Review (shop_order_settle_review): an older 'paid' step 5 does not pay
+ *     is listed as before ('legacy_paid'); any other order whose verdict is
+ *     amount_mismatch while a verified payment of exactly its total stands is
+ *     listed too ('not_computable' when the amount could not be computed,
+ *     else 'terms_mismatch'), its purchase as the pin Brilly may confirm. A
+ *     paid verdict clears the entry, and so does no candidate payment.
+ */
+export function judgeRow(db: Database.Database, row: any, listings: Array<ListingInfo | null>, ctx: JudgeContext): JudgeOutcome | null {
+  const { unit, trusted, now } = ctx;
+  if (!unit || !unitTrustedFor(unit, row.unit_owner_hex)) return null;
+  const q = judgeStmts(db);
+  const order = orderFromRow(row);
+  const purchases: ResolverPurchase[] = (q.getPurchases.all(row.unit_id, row.order_id) as any[]).map(p => ({
+    pubkey: p.pubkey, eventId: p.event_id, createdAt: p.created_at, txId: p.tx_id, unitId: p.unit_id,
+    invoiceNumber: p.invoice_number, receiptDescription: p.receipt_description || '', amount: p.amount || '',
+    currency: p.currency || '', lanaAmount: p.lana_amount || '', paymentType: p.payment_type || '',
+    status: p.status || '', customerHex: p.customer_hex || '',
+  }));
+  const fRow = q.getFulfillment.get(row.order_id) as any;
+  const fulfillment: ResolverFulfillment | null = fRow ? {
+    pubkey: fRow.pubkey, createdAt: fRow.created_at, status: fRow.status,
+    paymentRef: fRow.payment_ref || undefined, carrier: fRow.carrier || undefined, tracking: fRow.tracking || undefined,
+  } : null;
+  const resolverUnit = unitToResolver(unit);
+  const orderUnitRef = `30901:${row.unit_owner_hex}:${row.unit_id}`;
+
+  // A 'paid' the OLDER rules stored (no v1.1.2 pin for this event — see
+  // schema.ts) is judged again by step 5 alone, with no pin — priced like
+  // every other order, never by kept terms (attempt 2) or the order-time
+  // display snapshot (shop_order_item_snapshots: it records a price but not
+  // the listing's sale status, so it cannot tell an honest order from a
+  // buyer's replacement the older rules paid with an off-sale listing at its
+  // old price — round 3, x3/m1). An honest one step 5 cannot pay now is
+  // listed for Brilly, who confirms it (confirmSettleReview).
+  //
+  // It stays such an order while its legacy entry is open for this same
+  // event, not only while payment_state still says 'paid': the first
+  // judgement after deploy writes the new verdict, and a later tick judges it
+  // again with no pin and does not list it twice (a step-5 'paid' then pins
+  // it and clears the entry). A buyer's replacement is another event: afresh.
+  const confirmed = ctx.confirmed ?? null;
+  const entry = q.getOpenReview.get(row.order_id) as ReviewEntryRow | undefined;
+  const legacyEntryOpen = !!entry && entry.order_event_id === row.event_id && isLegacyEntry(entry);
+  const legacyPaid = !confirmed && row.settled_order_event_id !== row.event_id && (row.payment_state === 'paid' || legacyEntryOpen);
+
+  // 1. current terms
+  const prices = order.items.map((_, i) => usableListingPrice(listings[i], resolverUnit.currency, orderUnitRef));
+  order.items = order.items.map((it, i) => ({
+    ...it, listingPrice: prices[i], listingCreatedAt: prices[i] !== null ? (listings[i]?.createdAt ?? null) : null,
+  }));
+
+  // 2. kept once, for this event, when they are exactly its numbers
+  if (termsPriceOrder(order, resolverUnit, prices)) {
+    q.putTerms.run(
+      row.event_id, resolverUnit.shippingFee, resolverUnit.freeShippingFrom ?? null, resolverUnit.pickup ? 1 : 0, unitEventId(unit),
+      JSON.stringify(order.items.map((it, i) => ({ a: it.a, price: prices[i], listing_created_at: listings[i]?.createdAt ?? null }))),
+      order.total, now,
+    );
+  }
+
+  // SPEC §8 step 5a: the purchase (tx id + amount) that settled THIS 36520
+  // event (same id) keeps it paid through a later price, shipping-fee or
+  // pickup change, also when the brain re-signs that 30933; a replaced
+  // order is judged afresh. Only a pin this code wrote counts
+  // (settled_order_event_id), never paid_order_event_id of an older
+  // verdict — or the purchase Brilly confirmed for this very event.
+  const settledPurchase: SettledPurchase | null = confirmed ?? (!legacyPaid && row.payment_state === 'paid' && row.paid_tx_id && row.paid_amount
+    && row.settled_order_event_id && row.settled_order_event_id === row.event_id
+    ? { txId: String(row.paid_tx_id), amount: String(row.paid_amount) } : null);
+
+  // 3. judged by the terms now; then, if they do not reach it, by the terms
+  //    this event was once exactly right under
+  let r = resolveOrder({ order, purchases, fulfillment, unit: resolverUnit, trustedSigners: trusted, now, settledPurchase });
+  let attempt: 1 | 2 = 1;
+  if (r.paymentState === 'amount_mismatch' && !legacyPaid && !confirmed) {
+    const seen = q.getTerms.get(row.event_id) as OrderTermsSeen | undefined;
+    if (seen) {
+      const kept = termsPrices(seen.prices_json);
+      const r2 = resolveOrder({
+        order: {
+          ...order,
+          items: order.items.map(it => {
+            const k = kept.get(it.a);
+            return { ...it, listingPrice: k ? k.price : null, listingCreatedAt: k ? k.listingCreatedAt : null };
+          }),
+        },
+        purchases, fulfillment,
+        unit: { ...resolverUnit, shippingFee: seen.shipping_fee, freeShippingFrom: seen.free_from, pickup: seen.pickup === 1 },
+        trustedSigners: trusted, now, settledPurchase,
+      });
+      // price_changed (display) still says whether a listing changed since the order
+      if (r2.paymentState === 'paid') { r = { ...r2, priceChanged: r.priceChanged || r2.priceChanged }; attempt = 2; }
+    }
+  }
+
+  const paidPurchase = r.paidBy ? purchases.find(p => p.eventId === r.paidBy!.eventId) || null : null;
+  const signerOk = !!fRow && unitSigners(unit).includes(fRow.pubkey);
+  const paidNow = r.paymentState === 'paid';
+  q.update.run(
+    r.paymentState, r.expected, r.priceChanged ? 1 : 0, r.effectiveStatus, r.pending ? 1 : 0,
+    paidPurchase?.pubkey ?? null, r.paidBy?.txId ?? null, r.paidBy?.eventId ?? null, r.paidBy?.customerHex ?? null,
+    r.paidBy?.amount ?? null, r.paidBy?.lanaAmount ?? null, paidPurchase?.createdAt ?? null,
+    paidNow ? row.event_id : null, paidNow ? row.event_id : null,
+    signerOk ? fRow.status : null, signerOk ? fRow.event_id : null, signerOk ? fRow.pubkey : null,
+    signerOk ? fRow.created_at : null, signerOk ? fRow.carrier : null, signerOk ? fRow.tracking : null,
+    signerOk ? fRow.published : 1,
+    now, row.order_id,
+  );
+
+  // 4. review
+  if (legacyPaid && !paidNow) {
+    if (legacyEntryOpen) {
+      q.rejudgeLegacy.run(r.paymentState, r.expected, row.order_id, row.event_id);
+    } else {
+      q.listLegacy.run(row.order_id, row.event_id, row.paid_tx_id ?? null, row.paid_amount ?? null, r.paymentState, r.expected, now, LEGACY_REASON);
+      console.warn(`[orders] order ${String(row.order_id).slice(0, 12)}…: 'paid' under the older rules, ${r.paymentState} under SPEC v1.1.2 — not paid, listed in shop_order_settle_review`);
+    }
+  } else if (paidNow) {
+    q.clearReview.run(now, row.order_id);
+  } else if (!confirmed) {
+    const cand = r.paidBy;
+    const totalCents = toCents(order.total);
+    if (r.paymentState === 'amount_mismatch' && cand && totalCents !== null && totalCents === toCents(cand.amount)) {
+      const reason: SettleReviewReason = r.expected === '' ? 'not_computable' : 'terms_mismatch';
+      if (entry && entry.order_event_id === row.event_id && entry.old_paid_tx_id === cand.txId && entry.old_paid_amount === cand.amount) {
+        q.rejudgeGeneral.run(r.paymentState, r.expected, reason, row.order_id);
+      } else {
+        q.listGeneral.run(row.order_id, row.event_id, cand.txId, cand.amount, r.paymentState, r.expected, now, reason);
+        console.warn(`[orders] order ${String(row.order_id).slice(0, 12)}…: a verified payment of its total, ${reason} — not paid, listed in shop_order_settle_review`);
+      }
+    } else if (!cand && entry) {
+      q.clearReview.run(now, row.order_id);
+    }
+  }
+
+  // What was ordered, for the merchant's screen — from the listings already
+  // fetched (no extra REQ). Display only: after the money row is written,
+  // and a failure here never touches it.
+  try {
+    snapshotOrderItems(db, { ...row, paid_event_id: r.paidBy?.eventId ?? null }, listings, now);
+  } catch (e) {
+    console.warn(`[orders] item snapshot failed order=${String(row.order_id).slice(0, 12)}…: ${(e as Error)?.message || e}`);
+  }
+  return { result: r, attempt, legacy: legacyPaid };
+}
+
 export async function resolveOrders(db: Database.Database, opts: ResolveOptions): Promise<number> {
   const now = opts.now ?? nowUnix();
   const ids = opts.orderIds ?? activeOrderIds(db, now);
   const getOrder = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?');
-  const getPurchases = db.prepare('SELECT * FROM shop_order_payments WHERE unit_id = ? AND invoice_number = ?');
-  const getFulfillment = db.prepare('SELECT * FROM shop_order_fulfillments WHERE order_id = ?');
-  const getSeenPrice = db.prepare('SELECT price, listing_created_at FROM shop_order_listing_prices WHERE order_event_id = ? AND item_a = ?');
-  const putSeenPrice = db.prepare(`
-    INSERT INTO shop_order_listing_prices (order_event_id, item_a, price, listing_created_at, seen_at) VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(order_event_id, item_a) DO UPDATE SET
-      price = excluded.price, listing_created_at = excluded.listing_created_at, seen_at = excluded.seen_at
-    WHERE shop_order_listing_prices.price != excluded.price
-       OR shop_order_listing_prices.listing_created_at != excluded.listing_created_at
-  `);
-  const update = db.prepare(`
-    UPDATE shop_orders SET
-      payment_state = ?, expected_total = ?, price_changed = ?, effective_status = ?, pending = ?,
-      paid_signer_hex = ?, paid_tx_id = ?, paid_event_id = ?, paid_customer_hex = ?, paid_amount = ?, paid_lana_amount = ?, paid_at = ?,
-      paid_order_event_id = ?, settled_order_event_id = ?,
-      fulfillment_status = ?, fulfillment_event_id = ?, fulfillment_pubkey = ?, fulfillment_created_at = ?,
-      fulfillment_carrier = ?, fulfillment_tracking = ?, fulfillment_published = ?,
-      resolved_at = ?, updated_at = datetime('now')
-    WHERE order_id = ?
-  `);
-  const listForReview = db.prepare(`
-    INSERT INTO shop_order_settle_review (order_id, order_event_id, old_paid_tx_id, old_paid_amount, verdict, expected_total, listed_at, cleared_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-    ON CONFLICT(order_id) DO UPDATE SET
-      order_event_id = excluded.order_event_id, old_paid_tx_id = excluded.old_paid_tx_id,
-      old_paid_amount = excluded.old_paid_amount, verdict = excluded.verdict,
-      expected_total = excluded.expected_total, listed_at = excluded.listed_at, cleared_at = NULL
-  `);
-  const clearReview = db.prepare('UPDATE shop_order_settle_review SET cleared_at = ? WHERE order_id = ? AND cleared_at IS NULL');
-  // An older 'paid' that step 5 has already judged once and did not pay: its
-  // open entry, for exactly the order event that was paid.
-  const getOpenReview = db.prepare('SELECT 1 AS open FROM shop_order_settle_review WHERE order_id = ? AND order_event_id = ? AND cleared_at IS NULL');
-  // A later judgement of that entry: the verdict moves, the entry (when it was
-  // listed, what the older rules had paid) stays — so its 7 days end.
-  const rejudgeReview = db.prepare('UPDATE shop_order_settle_review SET verdict = ?, expected_total = ? WHERE order_id = ? AND order_event_id = ? AND cleared_at IS NULL');
 
   // Warm the listing cache for every distinct address up front, a few at a
   // time. The loop below awaits one fetch per order; with a dead relay set
@@ -952,7 +1407,7 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
     const k = `${unitId}:${ownerHex}`;
     if (!unitsSeen.has(k)) {
       const stored = unitRow(db, unitId);
-      const u = moneyUnit(stored, ownerHex);
+      const u = stored && unitTrustedFor(stored, ownerHex) ? stored : null;
       if (!u && stored) {
         console.warn(`[orders] unit ${String(unitId).slice(0, 12)}… is not a verified 30901 of the shop its orders name — those orders are not judged`);
       }
@@ -961,193 +1416,124 @@ export async function resolveOrders(db: Database.Database, opts: ResolveOptions)
     return unitsSeen.get(k)!;
   };
 
+  // One order's verdict, its kept terms, its review entry and its display
+  // snapshot are written together. The row is read again inside: a buyer's
+  // replacement stored while its listings were being fetched is judged on
+  // the next tick, never with the old event's listings.
+  const judgeOne = db.transaction((id: string, eventId: string, listings: Array<ListingInfo | null>, unit: UnitRow) => {
+    const fresh = getOrder.get(id) as any;
+    if (!fresh || fresh.event_id !== eventId) return null;
+    return judgeRow(db, fresh, listings, { unit, trusted: opts.trusted, now });
+  });
+
   let resolved = 0;
   for (const id of ids) {
     const row = getOrder.get(id) as any;
     if (!row) continue;
     const unit = trustedUnitFor(row.unit_id, row.unit_owner_hex);
     if (!unit) continue;
-    const order = orderFromRow(row);
-    const purchases: ResolverPurchase[] = (getPurchases.all(row.unit_id, row.order_id) as any[]).map(p => ({
-      pubkey: p.pubkey, eventId: p.event_id, createdAt: p.created_at, txId: p.tx_id, unitId: p.unit_id,
-      invoiceNumber: p.invoice_number, receiptDescription: p.receipt_description || '', amount: p.amount || '',
-      currency: p.currency || '', lanaAmount: p.lana_amount || '', paymentType: p.payment_type || '',
-      status: p.status || '', customerHex: p.customer_hex || '',
-    }));
-    const fRow = getFulfillment.get(row.order_id) as any;
-    const fulfillment: ResolverFulfillment | null = fRow ? {
-      pubkey: fRow.pubkey, createdAt: fRow.created_at, status: fRow.status,
-      paymentRef: fRow.payment_ref || undefined, carrier: fRow.carrier || undefined, tracking: fRow.tracking || undefined,
-    } : null;
-
-    // EVERY item is priced by its own current listing (SPEC v1.1.0): the
-    // first item's price applied to all would judge a correctly paid cart
-    // amount_mismatch. A listing prices an item only when it is usable for
-    // THIS order (SPEC v1.1.2 step 2: on sale, a positive price in the shop's
-    // currency, its `a` naming the order's shop). Otherwise the last usable
-    // price seen for it while judging this very 36520 event counts (an
-    // honest order whose listing was deleted or went off sale, or whose
-    // listing REQ failed);
-    // else null — the order is then not paid until it is (SPEC v1.1.1): the
-    // buyer's own unit_price is never money.
-    const resolverUnit = unitToResolver(unit);
-    const orderUnitRef = `30901:${row.unit_owner_hex}:${row.unit_id}`;
-    const listings = await listingsOf(order.items, opts.fetchListing);
-    // A 'paid' the OLDER rules stored (no v1.1.2 pin for this event — see
-    // schema.ts) is judged again by step 5 alone, with no pin — priced like
-    // every other order. Not by the order-time listing snapshot
-    // (shop_order_item_snapshots, display only): it records a price but not
-    // the listing's sale status, so it cannot tell an honest order from a
-    // buyer's replacement the older rules paid with an off-sale listing at
-    // its old price (round 3, x3/m1). An honest order step 5 cannot pay now
-    // (repriced, off sale, deleted, other shipping or pickup terms) is listed
-    // in shop_order_settle_review, as the portal lists it, and Brilly
-    // confirms it (confirmSettleReview).
-    //
-    // It stays such an order while its entry in shop_order_settle_review is
-    // open for this same event, not only while payment_state still says
-    // 'paid': the first judgement after deploy writes the new verdict, and a
-    // later tick judges it again with no pin and does not list it twice (a
-    // step-5 'paid' then pins it and clears the entry). A buyer's
-    // replacement is another event: afresh.
-    const confirmed = opts.confirmed && opts.confirmed.orderId === row.order_id && opts.confirmed.eventId === row.event_id
-      ? opts.confirmed.purchase : null;
-    const reviewOpen = !!getOpenReview.get(row.order_id, row.event_id);
-    const legacyPaid = !confirmed && row.settled_order_event_id !== row.event_id && (row.payment_state === 'paid' || reviewOpen);
-    order.items = order.items.map((it, i) => {
-      const l = listings[i];
-      const usable = usableListingPrice(l, resolverUnit.currency, orderUnitRef);
-      if (usable !== null && l) {
-        putSeenPrice.run(row.event_id, it.a, usable, l.createdAt, now);
-        return { ...it, listingPrice: usable, listingCreatedAt: l.createdAt };
-      }
-      const seen = getSeenPrice.get(row.event_id, it.a) as { price: string; listing_created_at: number } | undefined;
-      return { ...it, listingPrice: seen ? seen.price : null, listingCreatedAt: seen ? seen.listing_created_at : null };
-    });
-
-    // SPEC §8 step 5a: the purchase (tx id + amount) that settled THIS 36520
-    // event (same id) keeps it paid through a later price, shipping-fee or
-    // pickup change, also when the brain re-signs that 30933; a replaced
-    // order is judged afresh. Only a pin this code wrote counts
-    // (settled_order_event_id), never paid_order_event_id of an older
-    // verdict — or the purchase Brilly confirmed for this very event.
-    const settledPurchase: SettledPurchase | null = confirmed ?? (!legacyPaid && row.payment_state === 'paid' && row.paid_tx_id && row.paid_amount
-      && row.settled_order_event_id && row.settled_order_event_id === row.event_id
-      ? { txId: String(row.paid_tx_id), amount: String(row.paid_amount) } : null);
-
-    const r = resolveOrder({
-      order, purchases, fulfillment, unit: resolverUnit,
-      trustedSigners: opts.trusted, now,
-      settledPurchase,
-    });
-
-    const paidPurchase = r.paidBy ? purchases.find(p => p.eventId === r.paidBy!.eventId) || null : null;
-    const signerOk = !!fRow && unitSigners(unit).includes(fRow.pubkey);
-    const paidNow = r.paymentState === 'paid';
-    update.run(
-      r.paymentState, r.expected, r.priceChanged ? 1 : 0, r.effectiveStatus, r.pending ? 1 : 0,
-      paidPurchase?.pubkey ?? null, r.paidBy?.txId ?? null, r.paidBy?.eventId ?? null, r.paidBy?.customerHex ?? null,
-      r.paidBy?.amount ?? null, r.paidBy?.lanaAmount ?? null, paidPurchase?.createdAt ?? null,
-      paidNow ? row.event_id : null, paidNow ? row.event_id : null,
-      signerOk ? fRow.status : null, signerOk ? fRow.event_id : null, signerOk ? fRow.pubkey : null,
-      signerOk ? fRow.created_at : null, signerOk ? fRow.carrier : null, signerOk ? fRow.tracking : null,
-      signerOk ? fRow.published : 1,
-      now, row.order_id,
-    );
-    resolved++;
-    // An older 'paid' that step 5 does not pay is listed for Brilly, not
-    // paid; a later paid verdict clears the entry.
-    if (legacyPaid && !paidNow) {
-      if (reviewOpen) {
-        rejudgeReview.run(r.paymentState, r.expected, row.order_id, row.event_id);
-      } else {
-        listForReview.run(row.order_id, row.event_id, row.paid_tx_id ?? null, row.paid_amount ?? null, r.paymentState, r.expected, now);
-        console.warn(`[orders] order ${String(row.order_id).slice(0, 12)}…: 'paid' under the older rules, ${r.paymentState} under SPEC v1.1.2 — not paid, listed in shop_order_settle_review`);
-      }
-    } else if (paidNow) {
-      clearReview.run(now, row.order_id);
-    }
-
-    // What was ordered, for the merchant's screen — from the listing already
-    // fetched above (no extra REQ). Display only: after the money row is
-    // written, and a failure here never touches it.
-    try {
-      snapshotOrderItems(db, { ...row, paid_event_id: r.paidBy?.eventId ?? null }, listings, now);
-    } catch (e) {
-      console.warn(`[orders] item snapshot failed order=${String(row.order_id).slice(0, 12)}…: ${(e as Error)?.message || e}`);
-    }
+    const listings = await listingsOf(orderFromRow(row).items, opts.fetchListing);
+    if (judgeOne(id, row.event_id, listings, unit)) resolved++;
   }
   return resolved;
 }
 
-// ─── Brilly's word on an older 'paid' that step 5 does not pay ──────────
+// ─── Brilly's word on a paid order step 5 does not pay ──────────────────
 
 export interface SettleReviewEntry {
   order_id: string; order_event_id: string | null; old_paid_tx_id: string | null; old_paid_amount: string | null;
   verdict: string; expected_total: string | null; listed_at: number; cleared_at: number | null; confirmed_at: number | null;
+  /** why it is listed (SettleReviewReason); null = an older 'paid' listed before the column existed */
+  reason: string | null;
   /** the order as stored now */
-  current_event_id: string | null; payment_state: string | null; unit_id: string | null; items_json: string | null;
+  current_event_id: string | null; payment_state: string | null; unit_id: string | null; items_json: string | null; total: string | null;
 }
 
-/** Open entries of shop_order_settle_review with the order as stored now, oldest first. */
-export function listSettleReview(db: Database.Database): SettleReviewEntry[] {
+/**
+ * Open entries of shop_order_settle_review with the order as stored now,
+ * oldest first. `minAgeSeconds` hides entries listed less than that long ago
+ * (one tick's failed listing REQ lists an order the next tick may pay).
+ */
+export function listSettleReview(db: Database.Database, opts: { minAgeSeconds?: number; now?: number } = {}): SettleReviewEntry[] {
+  const now = opts.now ?? nowUnix();
+  const maxListedAt = opts.minAgeSeconds && opts.minAgeSeconds > 0 ? now - opts.minAgeSeconds : Number.MAX_SAFE_INTEGER;
   return db.prepare(`
     SELECT r.order_id, r.order_event_id, r.old_paid_tx_id, r.old_paid_amount, r.verdict, r.expected_total,
-           r.listed_at, r.cleared_at, r.confirmed_at,
-           o.event_id AS current_event_id, o.payment_state, o.unit_id, o.items_json
+           r.listed_at, r.cleared_at, r.confirmed_at, r.reason,
+           o.event_id AS current_event_id, o.payment_state, o.unit_id, o.items_json, o.total
       FROM shop_order_settle_review r LEFT JOIN shop_orders o ON o.order_id = r.order_id
-     WHERE r.cleared_at IS NULL
+     WHERE r.cleared_at IS NULL AND r.listed_at <= ?
      ORDER BY r.listed_at, r.order_id
-  `).all() as SettleReviewEntry[];
+  `).all(maxListedAt) as SettleReviewEntry[];
 }
 
 export type ConfirmSettleReviewResult =
   | { ok: true; paymentState: 'paid'; expected: string }
-  | { ok: false; reason: 'no_open_entry' | 'order_replaced' | 'event_mismatch' | 'no_old_payment' | 'unit_unknown' | 'not_paid'; paymentState?: string };
+  | {
+    ok: false;
+    reason: 'no_open_entry' | 'order_replaced' | 'event_mismatch' | 'not_taken' | 'no_old_payment' | 'total_mismatch' | 'unit_unknown' | 'not_paid';
+    paymentState?: string;
+  };
+
+class ConfirmNotPaid extends Error {
+  constructor(readonly paymentState: string) { super('not_paid'); }
+}
 
 /**
  * Brilly confirms ONE open entry of shop_order_settle_review as honest
- * (round 3, 2 Oct 2026): after checking the order against what the broker
- * took and checked at order time, he names its order id and the 36520 event
- * id he checked. The purchase the older rules had paid it with
- * (old_paid_tx_id, old_paid_amount) becomes the step-5a pin of exactly that
- * event, and the order is judged by the resolver at once — so it is paid
- * only while the NEWEST version of that 30933 still pays that amount for
- * this order (a cancellation un-pays it, as for every pin).
+ * (round 3, 2 Oct 2026; round 5): after reading, with the broker's own tool
+ * (lana-pays-shop server/scripts/order-as-taken.ts), which 36520 event the
+ * broker took and validated for this order id, and at what total, he names
+ * the order id, the event id he checked and the broker's taken event id. The
+ * purchase pinned on the entry (old_paid_tx_id, old_paid_amount) becomes the
+ * step-5a pin of exactly that event, and the order is judged at once — so it
+ * is paid only while the NEWEST version of that 30933 still pays that amount
+ * for this order (a cancellation un-pays it, as for every pin).
  *
  * Refused — nothing written — when no entry is open for the order, the
  * stored 36520 is no longer the event that was listed (the buyer replaced
  * it since: that is another order), the event id given is not the stored
- * one, the entry holds no old payment, or the shop is unknown. Never called
- * by the app itself.
+ * one, it is not the event the broker took, the entry holds no payment, the
+ * order's total is not the pinned amount, or the shop is unknown. Everything
+ * runs in one IMMEDIATE transaction (the heartbeat writes the same file),
+ * and a judgement that does not end 'paid' is rolled back: the order and the
+ * entry stay byte for byte as they were. Never called by the app itself.
  */
-export async function confirmSettleReview(
+export function confirmSettleReview(
   db: Database.Database,
   orderId: string,
-  expectEventId: string,
-  opts: { trusted: Set<string>; fetchListing?: ListingFetcher; now?: number },
-): Promise<ConfirmSettleReviewResult> {
+  eventId: string,
+  takenEventId: string,
+  opts: { trusted: Set<string>; now?: number },
+): ConfirmSettleReviewResult {
   const now = opts.now ?? nowUnix();
-  const entry = db.prepare('SELECT * FROM shop_order_settle_review WHERE order_id = ? AND cleared_at IS NULL').get(orderId) as any;
-  if (!entry) return { ok: false, reason: 'no_open_entry' };
-  const row = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(orderId) as any;
-  if (!row || !entry.order_event_id || entry.order_event_id !== row.event_id) return { ok: false, reason: 'order_replaced' };
-  if (expectEventId !== row.event_id) return { ok: false, reason: 'event_mismatch' };
-  const cents = toCents(entry.old_paid_amount);
-  if (!entry.old_paid_tx_id || cents === null || cents <= 0) return { ok: false, reason: 'no_old_payment' };
-  if (!moneyUnit(unitRow(db, row.unit_id), row.unit_owner_hex)) return { ok: false, reason: 'unit_unknown' };
-  await resolveOrders(db, {
-    orderIds: [orderId], trusted: opts.trusted, now,
+  const run = db.transaction((): ConfirmSettleReviewResult => {
+    const entry = db.prepare('SELECT * FROM shop_order_settle_review WHERE order_id = ? AND cleared_at IS NULL').get(orderId) as any;
+    if (!entry) return { ok: false, reason: 'no_open_entry' };
+    const row = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(orderId) as any;
+    if (!row || !entry.order_event_id || entry.order_event_id !== row.event_id) return { ok: false, reason: 'order_replaced' };
+    if (eventId !== row.event_id) return { ok: false, reason: 'event_mismatch' };
+    if (typeof takenEventId !== 'string' || takenEventId !== eventId) return { ok: false, reason: 'not_taken' };
+    const cents = toCents(entry.old_paid_amount);
+    if (!entry.old_paid_tx_id || cents === null || cents <= 0) return { ok: false, reason: 'no_old_payment' };
+    if (toCents(row.total) !== cents) return { ok: false, reason: 'total_mismatch' };
+    const unit = moneyUnit(unitRow(db, row.unit_id), row.unit_owner_hex);
+    if (!unit) return { ok: false, reason: 'unit_unknown' };
     // the pin needs no listing; nothing is fetched for a confirmation
-    fetchListing: opts.fetchListing ?? (async () => null),
-    confirmed: { orderId, eventId: row.event_id, purchase: { txId: String(entry.old_paid_tx_id), amount: String(entry.old_paid_amount) } },
+    const out = judgeRow(db, row, orderFromRow(row).items.map(() => null), {
+      unit, trusted: opts.trusted, now,
+      confirmed: { txId: String(entry.old_paid_tx_id), amount: String(entry.old_paid_amount) },
+    });
+    if (!out || out.result.paymentState !== 'paid') throw new ConfirmNotPaid(out?.result.paymentState ?? 'not_judged');
+    db.prepare('UPDATE shop_order_settle_review SET confirmed_at = ? WHERE order_id = ? AND order_event_id = ?').run(now, orderId, row.event_id);
+    return { ok: true, paymentState: 'paid', expected: out.result.expected };
   });
-  const after = db.prepare('SELECT payment_state, expected_total, settled_order_event_id, event_id FROM shop_orders WHERE order_id = ?').get(orderId) as any;
-  if (after?.payment_state !== 'paid' || after.settled_order_event_id !== row.event_id) {
-    return { ok: false, reason: 'not_paid', paymentState: after?.payment_state };
+  try {
+    return run.immediate();
+  } catch (e) {
+    if (e instanceof ConfirmNotPaid) return { ok: false, reason: 'not_paid', paymentState: e.paymentState };
+    throw e;
   }
-  db.prepare('UPDATE shop_order_settle_review SET confirmed_at = ? WHERE order_id = ? AND order_event_id = ?').run(now, orderId, row.event_id);
-  return { ok: true, paymentState: 'paid', expected: String(after.expected_total ?? '') };
 }
 
 // ─── Republish our own fulfillments no relay has accepted yet ───────────
@@ -1176,6 +1562,7 @@ const CURSOR_OVERLAP = 6 * 3600;     // tolerate late-published events + relay c
 const PAGE_HINT = 300;               // a relay that returns this many probably capped the REQ
 const TX_IDS_PER_REQ = 100;          // #d values per 30933 REQ (each has ≤ 1 version per signer on a relay)
 const TERMINAL_RECHECK_EVERY = 5;    // ticks between re-reads of rejected/shipped/delivered orders' 30933
+const LISTING_VERSIONS_EVERY = 5;    // ticks between proactive reads of our online shops' listing versions (M-3)
 const TERMINAL_RECHECK_DAYS = 60;    // …paid (brain-signed paid_at) at most this long ago
 const TERMINAL_RECHECK_LIMIT = 2000; // …newest first, at most this many tx ids per tick
 const BY_TX_PARALLEL = 4;            // 30933 by-tx REQ chunks in flight at once (a dead relay costs ≤ ⌈chunks/4⌉ timeouts)
@@ -1287,6 +1674,7 @@ export async function syncShopOrders(db: Database.Database, relaysFromHeartbeat?
   writeState(db, 'tick', String(tick));
   const safetyNet = tick % SAFETY_NET_EVERY === 1;
   const terminalTick = tick % TERMINAL_RECHECK_EVERY === 1;
+  const versionsTick = tick % LISTING_VERSIONS_EVERY === 1;
 
   const sinceFor = (kind: number): number => {
     const cursor = parseInt(readState(db, `since_${kind}`) || '', 10);
@@ -1364,9 +1752,18 @@ export async function syncShopOrders(db: Database.Database, relaysFromHeartbeat?
     console.warn('[orders] no trusted signers in KIND 38888 — purchases are NOT synced (fail-closed)');
   }
 
+  // 2c) Every 5th tick: the listing versions of our online shops (M-3) —
+  //     only remembered (shop_listing_versions), never a price, so an older
+  //     version of a listing no order has named yet is refused when one does.
+  if (versionsTick) {
+    try { fetched['listing_versions'] = await readListingVersions(db, relays, 10000); } catch (e) {
+      console.warn(`[orders] listing version read failed: ${(e as Error)?.message || e}`);
+    }
+  }
+
   // 3) Resolve everything that moved or can still move.
   const ids = new Set<string>([...touched, ...activeOrderIds(db, now)]);
-  const fetchListing = makeListingFetcher(relays);
+  const fetchListing = makeListingFetcher(db, relays);
   const resolved = await resolveOrders(db, { orderIds: [...ids], trusted, fetchListing, now });
 
   // 3b) Item names for orders the resolver no longer visits (display only).
@@ -1379,6 +1776,6 @@ export async function syncShopOrders(db: Database.Database, relaysFromHeartbeat?
   const republished = await republishUnpublished(db, relays);
 
   const stats: SyncStats = { relays: relays.length, trusted: trusted.size, fetched, touched: touched.size, resolved, backfilled, republished, safetyNet };
-  console.log(`[orders] sync: 36520=${fetched['36520']} 36521=${fetched['36521']} 36522=${fetched['36522']} 30933=${fetched['30933']} 30933_by_tx=${fetched['30933_by_tx'] ?? 0} touched=${touched.size} resolved=${resolved} items_backfilled=${backfilled} republished=${republished}${safetyNet ? ' (safety net)' : ''}`);
+  console.log(`[orders] sync: 36520=${fetched['36520']} 36521=${fetched['36521']} 36522=${fetched['36522']} 30933=${fetched['30933']} 30933_by_tx=${fetched['30933_by_tx'] ?? 0} touched=${touched.size} resolved=${resolved} items_backfilled=${backfilled} republished=${republished}${fetched['listing_versions'] !== undefined ? ` listing_versions=${fetched['listing_versions']}` : ''}${safetyNet ? ' (safety net)' : ''}`);
   return stats;
 }

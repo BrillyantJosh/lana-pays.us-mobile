@@ -213,7 +213,7 @@ describe('order items carry the listing the buyer saw', () => {
     const listingD = hex32();
     const lst = listingEvent(owner, listingD, now() - 86_400);
     relayEvents = [lst];
-    const o = await placeAndPay(mk(), listingD, makeListingFetcher([relayUrl], 3000), 2);
+    const o = await placeAndPay(mk(), listingD, makeListingFetcher(db, [relayUrl], 3000), 2);
     expect(o.payment_state).toBe('paid');
 
     const r = await get(`/api/orders/${o.order_id}?hex=${owner.pk}`);
@@ -237,7 +237,7 @@ describe('order items carry the listing the buyer saw', () => {
     const listingD = hex32();
     const before = listingEvent(owner, listingD, now() - 86_400, { title: 'TARTEN S PETERŠILJEM BIO 200g', sku: '321' });
     relayEvents = [before];
-    const o = await placeAndPay(mk(), listingD, makeListingFetcher([relayUrl], 3000));
+    const o = await placeAndPay(mk(), listingD, makeListingFetcher(db, [relayUrl], 3000));
     expect(snapRow(o.order_id).listing_event_id).toBe(before.id);
 
     // The merchant renames the product and changes the code a minute later.
@@ -245,7 +245,7 @@ describe('order items carry the listing the buyer saw', () => {
     const after = listingEvent(owner, listingD, now() + 60, { title: 'TARTEN S PETERŠILJEM 250g', sku: '999' });
     relayEvents = [after];
     expect(activeOrderIds(db)).toContain(o.order_id); // paid + pending → re-resolved every tick
-    await resolveOrders(db, { orderIds: [o.order_id], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    await resolveOrders(db, { orderIds: [o.order_id], trusted, fetchListing: makeListingFetcher(db, [relayUrl], 3000), now: now() });
 
     expect(snapRow(o.order_id)).toMatchObject({ listing_event_id: before.id, title: 'TARTEN S PETERŠILJEM BIO 200g', sku: '321' });
     const r = await get(`/api/orders/${o.order_id}?hex=${owner.pk}`);
@@ -257,7 +257,7 @@ describe('order items carry the listing the buyer saw', () => {
     // edited: 4.08 kos — the relays only ever had the version published after the order
     const sameD = hex32();
     relayEvents = [listingEvent(owner, sameD, t0 + 30, { unit: 'kos' })];
-    const o1 = await placeAndPay(mk(), sameD, makeListingFetcher([relayUrl], 3000), 1, t0);
+    const o1 = await placeAndPay(mk(), sameD, makeListingFetcher(db, [relayUrl], 3000), 1, t0);
     expect(o1.payment_state).toBe('paid');
     expect(snapRow(o1.order_id)).toMatchObject({ sale_unit: 'kos', listing_created_at: t0 + 30 });
     const v1 = await get(`/api/orders/${o1.order_id}?hex=${owner.pk}`);
@@ -270,7 +270,7 @@ describe('order items carry the listing the buyer saw', () => {
     const o2 = await placeAndPay(mk(), editD, priceOnly, 1, t0);
     expect(o2.payment_state).toBe('paid');
     relayEvents = [listingEvent(owner, editD, t0 + 30, { unit: 'kos', price: '5.00' })];
-    await resolveOrders(db, { orderIds: [o2.order_id], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    await resolveOrders(db, { orderIds: [o2.order_id], trusted, fetchListing: makeListingFetcher(db, [relayUrl], 3000), now: now() });
     expect(snapRow(o2.order_id)).toMatchObject({ sale_unit: 'kos', price: '5.00' });
     const v2 = await get(`/api/orders/${o2.order_id}?hex=${owner.pk}`);
     expect(v2.json).toMatchObject({ paymentState: 'paid', total: '4.08', shipping: '0.00' });
@@ -279,7 +279,7 @@ describe('order items carry the listing the buyer saw', () => {
     // a snapshot live at order time is the merchant's line, as before
     const liveD = hex32();
     relayEvents = [listingEvent(owner, liveD, t0 - 86_400, { unit: 'g' })];
-    const o3 = await placeAndPay(mk(), liveD, makeListingFetcher([relayUrl], 3000), 1, t0);
+    const o3 = await placeAndPay(mk(), liveD, makeListingFetcher(db, [relayUrl], 3000), 1, t0);
     const v3 = await get(`/api/orders/${o3.order_id}?hex=${owner.pk}`);
     expect(v3.json.items.map((i: any) => [i.saleUnit, i.unitPrice, i.saleUnitChanged, i.listingSaleUnit])).toEqual([['g', '4.08', false, null]]);
   });
@@ -305,7 +305,7 @@ describe('order items carry the listing the buyer saw', () => {
     const forged = { ...listingEvent(owner, listingD, now() - 1_800, { title: 'Ponarejen podpis' }), tags: [...real.tags.filter((t: string[]) => t[0] !== 'title'), ['title', 'Ponarejen podpis']] };
     relayEvents = [real, foreign, forged];
 
-    const o = await placeAndPay(mk(), listingD, makeListingFetcher([relayUrl], 3000));
+    const o = await placeAndPay(mk(), listingD, makeListingFetcher(db, [relayUrl], 3000));
     const r = await get(`/api/orders/${o.order_id}?hex=${owner.pk}`);
     expect(r.json.items[0]).toMatchObject({ title: 'Pravi izdelek', sku: '321' });
     expect(JSON.stringify(r.json)).not.toContain('Ponaredek');
@@ -337,14 +337,14 @@ describe('order items carry the listing the buyer saw', () => {
     expect(after).toEqual({ effective_status: 'rejected', pending: 0, payment_state: 'paid' });
 
     // A second pass finds nothing left to do for it.
-    const again = await backfillItemSnapshots(db, makeListingFetcher([relayUrl], 3000));
+    const again = await backfillItemSnapshots(db, makeListingFetcher(db, [relayUrl], 3000));
     expect(again).toBe(0);
   });
 
   it('(e) no listing on any relay → title from the 30933 receipt, binding suffix stripped; upgraded once the listing appears', async () => {
     const listingD = hex32();
     relayEvents = []; // listing deleted / relays silent
-    const o = await placeAndPay(mk(), listingD, makeListingFetcher([relayUrl], 3000), 1);
+    const o = await placeAndPay(mk(), listingD, makeListingFetcher(db, [relayUrl], 3000), 1);
     // SPEC v1.1.1: with no merchant-signed price the amount is not computable,
     // so the order is not paid yet (never priced at the buyer's unit_price).
     expect(o).toMatchObject({ payment_state: 'amount_mismatch', pending: 0 });
@@ -357,7 +357,7 @@ describe('order items carry the listing the buyer saw', () => {
     // The listing shows up again: the next resolve pays the order and upgrades the receipt title.
     relayEvents = [listingEvent(owner, listingD, now() - 86_400)];
     expect(activeOrderIds(db, now())).toContain(o.order_id);
-    await resolveOrders(db, { orderIds: [o.order_id], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    await resolveOrders(db, { orderIds: [o.order_id], trusted, fetchListing: makeListingFetcher(db, [relayUrl], 3000), now: now() });
     expect(snapRow(o.order_id)).toMatchObject({ source: 'listing', sku: '321' });
     expect(db.prepare('SELECT payment_state, pending FROM shop_orders WHERE order_id = ?').get(o.order_id)).toEqual({ payment_state: 'paid', pending: 1 });
   });
@@ -375,7 +375,7 @@ describe('order items carry the listing the buyer saw', () => {
     ]);
     expect(ingestEvent(db, ev, trusted)).toBe(d);
     relayEvents = [];
-    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher(db, [relayUrl], 3000), now: now() });
     const r = await get(`/api/orders/${d}?hex=${owner.pk}`);
     expect(r.json.items[0].title).toBeNull();
     expect(JSON.stringify(r.json)).not.toContain('Napačen naslov');
@@ -387,7 +387,7 @@ describe('order items carry the listing the buyer saw', () => {
     relayEvents = [listingEvent(owner, listingD, createdAt)];
     const sameAsListing: ListingFetcher = async () => ({ price: '4.08', currency: 'EUR', status: 'active', createdAt, unitRef: `30901:${owner.pk}:${UNIT}` });
 
-    const withDisplay = await placeAndPay(mk(), listingD, makeListingFetcher([relayUrl], 3000));
+    const withDisplay = await placeAndPay(mk(), listingD, makeListingFetcher(db, [relayUrl], 3000));
     const calls = vi.mocked(resolveOrder).mock.calls;
     expect(calls.length).toBe(1);
     const input = calls[0][0];
@@ -409,14 +409,14 @@ describe('order items carry the listing the buyer saw', () => {
     // A changed price is still flagged exactly as before (price_changed from created_at only).
     const listingD2 = hex32();
     relayEvents = [listingEvent(owner, listingD2, now() + 30, { price: '5.00' })];
-    const drift = await placeAndPay(mk(), listingD2, makeListingFetcher([relayUrl], 3000));
+    const drift = await placeAndPay(mk(), listingD2, makeListingFetcher(db, [relayUrl], 3000));
     expect(drift).toMatchObject({ payment_state: 'amount_mismatch', expected_total: '5.00', price_changed: 1, pending: 0 });
   });
 
   it('the listing fetch is shared with the resolver — no extra REQ per order', async () => {
     const listingD = hex32();
     relayEvents = [listingEvent(owner, listingD, now() - 86_400)];
-    const fetchListing = makeListingFetcher([relayUrl], 3000);
+    const fetchListing = makeListingFetcher(db, [relayUrl], 3000);
     reqCount = 0;
     await placeAndPay(mk(), listingD, fetchListing);
     // prefetch: the listing REQ + the REQ for the KIND 5s naming it (round 3,
@@ -454,7 +454,7 @@ describe('cart orders: several products of one shop in ONE order (SPEC v1.1.0)',
     const d = orderIdFor(buyer.pk);
     expect(ingestEvent(db, cartOrderEvent(buyer, d, items(), '20.10'), trusted)).toBe(d);
     expect(ingestEvent(db, purchaseEvent(d, buyer.pk, '20.10', 'TARTEN S PETERŠILJEM BIO 200g ×2 (+1)', 2), trusted)).toBe(d);
-    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher(db, [relayUrl], 3000), now: now() });
     const row = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(d) as any;
     expect(row).toMatchObject({ payment_state: 'paid', expected_total: '20.10', pending: 1 });
 
@@ -475,7 +475,7 @@ describe('cart orders: several products of one shop in ONE order (SPEC v1.1.0)',
     const d = orderIdFor(buyer.pk);
     expect(ingestEvent(db, cartOrderEvent(buyer, d, items(), '20.10'), trusted)).toBe(d);
     expect(ingestEvent(db, purchaseEvent(d, buyer.pk, '20.40', 'x', 2), trusted)).toBe(d); // 4.08 × 5
-    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher(db, [relayUrl], 3000), now: now() });
     expect(db.prepare('SELECT payment_state, pending FROM shop_orders WHERE order_id = ?').get(d)).toEqual({ payment_state: 'amount_mismatch', pending: 0 });
   });
 
@@ -485,7 +485,7 @@ describe('cart orders: several products of one shop in ONE order (SPEC v1.1.0)',
     const d = orderIdFor(buyer.pk);
     expect(ingestEvent(db, cartOrderEvent(buyer, d, items(), '20.10'), trusted)).toBe(d);
     expect(ingestEvent(db, purchaseEvent(d, buyer.pk, '20.10', 'x', 2), trusted)).toBe(d);
-    const fetchListing = makeListingFetcher([relayUrl], 3000);
+    const fetchListing = makeListingFetcher(db, [relayUrl], 3000);
     await resolveOrders(db, { orderIds: [d], trusted, fetchListing, now: now() });
     const paid = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(d) as any;
     expect(paid).toMatchObject({ payment_state: 'paid', pending: 1 });
@@ -494,14 +494,14 @@ describe('cart orders: several products of one shop in ONE order (SPEC v1.1.0)',
     // Next day the merchant republishes the second product at 4.20.
     relayEvents = [listings()[0], listingEvent(owner, L2, now() - 10, { title: 'HUMUS KLASIČNI BIO 180g', sku: '777', weight: '180 g', price: '4.20' })];
     expect(activeOrderIds(db, now())).toContain(d);
-    await resolveOrders(db, { trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    await resolveOrders(db, { trusted, fetchListing: makeListingFetcher(db, [relayUrl], 3000), now: now() });
     const after = db.prepare('SELECT payment_state, pending, expected_total, price_changed FROM shop_orders WHERE order_id = ?').get(d);
     expect(after).toEqual({ payment_state: 'paid', pending: 1, expected_total: '20.10', price_changed: 1 });
     expect(activeOrderIds(db, now())).toContain(d);
 
     // The buyer replaces the 36520 afterwards: that new event is judged afresh at today's prices.
     expect(ingestEvent(db, cartOrderEvent(buyer, d, items(), '20.10', now() - 5), trusted)).toBe(d);
-    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher([relayUrl], 3000), now: now() });
+    await resolveOrders(db, { orderIds: [d], trusted, fetchListing: makeListingFetcher(db, [relayUrl], 3000), now: now() });
     expect(db.prepare('SELECT payment_state, pending, paid_order_event_id FROM shop_orders WHERE order_id = ?').get(d))
       .toEqual({ payment_state: 'amount_mismatch', pending: 0, paid_order_event_id: null });
   });

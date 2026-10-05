@@ -193,7 +193,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   // Every test starts with no order at all — "no order is open" must really be true.
-  for (const t of ['shop_orders', 'shop_order_payments', 'shop_order_fulfillments', 'shop_order_delivery', 'shop_order_item_snapshots', 'shop_order_listing_prices', 'shop_order_sync_state', 'shop_order_settle_review']) {
+  for (const t of ['shop_orders', 'shop_order_payments', 'shop_order_fulfillments', 'shop_order_delivery', 'shop_order_item_snapshots', 'shop_order_listing_prices', 'shop_order_sync_state', 'shop_order_settle_review', 'shop_order_terms_seen', 'shop_listing_versions']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
   relayEvents = [];
@@ -467,14 +467,14 @@ describe('SPEC v1.1.2 — the merchant app pays and shows only the merchant\'s n
   it('the listing fetcher never returns a deleted listing\'s old price (probe-stale)', async () => {
     const lst = sign(owner.sk, 36502, [['d', 'stale'], ['a', REF()], ['title', 'Hruske'], ['price', '1.00', 'EUR'], ['unit', 'kg'], ['status', 'active']], '', now() - 3600);
     relayEvents = [lst];
-    const f = makeListingFetcher([relayUrl], 2000);
+    const f = makeListingFetcher(db, [relayUrl], 2000);
     const a = `36502:${owner.pk}:stale`;
     expect((await f(a))?.price).toBe('1.00');
     expect((await f(a))?.unitRef).toBe(REF());
     relayEvents = []; // the merchant deleted it: the relay answers EOSE with no event
     // The next tick makes a new fetcher (round 5, F2: a fetcher's cache lives
     // one tick): nothing the last tick read carries over.
-    expect(await makeListingFetcher([relayUrl], 2000)(a)).toBeNull();
+    expect(await makeListingFetcher(db, [relayUrl], 2000)(a)).toBeNull();
   });
 });
 
@@ -508,6 +508,7 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
   function fromBeforeThisCode(d: string) {
     db.prepare('UPDATE shop_orders SET settled_order_event_id = NULL WHERE order_id = ?').run(d);
     db.prepare('DELETE FROM shop_order_listing_prices').run();
+    db.prepare('DELETE FROM shop_order_terms_seen').run();
   }
   const review = (d: string) => db.prepare('SELECT verdict, expected_total, old_paid_amount, cleared_at FROM shop_order_settle_review WHERE order_id = ?').get(d) as any;
 
@@ -568,7 +569,7 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     expect(listSettleReview(db).map(e => ({ id: e.order_id, ev: e.order_event_id, now: e.current_event_id, tx: e.old_paid_tx_id })))
       .toEqual([{ id: p.d, ev: row(p.d).event_id, now: row(p.d).event_id, tx: p.txId }]);
     // Brilly checked it against what the broker took at order time and confirms THIS event
-    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() })).toEqual({ ok: true, paymentState: 'paid', expected: '12.50' });
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, row(p.d).event_id, { trusted, now: now() })).toEqual({ ok: true, paymentState: 'paid', expected: '12.50' });
     expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 1, expected_total: '12.50', paid_tx_id: p.txId });
     expect(row(p.d).settled_order_event_id).toBe(row(p.d).event_id);
     expect(review(p.d).cleared_at).toBeGreaterThan(0);
@@ -594,7 +595,7 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     await resolveOrders(db, { trusted, fetchListing: now6, now: now() });
     expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, effective_status: 'shipped', settled_order_event_id: null });
     expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '12.50', cleared_at: null });
-    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() })).toMatchObject({ ok: true, expected: '12.50' });
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, row(p.d).event_id, { trusted, now: now() })).toMatchObject({ ok: true, expected: '12.50' });
     expect(row(p.d)).toMatchObject({ payment_state: 'paid', pending: 0, effective_status: 'shipped' });
     expect(row(p.d).settled_order_event_id).toBe(row(p.d).event_id);
     expect(activeOrderIds(db)).not.toContain(p.d);
@@ -609,18 +610,21 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     asOlderRulesLeftIt(p.d, { oldPin: false });
     fromBeforeThisCode(p.d);
     // nothing listed yet: nothing to confirm, nothing written
-    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() })).toEqual({ ok: false, reason: 'no_open_entry' });
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, row(p.d).event_id, { trusted, now: now() })).toEqual({ ok: false, reason: 'no_open_entry' });
     expect(row(p.d)).toMatchObject({ payment_state: 'paid', settled_order_event_id: null });
     const now6 = listed({ [APPLES]: '6.00' }, now() - 60);
     await resolveOrders(db, { trusted, fetchListing: now6, now: now() });
     expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', cleared_at: null });
     // another event id than the one stored (and checked): refused, nothing written
-    expect(await confirmSettleReview(db, p.d, 'a'.repeat(64), { trusted, now: now() })).toEqual({ ok: false, reason: 'event_mismatch' });
+    expect(await confirmSettleReview(db, p.d, 'a'.repeat(64), 'a'.repeat(64), { trusted, now: now() })).toEqual({ ok: false, reason: 'event_mismatch' });
     expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', settled_order_event_id: null });
     // the brain has cancelled that purchase since: a confirmation does not pay it
     expect(ingestEvent(db, cancelledPurchaseEvent(p.d, p.txId, now()), trusted)).toBe(p.d);
-    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() })).toEqual({ ok: false, reason: 'not_paid', paymentState: 'unpaid' });
-    expect(row(p.d)).toMatchObject({ payment_state: 'unpaid', pending: 0, settled_order_event_id: null });
+    const before = row(p.d);
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, row(p.d).event_id, { trusted, now: now() })).toEqual({ ok: false, reason: 'not_paid', paymentState: 'unpaid' });
+    // …and writes nothing: the judgement ran in a transaction that was rolled back (round 5)
+    expect(row(p.d)).toEqual(before);
+    expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, settled_order_event_id: null });
     expect(review(p.d).cleared_at).toBeNull();
     expect((db.prepare('SELECT confirmed_at FROM shop_order_settle_review WHERE order_id = ?').get(p.d) as any).confirmed_at).toBeNull();
     const ship = await post(`/api/orders/${p.d}/fulfillment`, { hex: owner.pk, event: fulfillmentEvent(row(p.d), 'shipped') });
@@ -681,7 +685,7 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '14.50', settled_order_event_id: null });
     expect(entry()).toEqual({ listed_at: listedAt, old_paid_amount: '12.50', old_paid_tx_id: p.txId, verdict: 'amount_mismatch', expected_total: '14.50', cleared_at: null });
     // the old payment is kept on the entry, so Brilly can still confirm it
-    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() + 180 })).toMatchObject({ ok: true, expected: '12.50' });
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, row(p.d).event_id, { trusted, now: now() + 180 })).toMatchObject({ ok: true, expected: '12.50' });
   });
 
   it('…but a buyer\'s replacement of a listed older \'paid\' is judged afresh, never at the old order\'s price', async () => {
@@ -691,12 +695,20 @@ describe('third review — an older \'paid\' is judged again, never pinned', () 
     fromBeforeThisCode(p.d);
     await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60, [APPLES]), now: now() });
     expect(review(p.d)).toMatchObject({ cleared_at: null });
+    const e1 = row(p.d).event_id;
     // E2: the same line, a new event — the snapshot of E1 must not price it
     expect(ingestEvent(db, orderEvent(p.buyer, p.d, [['item', APPLES, '2', 'kg', '5.00', 'EUR']], '12.50', p.t0 + 5), trusted)).toBe(p.d);
     await resolveOrders(db, { trusted, fetchListing: listed({ [APPLES]: '6.00' }, now() - 60), now: now() + 60 });
     expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', pending: 0, expected_total: '14.50' });
-    // the entry Brilly could confirm was E1's: E2 is another order, refused (round 3)
-    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, { trusted, now: now() + 120 })).toEqual({ ok: false, reason: 'order_replaced' });
+    // E2 pays exactly its total with a verified payment: listed for review as
+    // its own entry (round 5) — but the broker took E1, so Brilly's
+    // --taken is E1: neither event can be confirmed, nothing written
+    expect(review(p.d)).toMatchObject({ verdict: 'amount_mismatch', old_paid_amount: '12.50', cleared_at: null });
+    expect(listSettleReview(db).map(e => [e.order_event_id, e.reason, e.old_paid_tx_id])).toEqual([[row(p.d).event_id, 'terms_mismatch', p.txId]]);
+    const before = row(p.d);
+    expect(await confirmSettleReview(db, p.d, row(p.d).event_id, e1, { trusted, now: now() + 120 })).toEqual({ ok: false, reason: 'not_taken' });
+    expect(await confirmSettleReview(db, p.d, e1, e1, { trusted, now: now() + 120 })).toEqual({ ok: false, reason: 'event_mismatch' });
+    expect(row(p.d)).toEqual(before);
     expect(row(p.d)).toMatchObject({ payment_state: 'amount_mismatch', settled_order_event_id: null });
   });
 });
@@ -742,7 +754,7 @@ describe('fourth review — only a listing on sale prices an order; one qty shap
       sign(owner.sk, 36502, [['d', 'off'], ['a', REF], ['title', 'Med'], ['price', '5.00', 'EUR'], ['status', 'inactive']], '', now() - 100),
       sign(owner.sk, 36502, [['d', 'bare'], ['a', REF], ['title', 'Med'], ['price', '5.00', 'EUR']], '', now() - 100),
     ];
-    const f = makeListingFetcher([relayUrl], 2000);
+    const f = makeListingFetcher(db, [relayUrl], 2000);
     expect((await f(`31923:${owner.pk}:ev1`))?.status).toBe('published');
     expect((await f(`31923:${owner.pk}:ev2`))?.status).toBe('active');
     expect((await f(`31923:${owner.pk}:ev3`))?.status).toBe('draft');
@@ -847,7 +859,7 @@ describe('round 3 — a listing its merchant deleted (KIND 5) prices nothing, al
     const t0 = now() - 120;
     const oldEv = old();
     relayEvents = [honey(), oldEv, sign(owner.sk, 5, [['a', OLD], ['k', '36502']], 'deleted', now() - 80_000)];
-    const f = makeListingFetcher([relayUrl], 2000);
+    const f = makeListingFetcher(db, [relayUrl], 2000);
     expect(ingestEvent(db, orderEvent(buyer, d, [['item', HONEY, '1', 'kg', '50.00', 'EUR']], '52.50', t0), trusted)).toBe(d);
     expect(ingestEvent(db, purchaseEvent(d, buyer.pk, crypto.randomUUID(), '52.50'), trusted)).toBe(d);
     await resolveOrders(db, { orderIds: [d], trusted, fetchListing: f, now: now() });
@@ -865,7 +877,7 @@ describe('round 3 — a listing its merchant deleted (KIND 5) prices nothing, al
   it('the fetcher follows NIP-09 as the broker reads it: own author only, `e` = this version, `a` up to its created_at; an unread deletion is not "none"', async () => {
     const stranger = mk();
     const oldEv = old();
-    const f = () => makeListingFetcher([relayUrl], 2000);
+    const f = () => makeListingFetcher(db, [relayUrl], 2000);
     // a stranger's KIND 5 deletes nothing
     relayEvents = [oldEv, sign(stranger.sk, 5, [['a', OLD], ['e', oldEv.id]], '', now() - 100)];
     expect((await f()(OLD))?.price).toBe('5.00');
@@ -900,7 +912,7 @@ describe('round 3 — a listing its merchant deleted (KIND 5) prices nothing, al
     });
     try {
       const url = `ws://127.0.0.1:${(silent.address() as AddressInfo).port}`;
-      expect(await makeListingFetcher([url], 500)(OLD)).toBeNull();
+      expect(await makeListingFetcher(db, [url], 500)(OLD)).toBeNull();
     } finally {
       await new Promise<void>(r => silent.close(() => r()));
     }

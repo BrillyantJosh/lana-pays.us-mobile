@@ -350,7 +350,7 @@ export function registerOrderRoutes(app: Express, db: Database.Database): void {
         if (!newest || purchaseVersionWins(cand, newest)) newest = cand;
       }
       if (!newest || newest.eventId !== row.paid_event_id) {
-        await resolveOrders(db, { orderIds: [orderId], trusted, fetchListing: makeListingFetcher(relays) });
+        await resolveOrders(db, { orderIds: [orderId], trusted, fetchListing: makeListingFetcher(db, relays) });
         row = db.prepare('SELECT * FROM shop_orders WHERE order_id = ?').get(orderId) as any;
         if (!row) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
       }

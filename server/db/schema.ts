@@ -545,6 +545,54 @@ export function initializeSchema(db: Database.Database): void {
       PRIMARY KEY (order_event_id, item_a)
     );
   `);
+  // Round 5 (F3/F4): shop_order_listing_prices above is no longer read or
+  // written — a price remembered per item, apart from the shipping fee and
+  // pickup it was judged with, paid a cart the merchant never priced as a
+  // whole. Kept (not dropped): no destructive migration.
+
+  // Round 5 (F3/F4): the merchant's terms under which ONE 36520 event was
+  // exactly right — every item's listing on sale at the price the order
+  // names, the shop's shipping fee, free-shipping threshold and pickup, and
+  // the order's total to the cent. Written once (ON CONFLICT DO NOTHING) by
+  // orderSync judgeRow, only when all of that held at the moment it was
+  // judged, and keyed by the event id: a buyer's replacement is another event
+  // and starts with none. An order the current terms do not pay (the merchant
+  // raised a price, the fee, or turned pickup off before the 30933 arrived)
+  // is judged once more by these. MONEY input.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS shop_order_terms_seen (
+      order_event_id TEXT PRIMARY KEY,
+      shipping_fee TEXT NOT NULL,
+      free_from TEXT,
+      pickup INTEGER NOT NULL,
+      unit_event_id TEXT,
+      prices_json TEXT NOT NULL,
+      total TEXT NOT NULL,
+      seen_at INTEGER NOT NULL
+    );
+  `);
+
+  // Round 5 (F1): the newest version of each listing address this app has
+  // seen (NIP-01 order: later created_at, then lower id), and whether its
+  // author deleted it (NIP-09, by `e` or `a`). A relay that serves an older
+  // version — after the merchant deleted the newer one by event id only, or
+  // because someone re-broadcast it — never prices an order again
+  // (orderSync makeListingFetcher), as the broker's listing_versions holds it.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS shop_listing_versions (
+      address TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      deleted INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+
+  // Round 5: why an entry is open — 'legacy_paid' (a 'paid' of the older
+  // rules that step 5 does not pay; NULL on rows listed before this column),
+  // 'terms_mismatch' or 'not_computable' (a verified payment of exactly the
+  // order's total that the merchant's terms do not reach).
+  try { db.exec(`ALTER TABLE shop_order_settle_review ADD COLUMN reason TEXT`); } catch { /* column exists */ }
 
   // Last: say out loud whether the orders tables are what this code needs.
   // Every ALTER above swallows its error, so without this a failed
@@ -595,9 +643,12 @@ export const ORDERS_SCHEMA_REQUIRED: Readonly<Record<string, readonly string[]>>
   ],
   shop_order_settle_review: [
     'order_id', 'order_event_id', 'old_paid_tx_id', 'old_paid_amount', 'verdict', 'expected_total', 'listed_at',
-    'cleared_at', 'confirmed_at',
+    'cleared_at', 'confirmed_at', 'reason',
   ],
-  shop_order_listing_prices: ['order_event_id', 'item_a', 'price', 'listing_created_at', 'seen_at'],
+  shop_order_terms_seen: [
+    'order_event_id', 'shipping_fee', 'free_from', 'pickup', 'unit_event_id', 'prices_json', 'total', 'seen_at',
+  ],
+  shop_listing_versions: ['address', 'event_id', 'created_at', 'deleted', 'updated_at'],
 };
 
 export interface OrdersSchemaStatus {
