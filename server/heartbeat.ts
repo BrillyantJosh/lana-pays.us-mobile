@@ -210,6 +210,89 @@ export function quotaSnapshotForThisMonth(
 }
 
 /**
+ * KIND 30903 → business_units gateway status and quota.
+ *
+ * Every unit is reset to the 'active' baseline and the events then override
+ * it per unit, so an EMPTY read would make every pending, suspended and
+ * quota-blocked unit 'active' here. Since 5 Oct 2026 the events are the
+ * processor's verified ones only (a pin that drops all of them — a quiet
+ * relay set, a rotated processor key — empties the read), so an empty read
+ * now keeps the stored statuses instead: a status nobody could read is not
+ * a release. Exported for tests.
+ */
+export function applySuspensions(db: Database.Database, suspensions: Kind30903Event[], now = Math.floor(Date.now() / 1000)): number {
+  if (suspensions.length === 0) {
+    console.warn('KIND 30903: no event from the processor was read — keeping every stored gateway status as it is');
+    return 0;
+  }
+
+  // Reset gateway state to 'active' baseline; events below override per unit.
+  // Units with no KIND 30903 stay 'active' (legacy / pre-gateway merchants).
+  db.prepare(`UPDATE business_units SET
+    suspension_status = 'active',
+    suspension_reason = NULL,
+    suspension_until = NULL,
+    suspension_content = NULL,
+    quota_volume_used = 0,
+    quota_volume_limit = 0,
+    quota_tx_used = 0,
+    quota_tx_limit = 0,
+    quota_currency = '',
+    quota_period = ''`).run();
+
+  const NEW_STATUSES = new Set(['pending', 'active', 'quota_warning_80', 'quota_blocked', 'suspended', 'rejected']);
+
+  for (const s of suspensions) {
+    // Only apply if the unit exists in our DB
+    const unit = db.prepare('SELECT unit_id FROM business_units WHERE unit_id = ?').get(s.unit_id) as any;
+    if (!unit) continue;
+
+    let effectiveStatus = s.status;
+    if (s.status === 'suspended' && s.active_until && s.active_until < now) {
+      // Legacy time-bound suspension expired — unit is active again
+      effectiveStatus = 'active';
+    }
+
+    // Persist gateway status (overloaded onto suspension_status column) + quota fields.
+    // A past month's quota snapshot is not this month's (quotaSnapshotForThisMonth).
+    const snapshot = quotaSnapshotForThisMonth(s, NEW_STATUSES.has(effectiveStatus) ? effectiveStatus : 'active');
+    const knownStatus = snapshot.status;
+
+    db.prepare(`
+      UPDATE business_units SET
+        suspension_status = ?,
+        suspension_reason = ?,
+        suspension_until = ?,
+        suspension_content = ?,
+        quota_volume_used = ?,
+        quota_volume_limit = ?,
+        quota_tx_used = ?,
+        quota_tx_limit = ?,
+        quota_currency = ?,
+        quota_period = ?
+      WHERE unit_id = ?
+    `).run(
+      knownStatus,
+      s.reason,
+      s.active_until || null,
+      s.content,
+      snapshot.volumeUsed,
+      s.quota_volume_limit ?? 0,
+      snapshot.txUsed,
+      s.quota_tx_limit ?? 0,
+      s.quota_currency ?? '',
+      snapshot.period,
+      s.unit_id,
+    );
+
+    if (knownStatus !== 'active') {
+      console.log(`KIND 30903: ${knownStatus} unit ${s.unit_id.slice(0, 12)}… reason: ${s.reason.slice(0, 50)}`);
+    }
+  }
+  return suspensions.length;
+}
+
+/**
  * Store the business units the relays hold — only what this app may believe.
  *
  * Until 5 Oct 2026 this took the newest KIND 30901 per `d` from ANY author,
@@ -413,72 +496,8 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
     await syncBusinessUnits(db, systemParams.relays);
 
     // Fetch KIND 30903 — Merchant Registration Gateway status & quota
-    const suspensions = await fetchKind30903(systemParams.relays);
-    const now = Math.floor(Date.now() / 1000);
-
-    // Reset gateway state to 'active' baseline; events below override per unit.
-    // Units with no KIND 30903 stay 'active' (legacy / pre-gateway merchants).
-    db.prepare(`UPDATE business_units SET
-      suspension_status = 'active',
-      suspension_reason = NULL,
-      suspension_until = NULL,
-      suspension_content = NULL,
-      quota_volume_used = 0,
-      quota_volume_limit = 0,
-      quota_tx_used = 0,
-      quota_tx_limit = 0,
-      quota_currency = '',
-      quota_period = ''`).run();
-
-    const NEW_STATUSES = new Set(['pending', 'active', 'quota_warning_80', 'quota_blocked', 'suspended', 'rejected']);
-
-    for (const s of suspensions) {
-      // Only apply if the unit exists in our DB
-      const unit = db.prepare('SELECT unit_id FROM business_units WHERE unit_id = ?').get(s.unit_id) as any;
-      if (!unit) continue;
-
-      let effectiveStatus = s.status;
-      if (s.status === 'suspended' && s.active_until && s.active_until < now) {
-        // Legacy time-bound suspension expired — unit is active again
-        effectiveStatus = 'active';
-      }
-
-      // Persist gateway status (overloaded onto suspension_status column) + quota fields.
-      // A past month's quota snapshot is not this month's (quotaSnapshotForThisMonth).
-      const snapshot = quotaSnapshotForThisMonth(s, NEW_STATUSES.has(effectiveStatus) ? effectiveStatus : 'active');
-      const knownStatus = snapshot.status;
-
-      db.prepare(`
-        UPDATE business_units SET
-          suspension_status = ?,
-          suspension_reason = ?,
-          suspension_until = ?,
-          suspension_content = ?,
-          quota_volume_used = ?,
-          quota_volume_limit = ?,
-          quota_tx_used = ?,
-          quota_tx_limit = ?,
-          quota_currency = ?,
-          quota_period = ?
-        WHERE unit_id = ?
-      `).run(
-        knownStatus,
-        s.reason,
-        s.active_until || null,
-        s.content,
-        snapshot.volumeUsed,
-        s.quota_volume_limit ?? 0,
-        snapshot.txUsed,
-        s.quota_tx_limit ?? 0,
-        s.quota_currency ?? '',
-        snapshot.period,
-        s.unit_id,
-      );
-
-      if (knownStatus !== 'active') {
-        console.log(`KIND 30903: ${knownStatus} unit ${s.unit_id.slice(0, 12)}… reason: ${s.reason.slice(0, 50)}`);
-      }
-    }
+    // (the processor's verified events only — nostr.ts selectProcessorEvents).
+    applySuspensions(db, await fetchKind30903(systemParams.relays));
 
     // Fetch KIND 30902 fee policies (includes max_tx_amount)
     const feePolicies = await fetchKind30902(systemParams.relays);

@@ -611,6 +611,72 @@ export async function fetchKind30901(
 }
 
 /**
+ * The processor key: the SOLE author of KIND 30902 (fee policy — max_tx_amount,
+ * caretaker) and KIND 30903 (gateway status, suspension, quota). Measured on
+ * 5 Oct 2026 on the four KIND 38888 relays: 223 live 30902 and 163 live 30903,
+ * every one signed by this key. Unlike 30901, which each merchant signs, these
+ * have one authoritative signer, so they are pinned to it like KIND 38888 —
+ * the same pin as lana-brain (a3c133c) and lana-pays-shop.
+ *
+ * Until 5 Oct 2026 both were taken here from ANY author, signature unchecked,
+ * newest-wins: anyone able to write to a relay could lift a unit's
+ * max_tx_amount, name a caretaker, or turn a suspended unit 'active'.
+ * caretaker_hex is a TAG the processor writes, not the signer — pinning the
+ * author leaves it as it is (the "author == owner_hex" trap of 30901).
+ */
+export const PROCESSOR_PUBKEY = '79730aba75d71584e8a4f9d0cc1173085e75590ce489760078d2bf6f5210d692';
+
+/** KIND_POLICY_AUTHOR_PIN=0 → log-only (revert with one restart, no redeploy). Signatures are always checked. */
+export function policyAuthorPinEnforced(): boolean {
+  return (process.env.KIND_POLICY_AUTHOR_PIN ?? '1') !== '0';
+}
+
+/** Is this KIND 30902/30903 the processor's? Logs every other author. */
+export function acceptProcessorAuthored(
+  event: NostrEvent,
+  kind: number,
+  opts: { enforced?: boolean; processorPubkey?: string } = {},
+): boolean {
+  const enforced = opts.enforced ?? policyAuthorPinEnforced();
+  if (event.pubkey === (opts.processorPubkey ?? PROCESSOR_PUBKEY)) return true;
+  const d = event.tags.find(t => t[0] === 'd')?.[1] || '?';
+  console.warn(`[policy-pin] ${enforced ? 'REJECTED' : 'WOULD-REJECT'} KIND ${kind} d=${d} author=${String(event.pubkey).slice(0, 12)}… (not processor)`);
+  return !enforced;
+}
+
+/**
+ * The newest KIND 30902/30903 per key that this app may believe (pure;
+ * exported for tests). Signature (verifyNostrEvent: id, schnorr, kind,
+ * created_at <= now + 300) and author are checked PER CANDIDATE, BEFORE
+ * newest-wins: filtering the winner instead would let a forged event dated
+ * now+1 win, be refused, and take the processor's real one down with it.
+ */
+export function selectProcessorEvents(
+  events: unknown[],
+  kind: 30902 | 30903,
+  keyOf: (ev: NostrEvent) => string | undefined,
+  opts: { enforced?: boolean; processorPubkey?: string; nowSec?: number } = {},
+): NostrEvent[] {
+  const byKey = new Map<string, NostrEvent>();
+  let unverifiable = 0;
+  for (const raw of events) {
+    if (!verifyNostrEvent(raw, [kind], opts.nowSec)) { unverifiable++; continue; }
+    const event = raw as NostrEvent;
+    if (!acceptProcessorAuthored(event, kind, opts)) continue;
+    const key = keyOf(event);
+    if (!key) continue;
+    const existing = byKey.get(key);
+    // NIP-01: newest created_at; in the same second the lowest id.
+    if (!existing || event.created_at > existing.created_at
+      || (event.created_at === existing.created_at && event.id < existing.id)) {
+      byKey.set(key, event);
+    }
+  }
+  if (unverifiable) console.warn(`[policy-pin] KIND ${kind}: ${unverifiable} unverifiable event(s) dropped`);
+  return [...byKey.values()];
+}
+
+/**
  * KIND 30903 — Unit Suspension events
  */
 export interface Kind30903Event {
@@ -720,21 +786,9 @@ export async function fetchKind30903(relays?: string[]): Promise<Kind30903Event[
     useRelays.map(relay => fetchFromRelayKind30903(relay))
   );
 
-  // Deduplicate by unit_id, keep newest
-  const byUnitId = new Map<string, NostrEvent>();
-  for (const relayEvents of results) {
-    for (const event of relayEvents) {
-      const dTag = event.tags.find(t => t[0] === 'd')?.[1];
-      if (!dTag) continue;
-      const existing = byUnitId.get(dTag);
-      if (!existing || event.created_at > existing.created_at) {
-        byUnitId.set(dTag, event);
-      }
-    }
-  }
-
+  // Newest per unit (`d`), among the processor's verified events only.
   const parsed: Kind30903Event[] = [];
-  for (const event of byUnitId.values()) {
+  for (const event of selectProcessorEvents(results.flat(), 30903, ev => ev.tags.find(t => t[0] === 'd')?.[1])) {
     const p = parseKind30903Event(event);
     if (p) parsed.push(p);
   }
@@ -811,21 +865,9 @@ export async function fetchKind30902(relays?: string[]): Promise<Kind30902Policy
     useRelays.map(relay => fetchFromRelayKind30902(relay))
   );
 
-  // Deduplicate by unit_id, keep newest
-  const byUnitId = new Map<string, NostrEvent>();
-  for (const relayEvents of results) {
-    for (const event of relayEvents) {
-      const unitId = event.tags.find(t => t[0] === 'unit_id')?.[1];
-      if (!unitId) continue;
-      const existing = byUnitId.get(unitId);
-      if (!existing || event.created_at > existing.created_at) {
-        byUnitId.set(unitId, event);
-      }
-    }
-  }
-
+  // Newest per unit_id, among the processor's verified events only.
   const policies: Kind30902Policy[] = [];
-  for (const event of byUnitId.values()) {
+  for (const event of selectProcessorEvents(results.flat(), 30902, ev => ev.tags.find(t => t[0] === 'unit_id')?.[1])) {
     const getTag = (name: string) => event.tags.find(t => t[0] === name)?.[1] || '';
     const unitId = getTag('unit_id');
     if (!unitId) continue;
