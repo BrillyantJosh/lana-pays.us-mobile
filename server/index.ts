@@ -18,6 +18,7 @@ import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, fetchBalancesBatch, electrumCall, type ElectrumServer } from './lib/electrum.js';
 import { SIMPLE_UNIT_SQL } from './lib/unitOrigin.js';
 import { isOnlineShopUnit } from './lib/unitFlags.js';
+import { receiptUploadTarget } from './lib/receiptUpload.js';
 import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 import { ensureExclusionTables, exclusionRefusal, exclusionKnown } from './lib/personExclusion.js';
 import { gate, gateNames, excludedNow, logGateState, refreshPersonExclusions, type RequestNames } from './lib/exclusionGate.js';
@@ -1524,9 +1525,11 @@ app.post('/api/upload', upload.array('images', 5), gate(db, uploadCaller, discar
 });
 
 // ─── Receipt Upload Proxy ──────────────────────────────
-// Proxies receipt uploads to file server (65.21.189.205:3099)
-const RECEIPT_UPLOAD_URL = process.env.RECEIPT_UPLOAD_URL || 'http://65.21.189.205:3099/api/upload';
-const RECEIPT_UPLOAD_KEY = process.env.RECEIPT_UPLOAD_KEY || 'lana_receipt_upload_2026_secure';
+// Proxies receipt uploads to the files.lanapays.us upload server. The key is
+// RECEIPT_UPLOAD_KEY or nothing — no fallback in this (public) source; see
+// lib/receiptUpload.ts.
+const receiptTarget = receiptUploadTarget(process.env);
+if (receiptTarget.ok === false) console.error(`[receipt-upload] ${receiptTarget.error}`);
 
 const receiptUpload = multer({
   storage: multer.memoryStorage(),
@@ -1538,6 +1541,10 @@ const receiptUpload = multer({
 });
 
 app.post('/api/receipt/upload', receiptUpload.single('receipt'), gate(db, uploadCaller, discardUploads), requireCaller, async (req, res) => {
+  if (receiptTarget.ok === false) {
+    console.error(`[receipt-upload] refused: ${receiptTarget.error}`);
+    return res.status(503).json({ success: false, error: 'Receipt upload is not configured on this server', code: 'RECEIPT_UPLOAD_NOT_CONFIGURED' });
+  }
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
@@ -1554,13 +1561,16 @@ app.post('/api/receipt/upload', receiptUpload.single('receipt'), gate(db, upload
     const blob = new Blob([req.file.buffer as Uint8Array<ArrayBuffer>], { type: req.file.mimetype });
     formData.append('receipt', blob, req.file.originalname || 'receipt.jpg');
 
-    const uploadRes = await fetch(RECEIPT_UPLOAD_URL, {
+    const uploadRes = await fetch(receiptTarget.url, {
       method: 'POST',
-      headers: { 'X-Upload-Key': RECEIPT_UPLOAD_KEY },
+      headers: { 'X-Upload-Key': receiptTarget.key },
       body: formData,
     });
 
     if (!uploadRes.ok) {
+      if (uploadRes.status === 401 || uploadRes.status === 403) {
+        console.error(`[receipt-upload] file server refused RECEIPT_UPLOAD_KEY (HTTP ${uploadRes.status}) — receipt kept locally instead`);
+      }
       // Fallback: save locally
       const id = crypto.randomBytes(16).toString('hex');
       const ext = path.extname(req.file.originalname || '.jpg') || '.jpg';

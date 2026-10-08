@@ -28,6 +28,11 @@ services:
       # a .env nobody opens. Compose interpolates it from THIS directory's .env
       # — the same file env_file names — so put it there, not in .env.local.
       - BRAIN_PEER_KEY=${BRAIN_PEER_KEY:-}
+      # Key the files.lanapays.us upload server checks in X-Upload-Key on every
+      # receipt photo. There is no fallback in the source any more: unset means
+      # /api/receipt/upload answers 503 RECEIPT_UPLOAD_NOT_CONFIGURED. Same rule
+      # as above — put it in THIS directory's .env.
+      - RECEIPT_UPLOAD_KEY=${RECEIPT_UPLOAD_KEY:-}
     volumes:
       - ./data:/app/data
     networks:
