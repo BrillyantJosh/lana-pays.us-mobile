@@ -154,19 +154,24 @@ const PublicPay = () => {
         }
         if (checkJson.success && !checkJson.registered) {
           const balRes = await fetch(`/api/balance/${encodeURIComponent(ids.walletId)}?currency=${request.currency}`);
+          if (!balRes.ok) {
+            // Without a balance this cannot be called a new, empty card.
+            setError(t('lana.networkError'));
+            setPhase('ready');
+            return;
+          }
           const balData = await balRes.json();
           if ((balData.lana || 0) > 0) {
             setError(t('lana.walletNotVirgin', { balance: (balData.lana || 0).toLocaleString() }));
             setPhase('ready');
             return;
           }
-          try {
-            await fetch('/api/register/wallet', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ wallet_id: ids.walletId, nostr_id_hex: ids.nostrHexId }),
-            });
-          } catch { /* best effort */ }
+          // A new, empty card cannot pay — and it is NOT registered from here:
+          // a card registered without a name becomes a nameless customer at
+          // every till (see LanaTab). It is registered at a till, with a name.
+          setError(t('pay.newCardNoLana'));
+          setPhase('ready');
+          return;
         }
       } catch { /* soft-fail — balance check below is the important one */ }
 

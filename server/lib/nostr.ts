@@ -304,6 +304,101 @@ export async function fetchKind0Profile(hexId: string): Promise<{ name?: string;
 }
 
 /**
+ * Does this person have a profile? Answered three ways, never two.
+ *
+ * fetchKind0Profile() above folds "every relay said no" and "a relay was down"
+ * into the same null. That is fine for showing a name and wrong for deciding to
+ * WRITE one: the till asks the holder of a nameless card for their name and
+ * publishes it as their KIND 0, which replaces whatever profile they already
+ * have. So 'absent' is said only when EVERY relay answered EOSE and none of
+ * them held a validly signed KIND 0 by this key. A relay that errored, closed
+ * early or stayed silent past the deadline makes it 'unknown' — and the till
+ * then sells exactly as before, rather than overwrite a profile it could not see.
+ *
+ * A relay serves whatever it is handed, so an event only counts when its
+ * signature holds and it is by this key; a forged one is ignored, not believed.
+ */
+export type Kind0Status =
+  | { status: 'found'; name: string | null }
+  | { status: 'absent' }
+  | { status: 'unknown' };
+
+export async function fetchKind0Status(hexId: string, relays: string[], timeoutMs = 4000): Promise<Kind0Status> {
+  if (!/^[0-9a-f]{64}$/.test(hexId) || relays.length === 0) return { status: 'unknown' };
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let done = 0;          // relays that answered EOSE or failed — each counted once
+    let anyFailed = false;
+    const sockets: WebSocket[] = [];
+    const settle = (result: Kind0Status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      for (const s of sockets) { try { s.close(); } catch {} }
+      resolve(result);
+    };
+    // A relay that failed rules out 'absent' but not 'found' — another relay may
+    // still hold the profile — so a failure is noted and the rest are waited for.
+    const relayFinished = (failed: boolean) => {
+      done++;
+      if (failed) anyFailed = true;
+      if (done === relays.length) settle(anyFailed ? { status: 'unknown' } : { status: 'absent' });
+    };
+    const timer = setTimeout(() => settle({ status: 'unknown' }), timeoutMs);
+
+    for (const relayUrl of relays) {
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(relayUrl);
+      } catch {
+        relayFinished(true);
+        continue;
+      }
+      sockets.push(ws);
+      const subId = `kind0s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      let finished = false;
+      const finish = (failed: boolean) => { if (!finished) { finished = true; relayFinished(failed); } };
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify(['REQ', subId, { kinds: [0], authors: [hexId], limit: 1 }]));
+      });
+
+      ws.on('message', (data: Buffer) => {
+        let msg: any;
+        try { msg = JSON.parse(data.toString()); } catch { return; }
+        // A relay can send any valid JSON — `null` included — and a throw in a
+        // ws listener is uncaught: it would take the whole server down.
+        if (!Array.isArray(msg)) return;
+        if (msg[0] === 'EVENT' && msg[1] === subId) {
+          const ev = msg[2];
+          if (!ev || ev.kind !== 0 || ev.pubkey !== hexId) return;
+          let valid = false;
+          try { valid = verifyEvent(ev); } catch { valid = false; }
+          if (!valid) return;
+          let name: string | null = null;
+          try {
+            const c = JSON.parse(ev.content);
+            const raw = (typeof c?.name === 'string' && c.name.trim()) || (typeof c?.display_name === 'string' && c.display_name.trim()) || '';
+            name = raw || null;
+          } catch { name = null; }
+          settle({ status: 'found', name });
+        } else if (msg[0] === 'EOSE' && msg[1] === subId) {
+          finish(false);
+        } else if (msg[0] === 'CLOSED' && msg[1] === subId) {
+          finish(true);
+        }
+      });
+
+      // An error or close before this relay's EOSE means we never heard its
+      // answer. After EOSE, `finish` has already run and these are no-ops.
+      ws.on('error', () => finish(true));
+      ws.on('close', () => finish(true));
+    }
+  });
+}
+
+/**
  * Fetch KIND 30901 (Business Unit) events from Lana relays
  * If sinceTimestamp is provided, only fetch events newer than that
  * Otherwise fetch all history

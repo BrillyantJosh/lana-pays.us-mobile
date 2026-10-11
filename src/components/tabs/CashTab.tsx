@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { parseAmountInput, clampCashAmount, getCashMaxTx } from "@/lib/max-tx";
 import { withCallerHex, withCallerField } from "@/lib/callerIdentity";
 import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
+import { localNameFor, registeredCardStep, newCardMode, regularCustomerStep, type ProfileStatus } from "@/lib/customerName";
 
 const currencyIcons: Record<string, typeof PoundSterling> = {
   GBP: PoundSterling, USD: DollarSign, EUR: Euro,
@@ -185,6 +186,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
 
   // Registration form
   const [fullName, setFullName] = useState("");
+  // What the register step does. 'new': write the profile and register the
+  // wallet (a brand-new card). 'completeProfile': the card is registered but was
+  // never given a name — write the profile only. 'keepProfile': the card is new
+  // but its key already has a profile — register the wallet, publish nothing.
+  const [registerMode, setRegisterMode] = useState<'new' | 'completeProfile' | 'keepProfile'>('new');
+  const completingProfile = registerMode === 'completeProfile';
   const [email, setEmail] = useState("");
   const [countryCode, setCountryCode] = useState("+386");
   const [mobile, setMobile] = useState("");
@@ -459,6 +466,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     setCheckError(null);
     setSubmitError(null);
     setFullName("");
+    setRegisterMode('new');
     setEmail("");
     setCountryCode("+386");
     setMobile("");
@@ -466,6 +474,47 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     setAmount("");
     purchaseDataRef.current = null;
     onClearWallet?.();
+  };
+
+  /** 'found' | 'absent' | 'unknown' — anything but a clean answer is 'unknown'. */
+  const lookupProfileStatus = async (hexId: string): Promise<ProfileStatus> => {
+    try {
+      const res = await fetch('/api/profile-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hex_id: hexId }),
+      });
+      if (!res.ok) return { status: 'unknown' };
+      const json = await res.json();
+      if (json?.status === 'found') return { status: 'found', name: typeof json.name === 'string' && json.name.trim() ? json.name.trim() : null };
+      if (json?.status === 'absent') return { status: 'absent' };
+      return { status: 'unknown' };
+    } catch {
+      return { status: 'unknown' };
+    }
+  };
+
+  /** A regular customer saved without a name gets it once it is known — so the
+   *  list stops offering a nameless entry. Best effort; never blocks a sale. */
+  const backfillRegularName = (hexId: string, scannedWallet: string, name: string) => {
+    const entry = regularCustomers.find(c => c.customer_hex_id === hexId);
+    if (!entry || (entry.display_name || '').trim() || !unitId || !session?.nostrHexId) return;
+    fetch('/api/regular-customers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unit_id: unitId,
+        customer_hex_id: hexId,
+        customer_wallet: entry.customer_wallet || scannedWallet,
+        customer_npub: entry.customer_npub || null,
+        display_name: name,
+        staff_hex: session.nostrHexId,
+      }),
+    })
+      .then(() => fetch(`/api/regular-customers/${unitId}?staff_hex=${session.nostrHexId}`))
+      .then(r => r.json())
+      .then(d => setRegularCustomers(d.customers || []))
+      .catch(() => {});
   };
 
   // ══════ SCAN HANDLER — reads from purchaseDataRef snapshot ══════
@@ -482,6 +531,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     setCheckError(null);
     setSubmitError(null);
     setBalance(null);
+    setRegisterMode('new');
 
     try {
       let resolvedWalletId: string;
@@ -503,6 +553,8 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       }
 
       setWalletId(resolvedWalletId);
+      // The hex whose key was just scanned — the only profile this till can sign.
+      const scannedHex = hasNostrKeys ? resolvedHexId : null;
 
       // Check registration + balance + hex lookup in parallel
       const [regRes, balanceRes, userLookup] = await Promise.all([
@@ -514,10 +566,11 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         fetch(`/api/balance/${encodeURIComponent(resolvedWalletId)}?currency=${pd.currency}`)
           .then(r => r.json().then(j => ({ ok: r.ok, json: j })))
           .catch(() => null),
-        !hasNostrKeys
-          ? fetch(`/api/users/by-wallet/${encodeURIComponent(resolvedWalletId)}`)
-              .then(r => r.json()).catch(() => ({ user: null }))
-          : Promise.resolve(null),
+        // Fetched for scanned keys too: its display_name is the customer's name
+        // as this app knows it. Its hex is only ever used as an identity when no
+        // key was scanned (below).
+        fetch(`/api/users/by-wallet/${encodeURIComponent(resolvedWalletId)}`)
+          .then(r => r.json()).catch(() => ({ user: null })),
       ]);
 
       // Single source of truth for customer identity:
@@ -583,6 +636,26 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             return;
           }
 
+          // A registered card must not be sold to as a bare hex. 8 Oct 2026,
+          // Živa center: a new card had been registered with no name (by the LANA
+          // tab), so this path sold to it without ever asking who it was. Now:
+          // the name this app knows → the name on the profile → and only when
+          // EVERY relay confirms there is no profile at all, and the scanned key
+          // is the one that identity belongs to, the seller is asked for the
+          // name and it is written as the customer's profile. A relay that did
+          // not answer never triggers the question: that sells as before rather
+          // than overwrite a real profile it could not see.
+          let customerName = localNameFor(userLookup?.user, resolvedHexId);
+          if (!customerName) {
+            const decision = registeredCardStep(await lookupProfileStatus(resolvedHexId), scannedHex, resolvedHexId);
+            if (decision.action === 'askName') {
+              setRegisterMode('completeProfile');
+              setStep("register");
+              return;
+            }
+            customerName = decision.name;
+          }
+
           setIsSubmitting(true);
           const res = await fetch('/api/brain/purchase', {
             method: 'POST',
@@ -594,7 +667,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
               customer_wallet: resolvedWalletId,
               // Snapshot the customer name so brain admin can show it even
               // if the KIND 0 event later disappears from relays.
-              customer_name: userLookup?.user?.display_name || '',
+              customer_name: customerName,
               amount: parsedAmount,
               currency: pd.currency,
               invoice_number: pd.invoiceNumber.trim(),
@@ -613,6 +686,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           }
 
           notifyServerAdjustment(purchaseData);
+          if (customerName) backfillRegularName(resolvedHexId, resolvedWalletId, customerName);
           setStep("confirmed");
         } else if (hasNostrKeys) {
           // Check if wallet has balance — only virgin (empty) wallets can be registered
@@ -620,6 +694,15 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           if (walletBalance > 0) {
             setCheckError(t('cash.walletNotVirgin', { balance: walletBalance.toLocaleString() }));
           } else {
+            // A new card whose key already has a profile keeps it: the wallet is
+            // registered, the till's template is not published over it.
+            const mode = resolvedHexId ? newCardMode(await lookupProfileStatus(resolvedHexId)) : { mode: 'new' as const };
+            if (mode.mode === 'keepProfile') {
+              setRegisterMode('keepProfile');
+              if (mode.name) setFullName(mode.name);
+            } else {
+              setRegisterMode('new');
+            }
             setStep("register");
           }
         } else {
@@ -658,6 +741,22 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       return;
     }
 
+    // A regular customer saved without a name: the profile's name is used (and
+    // filled in on the list); with confirmed no profile at all the card has to
+    // be scanned, which asks for the name. A relay that did not answer sells as
+    // before.
+    let regularName = (customer.display_name || '').trim();
+    if (!regularName) {
+      setIsSubmitting(true);
+      const step = regularCustomerStep(customer.display_name, await lookupProfileStatus(customer.customer_hex_id));
+      setIsSubmitting(false);
+      if (step.action === 'scanCard') {
+        setSubmitError(t('cash.regularNeedsName'));
+        return;
+      }
+      regularName = step.name;
+    }
+
     // Self-purchase guard — see comment at the scanned-WIF site above.
     const ownerHex = ((window as any).__selectedUnit?.owner_hex || '').toLowerCase();
     const buyerHex = (customer.customer_hex_id || '').toLowerCase();
@@ -678,7 +777,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           payment_type: 'cash',
           customer_hex: customer.customer_hex_id,
           customer_wallet: customer.customer_wallet,
-          customer_name: customer.display_name || '',
+          customer_name: regularName,
           amount: parsedAmount,
           currency: pd.currency,
           invoice_number: pd.invoiceNumber.trim(),
@@ -696,6 +795,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       }
 
       notifyServerAdjustment(data);
+      if (regularName) backfillRegularName(customer.customer_hex_id, customer.customer_wallet, regularName);
       setWalletId(customer.customer_wallet);
       setNostrHexId(customer.customer_hex_id);
       setStep("confirmed");
@@ -713,50 +813,61 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     setSubmitError(null);
 
     try {
-      // 1. Create and broadcast KIND 0 profile
-      console.log('[CashTab] Creating KIND 0 profile for new customer...');
-      const kind0Content: Kind0Content = {
-        name: fullName.trim(),
-        display_name: fullName.trim(),
-        about: 'LanaPays.Us customer',
-        location: '',
-        country: '',
-        currency: currency,
-        lanoshi2lash: '10000',
-        lanaWalletID: walletId,
-        whoAreYou: 'Human',
-        orgasmic_profile: 'Living life',
-        statement_of_responsibility: 'I accept full and unconditional self-responsibility for everything I do or do not do inside the Lana World.',
-      };
+      // 1. Create and broadcast KIND 0 profile — never over a profile that exists.
+      if (registerMode !== 'keepProfile') {
+        console.log('[CashTab] Creating KIND 0 profile for new customer...');
+        const kind0Content: Kind0Content = {
+          name: fullName.trim(),
+          display_name: fullName.trim(),
+          about: 'LanaPays.Us customer',
+          location: '',
+          country: '',
+          currency: currency,
+          lanoshi2lash: '10000',
+          lanaWalletID: walletId,
+          whoAreYou: 'Human',
+          orgasmic_profile: 'Living life',
+          statement_of_responsibility: 'I accept full and unconditional self-responsibility for everything I do or do not do inside the Lana World.',
+        };
 
-      const tags: string[][] = [['lang', 'en']];
+        const tags: string[][] = [['lang', 'en']];
 
-      const signedEvent = createAndSignKind0(customerPrivateKeyHex, kind0Content, tags);
+        const signedEvent = createAndSignKind0(customerPrivateKeyHex, kind0Content, tags);
+        // The profile is written by the scanned key, so it must be the key of the
+        // identity this sale is recorded under — never a name on someone else.
+        if (signedEvent.pubkey !== nostrHexId) {
+          setSubmitError(t('cash.customerNotIdentified'));
+          return;
+        }
 
-      const broadcastRes = await fetch('/api/broadcast-event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: signedEvent }),
-      });
-      const broadcastData = await broadcastRes.json();
-      console.log(`[CashTab] KIND 0 broadcast: ${broadcastData.success?.length || 0} relays ok`);
+        const broadcastRes = await fetch('/api/broadcast-event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event: signedEvent }),
+        });
+        const broadcastData = await broadcastRes.json();
+        console.log(`[CashTab] KIND 0 broadcast: ${broadcastData.success?.length || 0} relays ok`);
+      }
 
-      // 2. Register wallet via Lana Register API
-      console.log('[CashTab] Registering wallet via Lana Register API...');
-      const regRes = await fetch('/api/register/wallet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wallet_id: walletId,
-          nostr_id_hex: nostrHexId,
-        }),
-      });
-      const regData = await regRes.json();
-      console.log(`[CashTab] Wallet registration: ${regData.status} - ${regData.message}`);
+      // 2. Register wallet via Lana Register API — skipped for a card that is
+      //    already registered and only lacked its name.
+      if (!completingProfile) {
+        console.log('[CashTab] Registering wallet via Lana Register API...');
+        const regRes = await fetch('/api/register/wallet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            wallet_id: walletId,
+            nostr_id_hex: nostrHexId,
+          }),
+        });
+        const regData = await regRes.json();
+        console.log(`[CashTab] Wallet registration: ${regData.status} - ${regData.message}`);
 
-      if (!regData.success && regData.status === 'rejected') {
-        setSubmitError(regData.message || 'Wallet registration rejected');
-        return;
+        if (!regData.success && regData.status === 'rejected') {
+          setSubmitError(regData.message || 'Wallet registration rejected');
+          return;
+        }
       }
 
       // 3. Register user in local DB
@@ -817,6 +928,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           }
 
           notifyServerAdjustment(purchaseData);
+          backfillRegularName(nostrHexId, walletId, fullName.trim());
           setStep("confirmed");
           return;
         }
@@ -975,7 +1087,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       <div className="flex flex-col gap-5 px-6 py-4">
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0"><UserPlus className="w-7 h-7 text-primary" /></div>
-          <div><h2 className="font-display text-xl font-bold text-foreground">{t('cash.registerTitle')}</h2><p className="text-muted-foreground text-sm">{t('cash.registerSubtitle')}</p></div>
+          <div><h2 className="font-display text-xl font-bold text-foreground">{t(completingProfile ? 'cash.completeProfileTitle' : 'cash.registerTitle')}</h2><p className="text-muted-foreground text-sm">{t(completingProfile ? 'cash.completeProfileSubtitle' : 'cash.registerSubtitle')}</p></div>
         </div>
         <BalanceCard compact />
         {submitError && <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4"><p className="text-xl text-destructive text-center leading-relaxed">{submitError}</p></div>}
@@ -983,7 +1095,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           <div className="space-y-1.5"><Label className="text-xs font-medium text-muted-foreground">{t('cash.fullName')} <span className="text-destructive">*</span></Label><Input placeholder={t('cash.fullNamePlaceholder')} value={fullName} onChange={(e) => setFullName(e.target.value)} className="h-11 rounded-xl" /></div>
         </div>
         <Button onClick={handleRegister} disabled={!fullName.trim() || isSubmitting} className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
-          <UserPlus className="w-5 h-5" />{isSubmitting ? t('cash.processing') : t('cash.registerAndContinue')}
+          <UserPlus className="w-5 h-5" />{isSubmitting ? t('cash.processing') : t(completingProfile ? 'cash.completeProfileAndContinue' : 'cash.registerAndContinue')}
         </Button>
         <button onClick={resetAll} className="text-sm text-muted-foreground text-center hover:text-foreground transition-colors">{t('common.scanAnother')}</button>
       </div>

@@ -55,6 +55,7 @@ describe('every route that acts in a person\'s name asks the gate', () => {
     // [file label, source, exact registration prefix]
     ['index.ts', indexTs, "app.post('/api/users'"],
     ['index.ts', indexTs, "app.post('/api/profile-lookup'"],
+    ['index.ts', indexTs, "app.post('/api/profile-status'"],
     ['index.ts', indexTs, "app.post('/api/register/wallet'"],
     ['index.ts', indexTs, "app.get('/api/business-units/:hexId'"],
     ['index.ts', indexTs, "app.get('/api/regular-customers/:unitId'"],

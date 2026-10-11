@@ -222,6 +222,12 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         // If wallet is not registered, check balance first
         if (checkJson.success && !checkJson.registered) {
           const balRes = await fetch(`/api/balance/${encodeURIComponent(ids.walletId)}?currency=${currency}`);
+          if (!balRes.ok) {
+            // Without a balance this cannot be called a new, empty card.
+            setScanError(t('lana.networkError'));
+            setIsCheckingBalance(false);
+            return;
+          }
           const balData = await balRes.json();
           const walletLana = balData.lana || 0;
           if (walletLana > 0) {
@@ -229,14 +235,15 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             setIsCheckingBalance(false);
             return;
           }
-          // Virgin wallet — try to auto-register
-          try {
-            await fetch('/api/register/wallet', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ wallet_id: ids.walletId, nostr_id_hex: ids.nostrHexId }),
-            });
-          } catch {} // best effort
+          // A new, empty card cannot pay in LANA — and it is NOT registered here.
+          // This tab used to register it on the spot, with no name and no
+          // profile, and then fail on the balance. The card then counted as
+          // registered, so the cash tab skipped its name step and the sale was
+          // recorded under a bare hex (Živa center, 8 Oct 2026). Cards are
+          // registered in the cash tab, together with the customer's name.
+          setScanError(t('lana.newCardNoLana'));
+          setIsCheckingBalance(false);
+          return;
         }
       } catch {
         // If check fails, continue anyway — balance check is more important

@@ -18,7 +18,7 @@ import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, fetchBalancesBatch, electrumCall, type ElectrumServer } from './lib/electrum.js';
 import { SIMPLE_UNIT_SQL } from './lib/unitOrigin.js';
 import { isOnlineShopUnit } from './lib/unitFlags.js';
-import { fetchKind0Profile, fetchKind0Full, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
+import { fetchKind0Profile, fetchKind0Full, fetchKind0Status, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 import { ensureExclusionTables, exclusionRefusal, exclusionKnown } from './lib/personExclusion.js';
 import { gate, gateNames, excludedNow, logGateState, refreshPersonExclusions, type RequestNames } from './lib/exclusionGate.js';
 import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js';
@@ -385,6 +385,41 @@ app.post('/api/profile-lookup', gate(db, req => req.body?.hex_id), async (req, r
   } catch (error: any) {
     console.error(`Profile lookup failed for ${hex_id}:`, error.message);
     res.json({ profile: null });
+  }
+});
+
+/**
+ * Does this customer have a profile at all — 'found' | 'absent' | 'unknown'.
+ *
+ * The till asks this when a registered card arrives with no name anywhere in
+ * this app. Only 'absent' (every relay of the cached KIND 38888 answered, none
+ * holds a valid KIND 0 by this key) lets the till ask for a name and publish
+ * it; a missing relay list or any silent relay is 'unknown' and changes nothing.
+ * The relays are exactly the list /api/broadcast-event publishes to, so a name
+ * is never written to a relay that was not asked first.
+ */
+const profileStatusLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+app.post('/api/profile-status', profileStatusLimiter, gate(db, req => req.body?.hex_id), async (req, res) => {
+  const hexId = typeof req.body?.hex_id === 'string' ? req.body.hex_id.toLowerCase() : '';
+  if (!/^[0-9a-f]{64}$/.test(hexId)) {
+    return res.status(400).json({ error: 'hex_id must be 64 hex characters' });
+  }
+  let relays: string[] = [];
+  try {
+    const sysRow = db.prepare('SELECT relays FROM kind_38888 ORDER BY id DESC LIMIT 1').get() as any;
+    const parsed = sysRow ? JSON.parse(sysRow.relays || '[]') : [];
+    // Anything that is not a plain relay URL makes the list untrustworthy as a
+    // whole: answering on part of it could call a profile absent that sits on
+    // the part we skipped.
+    const ok = Array.isArray(parsed) && parsed.length > 0 && parsed.every((r: unknown) => typeof r === 'string' && /^wss?:\/\//.test(r));
+    relays = ok ? (parsed as string[]) : [];
+  } catch { relays = []; }
+  if (relays.length === 0) return res.json({ status: 'unknown' });
+  try {
+    res.json(await fetchKind0Status(hexId, relays));
+  } catch (error: any) {
+    console.error(`Profile status failed for ${hexId.slice(0, 8)}:`, error.message);
+    res.json({ status: 'unknown' });
   }
 });
 
