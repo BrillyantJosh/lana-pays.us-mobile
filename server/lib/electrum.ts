@@ -10,6 +10,10 @@ interface WalletBalance {
   balance: number;
   confirmed: number;
   unconfirmed: number;
+  /** Exact `unconfirmed` from Electrum, unrounded. A pending payment whose net is
+   *  only a fee (a consolidation) rounds to 0.00 LANA; the "still waiting for a
+   *  block" check in the pay pages needs to see it anyway. */
+  unconfirmedLanoshis?: number;
   status: string;
   error?: string;
 }
@@ -153,6 +157,7 @@ export function toWalletBalance(address: string, response: any): WalletBalance {
       balance: Math.round(total * 100) / 100,
       confirmed: Math.round(confirmed * 100) / 100,
       unconfirmed: Math.round(unconfirmed * 100) / 100,
+      unconfirmedLanoshis: Number(response.result.unconfirmed) || 0,
       status: total > 0 ? 'active' : 'inactive',
     };
   }

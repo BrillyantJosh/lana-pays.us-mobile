@@ -44,6 +44,13 @@ describe('toWalletBalance', () => {
     expect(b).toMatchObject({ wallet_id: 'LAddr', confirmed: 1.5, unconfirmed: 0.25, balance: 1.75, status: 'active' });
   });
 
+  it('keeps the exact unconfirmed lanoshis a fee-only pending spend would round away', () => {
+    // A pending one-input spend to oneself: net = only its fee, -0.000387 LANA.
+    const b = toWalletBalance('LAddr', { result: balanceFor(214_350_745_637, -38_700) });
+    expect(Math.abs(b.unconfirmed)).toBe(0);
+    expect(b.unconfirmedLanoshis).toBe(-38_700);
+  });
+
   it('marks an empty wallet inactive, not errored', () => {
     expect(toWalletBalance('LAddr', { result: balanceFor(0) })).toMatchObject({ balance: 0, status: 'inactive' });
   });

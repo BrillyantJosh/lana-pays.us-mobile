@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from 'react-i18next';
-import { Loader2, CheckCircle2, AlertCircle, Snowflake, Camera, CheckCircle, ImagePlus } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Snowflake, Camera, CheckCircle, ImagePlus, Clock } from "lucide-react";
 import { compressImage } from "@/lib/compress-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,10 @@ import { Label } from "@/components/ui/label";
 import { QRScanner } from "@/components/QRScanner";
 import { convertWifToIds } from "@/lib/crypto";
 import { signCustomerLanaTx } from "@/lib/transaction";
+import {
+  blockWaitBeforeSigning, blockWaitAfterRejection, isOutcomeUnknown, readBalanceSnapshot,
+  type BlockWait,
+} from "@/lib/blockWait";
 import { useAuth } from "@/contexts/AuthContext";
 import { withCallerHex, withCallerField } from "@/lib/callerIdentity";
 import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
@@ -119,6 +123,12 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
   // Processing/paid state
   const [txHash, setTxHash] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  // The customer's wallet has a payment (or incoming LANA) not in a block yet,
+  // so this payment cannot go out yet — NOT a failed payment (lib/blockWait).
+  const [blockWait, setBlockWait] = useState<BlockWait>(null);
+  // The till did not hear whether the customer's LANA moved. Never shown as
+  // "payment not received": it may have been received.
+  const [inReview, setInReview] = useState(false);
 
   // Cross-tab entry
   useEffect(() => {
@@ -180,6 +190,8 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
     }
 
     setScanError(null);
+    setBlockWait(null);
+    setInReview(false);
     setIsCheckingBalance(true);
     setIsFrozen(false);
 
@@ -266,6 +278,16 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         return;
       }
 
+      // An earlier payment from this wallet still waiting for its block means the
+      // coins on offer may already be spent: the node would refuse this payment
+      // until that block (19 Oct 2026: six refusals in a row). Say so, sign nothing.
+      const wait = blockWaitBeforeSigning(balanceData, Math.round(lanaAmount * 1e8));
+      if (wait) {
+        setBlockWait(wait);
+        setIsCheckingBalance(false);
+        return;
+      }
+
       // Sufficient balance — proceed to processing
       setIsCheckingBalance(false);
       setStep("processing");
@@ -339,6 +361,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         receipt_description: analysisDescription || undefined,
       };
 
+      let purchaseSent = false;
       try {
         // ── Client-side signing (the ONLY path) ──────────────────
         // 1) Ask Brain for the recipient list (read-only, no DB writes)
@@ -396,6 +419,9 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
 
         const purchaseBody = { ...basePurchaseBody, signed_tx_hex: signedTxHex, allocations };
 
+        // From here on the signed payment has left the till: a lost answer means
+        // "we do not know", never "not received".
+        purchaseSent = true;
         const purchaseRes = await fetch('/api/brain/purchase', {
           method: 'POST',
           headers: withCallerHex({ 'Content-Type': 'application/json' }),
@@ -428,9 +454,15 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             );
           } else if (purchaseRes.status === 402 && brainData?.error === 'CUSTOMER_LANA_FAILED') {
             // The customer's LANA funding TX was rejected by the network — NO
-            // payment was received and NO payout was released. The seller must
-            // NOT hand over goods. Loud, clear, localized message.
-            setPurchaseError(t('purchase.customerLanaFailed'));
+            // payment was received and NO payout was released. When the refusal
+            // is the "coin already spent" kind and the wallet still has a payment
+            // waiting for its block, that is why: say so (calm, amber). Otherwise
+            // the seller must NOT hand over goods — loud, clear, localized.
+            const after = blockWaitAfterRejection(brainData?.reason || brainData?.message, await readBalanceSnapshot(ids.walletId));
+            if (after) setBlockWait(after);
+            else setPurchaseError(t('purchase.customerLanaFailed'));
+          } else if (isOutcomeUnknown(purchaseRes.status, brainData)) {
+            setInReview(true);
           } else {
             setPurchaseError(excludedMessage(purchaseRes.status, brainData, t) || brainData.error || t('lana.purchaseFailed'));
           }
@@ -441,7 +473,8 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         setTxHash(brainData.data.tx_hash || brainData.data.transaction_id);
         setStep("paid");
       } catch (err: any) {
-        setPurchaseError(t('lana.networkError'));
+        if (purchaseSent) setInReview(true);
+        else setPurchaseError(t('lana.networkError'));
         setStep("display");
       }
 
@@ -465,6 +498,8 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
     setIsFrozen(false);
     setTxHash(null);
     setPurchaseError(null);
+    setBlockWait(null);
+    setInReview(false);
     onClearRequest?.();
   };
 
@@ -848,8 +883,51 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           </div>
         )}
 
+        {/* Waiting for a block — this payment cannot go out YET. Not a failure:
+            nothing was sent, and a scan after the block goes through. */}
+        {blockWait && !inReview && !purchaseError && !isCheckingBalance && !isFrozen && !scanError && (
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-amber-50 dark:bg-amber-500/5 border-2 border-amber-300 dark:border-amber-500/30 p-6">
+              <div className="flex flex-col items-center text-center gap-3">
+                <Clock className="w-12 h-12 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                <p className="text-lg font-bold text-amber-700 dark:text-amber-400">{t('purchase.waitingForBlockTitle')}</p>
+                <p className="text-base font-medium text-amber-800 dark:text-amber-300 leading-snug">
+                  {t(blockWait === 'outgoing' ? 'purchase.previousPaymentPending' : 'purchase.incomingPaymentPending')}
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={() => { setBlockWait(null); setWifScannerOpen(true); }}
+              className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              {t('common.scanAgain')}
+            </Button>
+          </div>
+        )}
+
+        {/* Outcome unknown — the payment may have gone through. Never "not
+            received", and no "try again": a second scan could charge twice. */}
+        {inReview && !isCheckingBalance && !isFrozen && (
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-blue-50 border-2 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800 p-6">
+              <div className="flex flex-col items-center text-center gap-3">
+                <Loader2 className="w-12 h-12 text-blue-500 flex-shrink-0 animate-spin" />
+                <p className="text-lg font-bold text-blue-700 dark:text-blue-400">{t('purchase.inReviewTitle')}</p>
+                <p className="text-base font-medium text-blue-700 dark:text-blue-300 leading-snug">{t('purchase.customerLanaInReview')}</p>
+              </div>
+            </div>
+            <Button
+              onClick={resetAll}
+              variant="outline"
+              className="w-full h-14 rounded-2xl text-base font-semibold"
+            >
+              {t('common.back')}
+            </Button>
+          </div>
+        )}
+
         {/* Prompt to scan — when idle */}
-        {!scanError && !purchaseError && !isCheckingBalance && !isFrozen && (
+        {!scanError && !purchaseError && !blockWait && !inReview && !isCheckingBalance && !isFrozen && (
           <div className="flex flex-col items-center gap-4">
             <p className="text-sm text-muted-foreground text-center">
               {t('lana.askCustomerWif')}

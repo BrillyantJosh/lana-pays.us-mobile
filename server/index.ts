@@ -263,6 +263,7 @@ app.get('/api/balance/:address', async (req, res) => {
       address,
       confirmed: result.confirmed,
       unconfirmed: result.unconfirmed,
+      unconfirmedLanoshis: result.unconfirmedLanoshis ?? null,
       lana: result.balance,
       fiatValue: Math.round(result.balance * rate * 100) / 100,
       rate,

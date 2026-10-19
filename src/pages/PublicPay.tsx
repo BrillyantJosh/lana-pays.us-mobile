@@ -28,6 +28,10 @@ import { QRScanner } from '@/components/QRScanner';
 import { convertWifToIds } from '@/lib/crypto';
 import { signCustomerLanaTx } from '@/lib/transaction';
 import { classifyWifInput } from '@/lib/wifInput';
+import {
+  blockWaitBeforeSigning, blockWaitAfterRejection, isOutcomeUnknown, readBalanceSnapshot,
+  type BlockWait,
+} from '@/lib/blockWait';
 import { currencySymbol, formatLana, formatLanoshis } from '@/lib/format';
 import { isMerchantUnavailable, exclusionFromRefusal } from '@/lib/exclusion';
 import { changeLanguage } from '@/i18n';
@@ -78,6 +82,12 @@ const PublicPay = () => {
   // customer sees whether they actually have enough before paying.
   const [customerBalance, setCustomerBalance] = useState<number | null>(null);
   const [paidResult, setPaidResult] = useState<{ txHash: string; lanaPaidLanoshis: number | null; exchangeRate: number | null } | null>(null);
+  // An earlier payment from this wallet (or LANA just received) is not in a
+  // block yet, so this one cannot go out yet. Not a failure — see lib/blockWait.
+  const [blockWait, setBlockWait] = useState<BlockWait>(null);
+  // We did not hear whether the payment went through. Never shown as "failed":
+  // the money may be on its way. The pay button gives way to "Check status".
+  const [inReview, setInReview] = useState(false);
 
   // The customer's key material lives ONLY in these refs for the duration of
   // the confirm→sign window. Never sent to any server, never persisted.
@@ -130,6 +140,8 @@ const PublicPay = () => {
     setError(null);
     setIsFrozen(false);
     setRateChanged(false);
+    setBlockWait(null);
+    setInReview(false);
     setPhase('checking');
 
     try {
@@ -181,6 +193,9 @@ const PublicPay = () => {
       if (!res.ok) throw new Error(balanceData.error || 'Failed to check balance');
       const walletLana = balanceData.lana || 0;
       setCustomerBalance(walletLana);
+      // Said on the confirm screen already, before anyone presses "pay";
+      // confirmAndPay reads the wallet again right before it signs.
+      setBlockWait(blockWaitBeforeSigning(balanceData, request.indicativeLanaLanoshis || 0));
       const neededLana = (request.indicativeLanaLanoshis || 0) / 1e8;
       if (neededLana > 0 && walletLana < neededLana) {
         setError(t('lana.insufficientBalance', {
@@ -267,6 +282,17 @@ const PublicPay = () => {
     if (!preview || !request) return;
     setPhase('paying');
     setError(null);
+    setInReview(false);
+
+    // Before signing: while an earlier payment from this wallet waits for its
+    // block, the coins on offer may already be spent and the node would refuse
+    // this one (19 Oct 2026: six refusals in a row). Say so, sign nothing.
+    const wait = blockWaitBeforeSigning(await readBalanceSnapshot(customerRef.current.wallet), preview.lanaTotalLanoshis);
+    setBlockWait(wait);
+    if (wait) {
+      setPhase('confirm');
+      return;
+    }
 
     let signedTxHex: string;
     try {
@@ -297,7 +323,9 @@ const PublicPay = () => {
       });
       json = await res.json();
     } catch {
-      setError(t('lana.networkError'));
+      // The signed payment left this device and no readable answer came back:
+      // it may have been paid. "Being verified", not "failed".
+      setInReview(true);
       setPhase('confirm');
       return;
     }
@@ -351,11 +379,26 @@ const PublicPay = () => {
     } else if (res.status === 422 && json?.error === 'INVALID_WALLET') {
       setError(json?.field === 'customer_wallet' ? t('purchase.invalidCustomerWallet') : t('purchase.invalidMerchantWallet'));
     } else if (res.status === 402 && json?.error === 'CUSTOMER_LANA_FAILED') {
-      setError(t('purchase.customerLanaFailed'));
+      // Refused by the node and nothing moved. When the refusal is the "coin
+      // already spent" kind and the wallet still has a payment waiting for its
+      // block, that is the reason — say that, calmly, instead of "failed".
+      const after = blockWaitAfterRejection(json?.reason || json?.message, await readBalanceSnapshot(customerRef.current.wallet));
+      if (after) setBlockWait(after);
+      else setError(t('purchase.customerLanaFailed'));
+    } else if (isOutcomeUnknown(res.status, json)) {
+      setInReview(true);
     } else {
       setError(json?.error || t('lana.purchaseFailed'));
     }
     setPhase('confirm');
+  };
+
+  /** "Check status": reload the request. Paid → the paid page. Still open → pay again
+   *  is safe (the server claims the request and the brain refuses a second payment
+   *  of the same invoice), so the button comes back. */
+  const checkStatus = async () => {
+    const r = await loadRequest();
+    if (r && r.status === 'pending') setInReview(false);
   };
 
   // ── Shared page chrome ───────────────────────────────────────────────────
@@ -514,6 +557,24 @@ const PublicPay = () => {
             <p className="text-sm font-semibold text-destructive text-center">{error}</p>
           </div>
         )}
+        {inReview && (
+          <div className="rounded-2xl bg-blue-50 border border-blue-200 dark:bg-blue-950/30 dark:border-blue-800 p-4">
+            <div className="flex items-start gap-3">
+              <Loader2 className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5 animate-spin" />
+              <p className="text-sm font-medium text-blue-700 dark:text-blue-400">{t('pay.inReview')}</p>
+            </div>
+          </div>
+        )}
+        {blockWait && !inReview && (
+          <div className="rounded-2xl bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/10 p-4">
+            <div className="flex items-start gap-3">
+              <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                {t(blockWait === 'outgoing' ? 'lana.previousPaymentPending' : 'lana.incomingPaymentPending')}
+              </p>
+            </div>
+          </div>
+        )}
         <div className="flex flex-col items-center gap-2 py-4">
           <p className="text-sm text-muted-foreground">{t('pay.youWillPay')}</p>
           <div className="flex items-center gap-3">
@@ -558,14 +619,24 @@ const PublicPay = () => {
           </div>
         )}
 
-        <Button
-          onClick={() => confirmAndPay(rateChanged)}
-          disabled={hasBalance && !enough}
-          className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
-        >
-          <CheckCircle2 className="w-5 h-5" />
-          {t('pay.confirmAndPay')}
-        </Button>
+        {inReview ? (
+          <Button
+            onClick={checkStatus}
+            className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
+          >
+            <Clock className="w-5 h-5" />
+            {t('pay.checkStatus')}
+          </Button>
+        ) : (
+          <Button
+            onClick={() => confirmAndPay(rateChanged)}
+            disabled={hasBalance && !enough}
+            className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
+          >
+            <CheckCircle2 className="w-5 h-5" />
+            {t('pay.confirmAndPay')}
+          </Button>
+        )}
       </>)
     );
   }
