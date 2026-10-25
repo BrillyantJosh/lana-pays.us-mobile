@@ -26,6 +26,7 @@ import { HEX64, unitForMerchant, unitIdsForMerchant } from './lib/merchantAuth.j
 import { gate, gateNames, excludedMerchant, merchantRefusal } from './lib/exclusionGate.js';
 import { requireSignedMerchant } from './lib/nip98.js';
 import { brainPayoutReader, type InvestorStatus } from './lib/brainPayouts.js';
+import { isBrainDuplicate, verifyBrainDuplicate, duplicateMismatchMessage } from './lib/brainDuplicate.js';
 import rateLimit from 'express-rate-limit';
 import type Database from 'better-sqlite3';
 import type { Express } from 'express';
@@ -631,16 +632,38 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
       });
     }
 
-    // 5) Brain dedup while WE are mid-'paying' ⇒ a previous attempt for this
-    //    request already succeeded at the brain (crash-between). Self-heal.
-    if (response.status === 409 && ['DUPLICATE_INVOICE', 'DUPLICATE_RECEIPT_IMAGE'].includes(data?.error)) {
-      console.warn(`[lana-online] Request ${row.id}: brain dedup during paying → assuming prior attempt succeeded (${data?.error})`);
+    // 5) Brain dedup while WE are mid-'paying'. It MAY mean a previous attempt
+    //    for this request already succeeded at the brain (crash-between) — or
+    //    that a DIFFERENT earlier purchase on this unit carries the same invoice
+    //    number or receipt photo (a till sale, a misread receipt), because the
+    //    brain's rule never compares the amount. Self-heal ONLY when the 409's
+    //    `original` is provably this request's own attempt
+    //    (lib/brainDuplicate.ts). Otherwise the request stays unpaid — the brain
+    //    did not broadcast this signed transaction — and the customer is
+    //    refused like any other brain refusal. Fail-closed: an older brain that
+    //    does not describe the original is NOT paid.
+    if (isBrainDuplicate(response.status, data)) {
+      const verdict = verifyBrainDuplicate(data, {
+        unitId: row.unit_id, currency: row.currency, amount: row.amount_fiat,
+        invoiceNumber: row.invoice_number, createdAt: row.created_at,
+      });
+      if (!verdict.paid || !verdict.original) {
+        const o = verdict.original;
+        const reason = verdict.reason || 'NO_ORIGINAL';
+        console.warn(`[lana-online] Request ${row.id}: brain ${data?.error} NOT taken as paid (${reason}; original ${o ? o.id.slice(0, 8) : 'not described'}) — request stays unpaid`);
+        revert(`brain ${data?.error} not this request (${reason})${o ? ` original=${o.id}` : ''}`);
+        // The pay page is public: nothing about the other purchase goes to it.
+        return res.status(409).json({ success: false, error: data.error, reason, message: duplicateMismatchMessage(reason) });
+      }
+      console.warn(`[lana-online] Request ${row.id}: brain ${data?.error} is this request's own earlier attempt (original ${verdict.original.id.slice(0, 8)}, ${verdict.original.amount} ${verdict.original.currency}) → paid`);
       db.prepare(`
         UPDATE payment_requests SET status = 'paid', paid_at = COALESCE(paid_at, datetime('now')),
+          brain_transaction_id = COALESCE(brain_transaction_id, ?),
           customer_hex = COALESCE(customer_hex, ?), customer_wallet = COALESCE(customer_wallet, ?),
           last_error = ?, last_error_at = datetime('now'), seen_by_merchant = 0
         WHERE token = ? AND status = 'paying'
-      `).run(customerHex, customerWallet, `assumed paid via brain dedup: ${data?.error}`, token);
+      `).run(verdict.original.id, customerHex, customerWallet,
+        `paid via verified brain dedup: ${data?.error} original=${verdict.original.id}`, token);
       return res.json({ success: true, alreadyPaid: true });
     }
 
