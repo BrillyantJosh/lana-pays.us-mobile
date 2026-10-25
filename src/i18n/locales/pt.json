@@ -132,6 +132,8 @@
   "cash.takePhoto": "Tirar foto",
   "cash.retakePhoto": "Repetir foto",
   "cash.continueToInvoice": "Continuar para fatura",
+  "cash.fixInvoiceNumber": "Corrigir o número da fatura",
+  "cash.fixInvoiceHint": "Escreve o número impresso neste recibo (sem recibo: uma nova descrição desta compra). Será verificado de novo.",
   "cash.skipNoReceipt": "Pular — sem recibo disponível",
   "cash.analyzingImage": "Analisando imagem...",
   "cash.receiptDetected": "Recibo detectado",

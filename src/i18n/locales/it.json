@@ -132,6 +132,8 @@
   "cash.takePhoto": "Scatta foto",
   "cash.retakePhoto": "Ripeti foto",
   "cash.continueToInvoice": "Continua alla fattura",
+  "cash.fixInvoiceNumber": "Correggi il numero della fattura",
+  "cash.fixInvoiceHint": "Inserisci il numero stampato su questo scontrino (senza scontrino: una nuova descrizione di questo acquisto). Verrà controllato di nuovo.",
   "cash.skipNoReceipt": "Salta — nessuno scontrino disponibile",
   "cash.analyzingImage": "Analisi immagine...",
   "cash.receiptDetected": "Scontrino rilevato",

@@ -14,6 +14,8 @@ import { parseAmountInput, clampCashAmount, getCashMaxTx } from "@/lib/max-tx";
 import { withCallerHex, withCallerField } from "@/lib/callerIdentity";
 import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
 import { localNameFor, registeredCardStep, newCardMode, regularCustomerStep, type ProfileStatus } from "@/lib/customerName";
+import { freshReceiptFields, duplicateRefusal, checkDedup, canContinueAfterHit, type DedupHit } from "@/lib/receiptDedup";
+import { DuplicateNumberFix, RefusedNumberHint } from "@/components/DuplicateNumberFix";
 
 const currencyIcons: Record<string, typeof PoundSterling> = {
   GBP: PoundSterling, USD: DollarSign, EUR: Euro,
@@ -214,10 +216,14 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   const [analysisDescription, setAnalysisDescription] = useState<string | null>(null);
 
   // Pre-flight dedup result — set when Brain reports the receipt or invoice
-  // was already used for a prior persisted purchase on this unit. While
-  // populated, the "Continue to Invoice" button is hidden so the seller can't
-  // waste time filling in customer details for a purchase that will be rejected.
-  const [dedupHit, setDedupHit] = useState<{ by: 'receipt_image' | 'invoice'; date: string } | null>(null);
+  // was already used for a prior persisted purchase on this unit. A hit on the
+  // PHOTO hides "Continue" (a new photo is needed); a hit on the NUMBER lets
+  // the seller correct the number in place (lib/receiptDedup).
+  const [dedupHit, setDedupHit] = useState<DedupHit | null>(null);
+  const [recheckingNumber, setRecheckingNumber] = useState(false);
+  // The number the brain refused at payment time — the invoice step asks for
+  // a different one before the wallet can be scanned again.
+  const [refusedNumber, setRefusedNumber] = useState<string | null>(null);
 
   // Cross-tab entry: wallet already verified from WalletsTab
   const initializedRef = useRef(false);
@@ -317,6 +323,17 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     setUploadError(null);
     setDedupHit(null);            // wipe any prior duplicate flag — fresh upload, fresh check
     setReceiptHash(null);
+    setReceiptUrl(null);
+    // A new photo starts from empty fields: nothing carried over from the
+    // previous photo. 16 Oct 2026 (Alaja): a product photo went on with the
+    // previous receipt's number, and the brain refused it at payment.
+    const fresh = freshReceiptFields();
+    setInvoiceNumber(fresh.invoiceNumber);
+    setAmount(fresh.amount);
+    setReceiptType('receipt');
+    setAnalysisDescription(null);
+    setRefusedNumber(null);
+    setSubmitError(null);
 
     // Show preview from the ORIGINAL so the seller sees what they captured
     const reader = new FileReader();
@@ -416,32 +433,45 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
 
     // ── Pre-flight dedup check ─────────────────────────────────────────
     // If Brain already has a persisted purchase with this receipt_hash or
-    // (when Claude extracted one) invoice_number for the same shop, set
-    // dedupHit so the Continue button hides and a friendly message shows.
-    // This is purely UX — Brain still enforces dedup at submit, so the
+    // (when Claude extracted one) invoice_number for the same shop, say so
+    // now. This is purely UX — Brain still enforces dedup at submit, so the
     // worst case if this check fails or is bypassed is a 409 then.
-    if (unitId && (localHash || localInvoiceNumber)) {
-      try {
-        const dedupRes = await fetch('/api/brain/purchase/check-dedup', {
-          method: 'POST',
-          headers: withCallerHex({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            unit_id: unitId,
-            receipt_hash: localHash || undefined,
-            invoice_number: localInvoiceNumber || undefined,
-          }),
-        });
-        const dedupData = await dedupRes.json();
-        if (dedupData?.duplicate && (dedupData.by === 'receipt_image' || dedupData.by === 'invoice')) {
-          const date = dedupData.original_created_at
-            ? new Date(dedupData.original_created_at + 'Z').toLocaleString()
-            : '';
-          setDedupHit({ by: dedupData.by, date });
-        }
-      } catch {
-        // Soft-fail: Brain will still catch it at submit time.
-      }
+    const hit = await checkDedup(unitId || '', { receiptHash: localHash, invoiceNumber: localInvoiceNumber }, withCallerHex({ 'Content-Type': 'application/json' }));
+    if (hit) setDedupHit(hit);
+  };
+
+  /** After a hit on the number: the seller typed the number printed on the
+   *  receipt. Ask again for THAT number, then go on. */
+  const continueAfterNumberFix = async () => {
+    if (!dedupHit || !canContinueAfterHit(dedupHit, invoiceNumber)) return;
+    setRecheckingNumber(true);
+    const again = await checkDedup(unitId || '', { invoiceNumber }, withCallerHex({ 'Content-Type': 'application/json' }));
+    setRecheckingNumber(false);
+    if (again) { setDedupHit(again); return; }
+    setDedupHit(null);
+    setStep("invoice");
+  };
+
+  /** The brain refused at payment. A refused NUMBER goes back to the number
+   *  field, a refused PHOTO back to the photo — never to "Scan again", which
+   *  only reopens the wallet scanner and would send the same thing again. */
+  const showPurchaseRefusal = (status: number, data: any, sentNumber: string) => {
+    const dup = duplicateRefusal(status, data, sentNumber);
+    if (dup?.by === 'invoice') {
+      setCheckError(null);
+      setSubmitError(formatPurchaseError(status, data));
+      setRefusedNumber(dup.number || null);
+      setStep("invoice");
+      return;
     }
+    if (dup?.by === 'receipt_image') {
+      setCheckError(null);
+      setSubmitError(null);
+      setDedupHit(dup);
+      setStep("receipt");
+      return;
+    }
+    setSubmitError(formatPurchaseError(status, data));
   };
 
   const fetchBalance = async (address: string) => {
@@ -458,6 +488,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     setReceiptUrl(null);
     setReceiptHash(null);
     setDedupHit(null);
+    setRefusedNumber(null);
     setUploadError(null);
     setWalletId(null);
     setNostrHexId(null);
@@ -681,7 +712,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           setIsSubmitting(false);
 
           if (!res.ok || !purchaseData.success) {
-            setSubmitError(formatPurchaseError(res.status, purchaseData));
+            showPurchaseRefusal(res.status, purchaseData, pd.invoiceNumber);
             return;
           }
 
@@ -790,7 +821,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        setSubmitError(formatPurchaseError(res.status, data));
+        showPurchaseRefusal(res.status, data, pd.invoiceNumber);
         return;
       }
 
@@ -923,7 +954,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           const purchaseData = await purchaseRes.json();
 
           if (!purchaseRes.ok || !purchaseData.success) {
-            setSubmitError(formatPurchaseError(purchaseRes.status, purchaseData));
+            showPurchaseRefusal(purchaseRes.status, purchaseData, pd.invoiceNumber);
             return;
           }
 
@@ -1006,13 +1037,24 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             <p className="text-xl text-foreground/85 mt-1.5 leading-relaxed whitespace-pre-wrap break-words">{analysisDescription}</p>
           </div>
         )}
-        {/* Pre-flight dedup banner — hides Continue while shown */}
+        {/* Pre-flight dedup banner — a hit on the photo hides Continue; a hit
+            on the number offers to correct it in place */}
         {dedupHit && (
           <div className="rounded-2xl p-4 border bg-destructive/10 border-destructive/20">
             <p className="text-xl text-destructive text-center leading-relaxed">
               {t(dedupHit.by === 'receipt_image' ? 'cash.duplicateReceiptImage' : 'cash.duplicateInvoice', { date: dedupHit.date })}
             </p>
           </div>
+        )}
+        {dedupHit?.by === 'invoice' && !isAnalyzing && (
+          <DuplicateNumberFix
+            hit={dedupHit}
+            value={invoiceNumber}
+            onChange={setInvoiceNumber}
+            onContinue={continueAfterNumberFix}
+            checking={recheckingNumber}
+            disabled={isUploading}
+          />
         )}
         <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptFile(f); }} className="hidden" />
         <input ref={galleryInputRef} type="file" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptFile(f); }} className="hidden" />
@@ -1187,6 +1229,9 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   // ═══════════════════════════════════════════════════════════════
   // INVOICE STEP (default)
   // ═══════════════════════════════════════════════════════════════
+  // The brain refused this number at payment; the same number would be
+  // refused again, so the wallet is not scanned until it changes.
+  const numberStillRefused = refusedNumber !== null && invoiceNumber.trim() === refusedNumber.trim();
   return (
     <div className="flex flex-col gap-5 px-6 py-4">
       <div className="flex items-center gap-4">
@@ -1208,9 +1253,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           <Input
             placeholder={receiptType === 'receipt' ? t('cash.invoicePlaceholder') : t('cash.descriptionPlaceholder')}
             value={invoiceNumber}
-            onChange={(e) => setInvoiceNumber(e.target.value)}
+            onChange={(e) => {
+              setInvoiceNumber(e.target.value);
+              if (refusedNumber) setSubmitError(null);
+            }}
             className="h-12 rounded-xl bg-background border-input"
           />
+          <RefusedNumberHint refused={refusedNumber} current={invoiceNumber} />
           {receiptType === 'photo' && (
             <p className="text-[11px] text-muted-foreground">{t('cash.noReceiptDescription')}</p>
           )}
@@ -1264,7 +1313,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           setStep("scan");
           setScannerOpen(true);
         }}
-        disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || cashBlocked()}
+        disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || cashBlocked() || numberStillRefused}
         className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
       >
         <Camera className="w-5 h-5" />{t('cash.scanCustomerWallet')}
@@ -1303,7 +1352,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
                 <button
                   key={c.customer_hex_id}
                   onClick={() => handleSelectRegularCustomer(c)}
-                  disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || cashBlocked()}
+                  disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || cashBlocked() || numberStillRefused}
                   className="rounded-xl bg-card border border-border p-3 flex items-center gap-3 active:scale-[0.98] transition-all hover:border-primary/30 disabled:opacity-40 disabled:pointer-events-none text-left"
                 >
                   {c.picture ? (

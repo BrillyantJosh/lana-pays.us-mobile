@@ -132,6 +132,8 @@
   "cash.takePhoto": "Zrób zdjęcie",
   "cash.retakePhoto": "Powtórz zdjęcie",
   "cash.continueToInvoice": "Przejdź do faktury",
+  "cash.fixInvoiceNumber": "Popraw numer faktury",
+  "cash.fixInvoiceHint": "Wpisz numer wydrukowany na tym paragonie (bez paragonu: nowy opis tego zakupu). Zostanie ponownie sprawdzony.",
   "cash.skipNoReceipt": "Pomiń — brak paragonu",
   "cash.analyzingImage": "Analizowanie obrazu...",
   "cash.receiptDetected": "Wykryto paragon",

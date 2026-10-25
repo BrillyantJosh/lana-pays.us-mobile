@@ -144,6 +144,8 @@
   "cash.takePhoto": "Take Photo",
   "cash.retakePhoto": "Retake Photo",
   "cash.continueToInvoice": "Continue to Invoice",
+  "cash.fixInvoiceNumber": "Correct the invoice number",
+  "cash.fixInvoiceHint": "Type the number printed on this receipt (without a receipt: a new description of this purchase). It is checked again.",
   "cash.skipNoReceipt": "Skip — no receipt available",
   "cash.analyzingImage": "Analyzing image...",
   "cash.receiptDetected": "Receipt detected",

@@ -132,6 +132,8 @@
   "cash.takePhoto": "拍照",
   "cash.retakePhoto": "重新拍照",
   "cash.continueToInvoice": "继续填写发票",
+  "cash.fixInvoiceNumber": "更正发票号码",
+  "cash.fixInvoiceHint": "请输入此收据上印的号码（无收据时：输入此次购买的新描述）。系统会再次核对。",
   "cash.skipNoReceipt": "跳过 — 没有收据",
   "cash.analyzingImage": "分析图片中...",
   "cash.receiptDetected": "已检测到收据",

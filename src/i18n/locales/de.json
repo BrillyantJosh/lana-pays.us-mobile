@@ -132,6 +132,8 @@
   "cash.takePhoto": "Foto aufnehmen",
   "cash.retakePhoto": "Foto wiederholen",
   "cash.continueToInvoice": "Weiter zur Rechnung",
+  "cash.fixInvoiceNumber": "Rechnungsnummer korrigieren",
+  "cash.fixInvoiceHint": "Gib die auf diesem Beleg gedruckte Nummer ein (ohne Beleg: eine neue Beschreibung dieses Kaufs). Sie wird erneut geprüft.",
   "cash.skipNoReceipt": "Überspringen — keine Quittung vorhanden",
   "cash.analyzingImage": "Bild wird analysiert...",
   "cash.receiptDetected": "Quittung erkannt",

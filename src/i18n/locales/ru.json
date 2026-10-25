@@ -132,6 +132,8 @@
   "cash.takePhoto": "Сделать фото",
   "cash.retakePhoto": "Переснять фото",
   "cash.continueToInvoice": "Перейти к счёту",
+  "cash.fixInvoiceNumber": "Исправить номер счёта",
+  "cash.fixInvoiceHint": "Введите номер, напечатанный на этом чеке (без чека — новое описание этой покупки). Он будет проверен ещё раз.",
   "cash.skipNoReceipt": "Пропустить — чек отсутствует",
   "cash.analyzingImage": "Анализ изображения...",
   "cash.receiptDetected": "Чек обнаружен",

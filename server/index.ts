@@ -26,6 +26,7 @@ import { registerPaymentRequestRoutes } from './paymentRequests.js';
 import { registerOrderRoutes } from './orders.js';
 import { devRelays } from './lib/devOverrides.js';
 import { getMaxTransaction, foldQuotaRemaining, foldCustomerWindow, readCustomerWindowDays, clampCashAmount, round2 } from './lib/maxTransaction.js';
+import { analyzeReceiptImage } from './lib/receiptAnalysis.js';
 
 // Seed list used only on a fresh DB before the first heartbeat (see line ~964).
 // Kept in sync with server/lib/nostr.ts, including its dev-only override so a
@@ -1624,9 +1625,9 @@ app.post('/api/receipt/upload', receiptUpload.single('receipt'), gate(db, upload
 });
 
 // ─── Receipt Analysis (Claude Vision) ──────────────────
-import sharp from 'sharp';
+// The prompt, the model call and the checks on its answer live in
+// lib/receiptAnalysis.ts (testable, and runnable on a stored receipt).
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const MAX_IMAGE_BYTES = 3_500_000; // 3.5 MB raw → ~4.7 MB base64 (under Claude's 5 MB limit)
 
 app.post('/api/receipt/analyze', receiptUpload.single('receipt'), gate(db, uploadCaller, discardUploads), requireCaller, async (req, res) => {
   if (!req.file) {
@@ -1638,124 +1639,15 @@ app.post('/api/receipt/analyze', receiptUpload.single('receipt'), gate(db, uploa
   }
 
   try {
-    let imageBuffer = req.file.buffer;
-    let mediaType: 'image/jpeg' | 'image/png' | 'image/webp' = req.file.mimetype as any;
-    const currency = (req.body.currency as string) || 'EUR';
-
-    // The seller's UI language — Claude writes the human-readable
-    // items/description in this language so the receipt summary matches
-    // the rest of the app. Map our short codes to full language names so
-    // the model is unambiguous. Falls back to English.
-    const LANG_NAMES: Record<string, string> = {
-      en: 'English', sl: 'Slovenian', de: 'German', it: 'Italian', es: 'Spanish',
-      pt: 'Portuguese', hr: 'Croatian', sr: 'Serbian', pl: 'Polish',
-      hu: 'Hungarian', ru: 'Russian', zh: 'Chinese',
-    };
-    const langCode = ((req.body.lang as string) || 'en').slice(0, 2).toLowerCase();
-    const langName = LANG_NAMES[langCode] || 'English';
-
-    // Resize if image exceeds Claude's 5 MB base64 limit
-    if (imageBuffer.length > MAX_IMAGE_BYTES) {
-      console.log(`[mobile] Receipt image too large (${(imageBuffer.length / 1024 / 1024).toFixed(1)} MB), resizing...`);
-      imageBuffer = await sharp(imageBuffer)
-        .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 80 })
-        .toBuffer();
-      mediaType = 'image/jpeg';
-      console.log(`[mobile] Resized to ${(imageBuffer.length / 1024 / 1024).toFixed(1)} MB`);
-    }
-
-    const base64Image = imageBuffer.toString('base64');
-
-    const requestBody = JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 500,
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: mediaType, data: base64Image },
-          },
-          {
-            type: 'text',
-            text: `Analyze this image. Respond ONLY with valid JSON (no markdown, no code blocks).
-
-If this is a receipt/invoice/bill:
-{"isReceipt":true,"amount":NUMBER_OR_NULL,"currency":"${currency}","invoiceNumber":"STRING_OR_NULL","items":"brief description of purchased items"}
-
-If this is NOT a receipt (photo of people, items, scene, etc.):
-{"isReceipt":false,"description":"what the image shows in 1-2 sentences","amount":null,"invoiceNumber":null}
-
-Rules:
-- amount must be a number (no currency symbols), or null if unreadable
-- invoiceNumber: receipt/invoice number if visible, null otherwise
-- For non-receipts, describe what you see objectively
-- IMPORTANT: write the "items" and "description" text in ${langName}. All other JSON keys and values stay exactly as specified.`
-          }
-        ]
-      }],
+    const analysis = await analyzeReceiptImage({
+      buffer: req.file.buffer,
+      mediaType: req.file.mimetype,
+      currency: (req.body.currency as string) || 'EUR',
+      // The seller's UI language — Claude writes the human-readable
+      // items/description in it, so the summary matches the rest of the app.
+      lang: req.body.lang as string,
+      apiKey: ANTHROPIC_API_KEY,
     });
-
-    // Retry on transient Anthropic errors: 429 (rate-limited), 5xx, 529 (overloaded).
-    // Backoff: 500 ms → 1500 ms → 3500 ms (max 3 attempts, total <6 s).
-    const RETRY_DELAYS_MS = [500, 1500, 3500];
-    let response: Response | null = null;
-    let lastErrText = '';
-    let lastStatus = 0;
-
-    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: requestBody,
-      });
-
-      if (r.ok) { response = r; break; }
-
-      lastStatus = r.status;
-      lastErrText = await r.text();
-      const transient = r.status === 429 || r.status === 529 || (r.status >= 500 && r.status < 600);
-
-      if (!transient || attempt === RETRY_DELAYS_MS.length) {
-        // Non-retryable, or out of retries
-        console.error(`[mobile] Claude Vision error (attempt ${attempt + 1}):`, r.status, lastErrText);
-        break;
-      }
-
-      console.warn(`[mobile] Claude Vision transient ${r.status}, retrying in ${RETRY_DELAYS_MS[attempt]}ms (attempt ${attempt + 1}/${RETRY_DELAYS_MS.length + 1})`);
-      await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
-    }
-
-    if (!response) {
-      // All attempts failed — signal the reason so the client can show a sensible message.
-      const overloaded = lastStatus === 429 || lastStatus === 529 || (lastStatus >= 500 && lastStatus < 600);
-      return res.json({
-        isReceipt: false,
-        description: '',
-        amount: null,
-        invoiceNumber: null,
-        analysisError: overloaded ? 'overloaded' : 'failed',
-      });
-    }
-
-    const result = await response.json();
-    const text = result.content?.[0]?.text || '{}';
-
-    // Parse the JSON response (handle potential markdown wrapping)
-    let analysis;
-    try {
-      const jsonStr = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      analysis = JSON.parse(jsonStr);
-    } catch {
-      console.warn('[mobile] Failed to parse Claude response:', text);
-      analysis = { isReceipt: false, description: text.slice(0, 200), amount: null, invoiceNumber: null };
-    }
-
     res.json(analysis);
   } catch (err: any) {
     console.error('[mobile] Receipt analysis error:', err.message);

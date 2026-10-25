@@ -15,6 +15,8 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { withCallerHex, withCallerField } from "@/lib/callerIdentity";
 import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
+import { freshReceiptFields, duplicateRefusal, checkDedup, canContinueAfterHit, type DedupHit } from "@/lib/receiptDedup";
+import { DuplicateNumberFix, RefusedNumberHint } from "@/components/DuplicateNumberFix";
 import lanaIcon from "@/assets/lana-icon.png";
 
 /**
@@ -102,9 +104,14 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
   const [receiptType, setReceiptType] = useState<'receipt' | 'photo'>('receipt');
   const [analysisDescription, setAnalysisDescription] = useState<string | null>(null);
   // Pre-flight dedup result — populated after upload+analyse if Brain already
-  // has a persisted purchase with this receipt hash or invoice number. Hides
-  // the "Continue" button until the seller retakes the photo.
-  const [dedupHit, setDedupHit] = useState<{ by: 'receipt_image' | 'invoice'; date: string } | null>(null);
+  // has a persisted purchase with this receipt hash or invoice number. A hit
+  // on the PHOTO hides "Continue" until the seller retakes it; a hit on the
+  // NUMBER lets the seller correct the number in place (lib/receiptDedup).
+  const [dedupHit, setDedupHit] = useState<DedupHit | null>(null);
+  const [recheckingNumber, setRecheckingNumber] = useState(false);
+  // The brain refused this number at payment time: the entry step shows why
+  // and asks for a different number before the customer pays again.
+  const [numberRefusal, setNumberRefusal] = useState<{ message: string; number: string } | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [amount, setAmount] = useState("");
   const [lanaAmount, setLanaAmount] = useState<number>(0);
@@ -168,9 +175,12 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
     }
   };
 
+  // The same number would be refused again — wait until it changes.
+  const numberStillRefused = numberRefusal !== null && invoiceNumber.trim() === numberRefusal.number.trim();
+
   const handleContinue = () => {
     const fiat = parseFloat(amount.replace(',', '.'));
-    if (!invoiceNumber.trim() || isNaN(fiat) || fiat <= 0) return;
+    if (!invoiceNumber.trim() || isNaN(fiat) || fiat <= 0 || numberStillRefused) return;
     fetchRateAndAdvance(fiat);
   };
 
@@ -434,15 +444,21 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           // Brain returns 409 with a structured body when this receipt was
           // already used for a prior purchase. Surface a clear localized
           // message naming the date of the original transaction.
-          if (purchaseRes.status === 409 && (brainData?.error === 'DUPLICATE_RECEIPT_IMAGE' || brainData?.error === 'DUPLICATE_INVOICE')) {
-            const date = brainData?.original_created_at
-              ? new Date(brainData.original_created_at + 'Z').toLocaleString()
-              : '';
-            const key = brainData.error === 'DUPLICATE_RECEIPT_IMAGE'
-              ? 'cash.duplicateReceiptImage'
-              : 'cash.duplicateInvoice';
-            setPurchaseError(t(key, { date }));
-          } else if (purchaseRes.status === 409 && brainData?.error === 'SELF_PURCHASE') {
+          // The brain refuses BEFORE any LANA is sent, so nothing moved. Go
+          // back to what has to change — the number field, or the photo —
+          // not to "Try again", which would send the same thing again.
+          const dup = duplicateRefusal(purchaseRes.status, brainData, basePurchaseBody.invoice_number);
+          if (dup?.by === 'invoice') {
+            setNumberRefusal({ message: t('cash.duplicateInvoice', { date: dup.date }), number: dup.number || '' });
+            setStep("entry");
+            return;
+          }
+          if (dup?.by === 'receipt_image') {
+            setDedupHit(dup);
+            setStep("receipt");
+            return;
+          }
+          if (purchaseRes.status === 409 && brainData?.error === 'SELF_PURCHASE') {
             // Brain layer-2 self-purchase rejection (multi-wallet history).
             setPurchaseError(t('purchase.cannotSellToYourself'));
           } else if (purchaseRes.status === 422 && brainData?.error === 'INVALID_WALLET') {
@@ -488,6 +504,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
     setStep("entry");
     setInvoiceNumber("");
     setAmount("");
+    setNumberRefusal(null);
     setLanaAmount(0);
     setExchangeRate(0);
     setRateError(null);
@@ -513,6 +530,17 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
     setUploadError(null);
     setDedupHit(null);
     setReceiptHash(null);
+    setReceiptUrl(null);
+    // A new photo starts from empty fields: nothing carried over from the
+    // previous photo (16 Oct 2026, Alaja: a product photo went on with the
+    // previous receipt's number and was refused at payment). Only what another
+    // tab handed over stays — it did not come from a photo.
+    const fresh = freshReceiptFields(paymentRequest ? { invoiceNumber: paymentRequest.invoiceNumber, amount: paymentRequest.amount } : null);
+    setInvoiceNumber(fresh.invoiceNumber);
+    setAmount(fresh.amount);
+    setReceiptType('receipt');
+    setAnalysisDescription(null);
+    setNumberRefusal(null);
 
     // Show preview from the ORIGINAL so the seller sees what they captured
     const reader = new FileReader();
@@ -588,32 +616,22 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
 
     // ── Pre-flight dedup check ─────────────────────────────────────────
     // Ask Brain if this receipt was already used (by image hash or by the
-    // invoice number Claude just extracted). On hit, dedupHit hides the
-    // "Continue" button until the seller retakes a fresh photo. Brain
-    // still enforces dedup at submit, so a soft fail here is acceptable.
-    const unit = unitIdRef.current;
-    if (unit && (localHash || localInvoiceNumber)) {
-      try {
-        const dedupRes = await fetch('/api/brain/purchase/check-dedup', {
-          method: 'POST',
-          headers: withCallerHex({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            unit_id: unit,
-            receipt_hash: localHash || undefined,
-            invoice_number: localInvoiceNumber || undefined,
-          }),
-        });
-        const dedupData = await dedupRes.json();
-        if (dedupData?.duplicate && (dedupData.by === 'receipt_image' || dedupData.by === 'invoice')) {
-          const date = dedupData.original_created_at
-            ? new Date(dedupData.original_created_at + 'Z').toLocaleString()
-            : '';
-          setDedupHit({ by: dedupData.by, date });
-        }
-      } catch {
-        // Soft-fail: Brain re-enforces on submit anyway.
-      }
-    }
+    // invoice number Claude just extracted). Brain still enforces dedup at
+    // submit, so a soft fail here is acceptable.
+    const hit = await checkDedup(unitIdRef.current || '', { receiptHash: localHash, invoiceNumber: localInvoiceNumber }, withCallerHex({ 'Content-Type': 'application/json' }));
+    if (hit) setDedupHit(hit);
+  };
+
+  /** After a hit on the number: the seller typed the number printed on the
+   *  receipt. Ask again for THAT number, then go on. */
+  const continueAfterNumberFix = async () => {
+    if (!dedupHit || !canContinueAfterHit(dedupHit, invoiceNumber)) return;
+    setRecheckingNumber(true);
+    const again = await checkDedup(unitIdRef.current || '', { invoiceNumber }, withCallerHex({ 'Content-Type': 'application/json' }));
+    setRecheckingNumber(false);
+    if (again) { setDedupHit(again); return; }
+    setDedupHit(null);
+    setStep("entry");
   };
 
   // ─── STEP: Receipt ─────────────────────────────
@@ -654,13 +672,24 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             <p className="text-xl text-foreground/85 mt-1.5 leading-relaxed whitespace-pre-wrap break-words">{analysisDescription}</p>
           </div>
         )}
-        {/* Pre-flight dedup banner — hides Continue while shown */}
+        {/* Pre-flight dedup banner — a hit on the photo hides Continue; a hit
+            on the number offers to correct it in place */}
         {dedupHit && (
           <div className="rounded-2xl p-4 border bg-destructive/10 border-destructive/20">
             <p className="text-xl text-destructive text-center leading-relaxed">
               {t(dedupHit.by === 'receipt_image' ? 'cash.duplicateReceiptImage' : 'cash.duplicateInvoice', { date: dedupHit.date })}
             </p>
           </div>
+        )}
+        {dedupHit?.by === 'invoice' && !isAnalyzing && (
+          <DuplicateNumberFix
+            hit={dedupHit}
+            value={invoiceNumber}
+            onChange={setInvoiceNumber}
+            onContinue={continueAfterNumberFix}
+            checking={recheckingNumber}
+            disabled={isUploading}
+          />
         )}
         {!receiptPreview ? (
           <div className="grid grid-cols-2 gap-2">
@@ -722,6 +751,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
               onChange={(e) => setInvoiceNumber(e.target.value)}
               className="h-12 rounded-xl bg-background border-input"
             />
+            <RefusedNumberHint refused={numberRefusal?.number ?? null} current={invoiceNumber} />
           </div>
           <div className="space-y-2">
             <Label className="text-sm font-medium text-foreground">
@@ -758,6 +788,12 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           </div>
         </div>
 
+        {numberStillRefused && (
+          <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
+            <p className="text-xl text-destructive text-center leading-relaxed">{numberRefusal.message}</p>
+          </div>
+        )}
+
         {rateError && (
           <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
             <p className="text-sm text-destructive text-center">{rateError}</p>
@@ -766,7 +802,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
 
         <Button
           onClick={handleContinue}
-          disabled={!invoiceNumber.trim() || !amount.trim() || parseFloat(amount.replace(',', '.')) <= 0 || isLoadingRate || (() => {
+          disabled={!invoiceNumber.trim() || !amount.trim() || parseFloat(amount.replace(',', '.')) <= 0 || isLoadingRate || numberStillRefused || (() => {
             const maxTx = (window as any).__maxTransactionAmountLana;
             if (maxTx !== null && maxTx !== undefined && maxTx <= 0) return true;
             const parsed = parseFloat(amount.replace(',', '.'));

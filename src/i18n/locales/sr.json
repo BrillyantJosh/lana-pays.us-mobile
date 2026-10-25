@@ -132,6 +132,8 @@
   "cash.takePhoto": "Fotografiši",
   "cash.retakePhoto": "Ponovi fotografiju",
   "cash.continueToInvoice": "Nastavi ka fakturi",
+  "cash.fixInvoiceNumber": "Ispravi broj fakture",
+  "cash.fixInvoiceHint": "Upiši broj odštampan na ovom računu (bez računa: novi opis ove kupovine). Biće ponovo proveren.",
   "cash.skipNoReceipt": "Preskoči — račun nije dostupan",
   "cash.analyzingImage": "Analiza slike...",
   "cash.receiptDetected": "Račun detektovan",

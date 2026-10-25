@@ -28,6 +28,8 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
 import { currencySymbol as symbolFor } from '@/lib/format';
 import { PaymentRequestList, payUrlFor, type PaymentRequestRow } from '@/components/PaymentRequestList';
+import { freshReceiptFields, checkDedup, canContinueAfterHit, type DedupHit } from '@/lib/receiptDedup';
+import { DuplicateNumberFix } from '@/components/DuplicateNumberFix';
 import lanaIcon from '@/assets/lana-icon.png';
 
 /** Same own-dedup-screenshot heuristic as LanaTab/CashTab. */
@@ -75,7 +77,10 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [receiptType, setReceiptType] = useState<'receipt' | 'photo'>('receipt');
   const [analysisDescription, setAnalysisDescription] = useState<string | null>(null);
-  const [dedupHit, setDedupHit] = useState<{ by: 'receipt_image' | 'invoice'; date: string } | null>(null);
+  // A hit on the photo needs a new photo; a hit on the number can be
+  // corrected in place (lib/receiptDedup).
+  const [dedupHit, setDedupHit] = useState<DedupHit | null>(null);
+  const [recheckingNumber, setRecheckingNumber] = useState(false);
 
   // Entry step state
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -117,6 +122,15 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
     setUploadError(null);
     setDedupHit(null);
     setReceiptHash(null);
+    setReceiptUrl(null);
+    // A new photo starts from empty fields — nothing carried over from the
+    // previous photo (16 Oct 2026, Alaja; see lib/receiptDedup).
+    const fresh = freshReceiptFields();
+    setInvoiceNumber(fresh.invoiceNumber);
+    setAmount(fresh.amount);
+    setReceiptType('receipt');
+    setAnalysisDescription(null);
+    setCreateError(null);
 
     const reader = new FileReader();
     reader.onload = (e) => setReceiptPreview(e.target?.result as string);
@@ -172,27 +186,20 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
     finally { setIsAnalyzing(false); }
 
     // Pre-flight dedup against brain (soft-fail — brain re-enforces at pay time).
-    const unit = unitIdRef.current;
-    if (unit && (localHash || localInvoiceNumber)) {
-      try {
-        const dedupRes = await fetch('/api/brain/purchase/check-dedup', {
-          method: 'POST',
-          headers: withCallerHex({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            unit_id: unit,
-            receipt_hash: localHash || undefined,
-            invoice_number: localInvoiceNumber || undefined,
-          }),
-        });
-        const dedupData = await dedupRes.json();
-        if (dedupData?.duplicate && (dedupData.by === 'receipt_image' || dedupData.by === 'invoice')) {
-          const date = dedupData.original_created_at
-            ? new Date(dedupData.original_created_at + 'Z').toLocaleString()
-            : '';
-          setDedupHit({ by: dedupData.by, date });
-        }
-      } catch { /* soft-fail */ }
-    }
+    const hit = await checkDedup(unitIdRef.current || '', { receiptHash: localHash, invoiceNumber: localInvoiceNumber }, withCallerHex({ 'Content-Type': 'application/json' }));
+    if (hit) setDedupHit(hit);
+  };
+
+  /** After a hit on the number: the seller typed the number printed on the
+   *  receipt. Ask again for THAT number, then go on. */
+  const continueAfterNumberFix = async () => {
+    if (!dedupHit || !canContinueAfterHit(dedupHit, invoiceNumber)) return;
+    setRecheckingNumber(true);
+    const again = await checkDedup(unitIdRef.current || '', { invoiceNumber }, withCallerHex({ 'Content-Type': 'application/json' }));
+    setRecheckingNumber(false);
+    if (again) { setDedupHit(again); return; }
+    setDedupHit(null);
+    setStep('entry');
   };
 
   // ── Create the payment request ────────────────────────────────────────────
@@ -458,6 +465,16 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
             {t(dedupHit.by === 'receipt_image' ? 'cash.duplicateReceiptImage' : 'cash.duplicateInvoice', { date: dedupHit.date })}
           </p>
         </div>
+      )}
+      {dedupHit?.by === 'invoice' && !isAnalyzing && (
+        <DuplicateNumberFix
+          hit={dedupHit}
+          value={invoiceNumber}
+          onChange={setInvoiceNumber}
+          onContinue={continueAfterNumberFix}
+          checking={recheckingNumber}
+          disabled={isUploading}
+        />
       )}
       {!receiptPreview ? (
         <div className="grid grid-cols-2 gap-2">

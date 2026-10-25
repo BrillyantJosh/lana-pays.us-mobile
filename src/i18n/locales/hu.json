@@ -132,6 +132,8 @@
   "cash.takePhoto": "Fotó készítése",
   "cash.retakePhoto": "Újrafotózás",
   "cash.continueToInvoice": "Tovább a számlához",
+  "cash.fixInvoiceNumber": "Számlaszám javítása",
+  "cash.fixInvoiceHint": "Írd be a nyugtára nyomtatott számot (nyugta nélkül: a vásárlás új leírását). Újra ellenőrizzük.",
   "cash.skipNoReceipt": "Kihagyás — nincs nyugta",
   "cash.analyzingImage": "Kép elemzése...",
   "cash.receiptDetected": "Nyugta észlelve",
