@@ -59,6 +59,10 @@ export default function LandingSections() {
         register: 'Predstavite svojo ponudbo',
         quote: 'Ko vrednost kroži pošteno, obilje postane naravno stanje.',
         footerLine: 'Vaše delo. Vaša vrednost. Vaš tok.',
+        navAbundance: 'Obilje',
+        navServices: 'Možnosti',
+        navHow: 'Kako deluje',
+        navTrust: 'Zaupanje',
       }
     : {
         natureTitle: 'Abundance is a flow, not a promise.',
@@ -91,6 +95,10 @@ export default function LandingSections() {
         register: 'Present your offer',
         quote: 'When value circulates honestly, abundance becomes a natural state.',
         footerLine: 'Your work. Your value. Your flow.',
+        navAbundance: 'Abundance',
+        navServices: 'Options',
+        navHow: 'How it works',
+        navTrust: 'Trust',
       };
 
   useEffect(() => {

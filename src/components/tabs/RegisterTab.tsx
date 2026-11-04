@@ -4,7 +4,7 @@ import { ScanLine, KeyRound, Loader2, CheckCircle, XCircle, ArrowLeft } from "lu
 import { Button } from "@/components/ui/button";
 import { convertWifToIds } from "@/lib/crypto";
 import { signNostrEvent, publishToRelays } from "@/lib/nostrSigning";
-import QRScanner from "@/components/QRScanner";
+import { QRScanner } from "@/components/QRScanner";
 
 const LANGUAGES = [
   { code: 'en', name: 'English' },
@@ -27,7 +27,7 @@ interface DerivedIds {
   walletId: string;
   nostrHexId: string;
   nostrNpubId: string;
-  nostrPrivateKey: string;
+  privateKeyHex: string;
 }
 
 const RegisterTab = () => {
@@ -116,7 +116,7 @@ const RegisterTab = () => {
       };
 
       const signedEvent = signNostrEvent(
-        derivedIds.nostrPrivateKey,
+        derivedIds.privateKeyHex,
         0,
         JSON.stringify(profileContent),
         [['lang', form.language]]
@@ -154,6 +154,7 @@ const RegisterTab = () => {
   if (showScanner) {
     return (
       <QRScanner
+        isOpen={showScanner}
         onScan={(value: string) => { setShowScanner(false); handleWifSubmit(value); }}
         onClose={() => setShowScanner(false)}
       />
