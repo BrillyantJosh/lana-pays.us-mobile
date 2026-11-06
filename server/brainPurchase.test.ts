@@ -360,6 +360,39 @@ describe('an effective maximum of 0: there is nothing to reduce a sale to', () =
   });
 });
 
+describe('the rest of the month, in cents, the way the brain counts it', () => {
+  // 2930.2100000000005 + 69.79 is 3000.0000000000005 as floats. The brain's gate
+  // takes it (lana-brain 304b156), and the till must not refuse it first.
+  it.each([
+    [188.94, 69.79, { original: 188.94, adjusted: 69.79, currency: 'EUR' }],
+    [69.79, 69.79, undefined],
+    [69.8, 69.79, { original: 69.8, adjusted: 69.79, currency: 'EUR' }],
+  ])('2930.2100000000005 of 3000: invoice %s goes on as %s', async (invoice, sent, notice) => {
+    seed({ maxTx: '200.00', volumeUsed: 2930.2100000000005, volumeLimit: 3000 });
+    const r = await sell(cashSale(invoice));
+
+    expect(r.status).toBe(200);
+    expect(forwarded()[0].body.amount).toBe(sent);
+    expect(r.body.amount_adjusted).toEqual(notice);
+  });
+
+  it('a counter with a fraction of a cent: 2930.214 of 3000 is not refused because what remains rounded up', async () => {
+    seed({ maxTx: '200.00', volumeUsed: 2930.214, volumeLimit: 3000 });
+    const r = await sell(cashSale(188.94));
+
+    expect(r.status).toBe(200);
+    expect(forwarded()[0].body.amount).toBe(69.79);
+  });
+
+  it('half a cent on the counter: 2930.185 of 3000 goes on for a cent less, not refused', async () => {
+    seed({ maxTx: '200.00', volumeUsed: 2930.185, volumeLimit: 3000 });
+    const r = await sell(cashSale(188.94));
+
+    expect(r.status).toBe(200);
+    expect(forwarded()[0].body.amount).toBe(69.81);
+  });
+});
+
 describe('a LANA sale is untouched', () => {
   const lanaSale = (amount: number) => ({ payment_type: 'lana', amount, signed_tx_hex: 'ab', ...CUSTOMER });
 

@@ -113,6 +113,16 @@ export function getMaxTransaction(
 }
 
 /**
+ * Would this amount take the month past its limit? In cents, the same comparison
+ * as the brain's gate (enforceMerchantGate). The counter is a sum of floats, so
+ * 2930.2100000000005 + 69.79, exactly what remains of 3000, is 3000.0000000000005
+ * as floats, and a bare comparison refuses the sale the clamp just reduced.
+ */
+export function exceedsVolumeLimit(used: number, amount: number, limit: number): boolean {
+  return Math.round((used + amount) * 100) > Math.round(limit * 100);
+}
+
+/**
  * Fold the merchant's remaining monthly CASH volume into the maximum — the
  * server-side twin of the client's effectiveMaxInvoice(). Only when the
  * request currency matches the quota currency; a cross-currency conversion is
@@ -126,9 +136,14 @@ export function foldQuotaRemaining(
   if (!unitRow || !(Number(unitRow.quota_volume_limit) > 0)) return maxAmount;
   const quotaCurrency = String(unitRow.quota_currency || unitRow.currency || 'EUR').toUpperCase();
   if (String(reqCurrency || '').toUpperCase() !== quotaCurrency) return maxAmount;
+  const limit = Number(unitRow.quota_volume_limit);
+  const used = Number(unitRow.quota_volume_used || 0);
   // In cents: the mirrored counter is a sum of floats, so a shop that reached its
   // limit can stand at 2999.9999999999995 of 3000, with nothing left to charge.
-  const remaining = round2(Math.max(0, Number(unitRow.quota_volume_limit) - Number(unitRow.quota_volume_used || 0)));
+  let remaining = round2(Math.max(0, limit - used));
+  // A counter with half a cent on it (2930.185) can round what remains up past
+  // the limit: then what remains is a cent less, not a refusal.
+  if (remaining > 0 && exceedsVolumeLimit(used, remaining, limit)) remaining = round2(remaining - 0.01);
   return maxAmount === null ? remaining : Math.min(maxAmount, remaining);
 }
 

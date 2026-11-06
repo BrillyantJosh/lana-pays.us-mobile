@@ -4,7 +4,7 @@
  * are shared, plus the merge/quota logic that only exists here.
  */
 import { describe, it, expect } from 'vitest';
-import { computeEffectiveMax, foldQuotaRemaining, foldCustomerWindow, clampCashAmount } from './maxTransaction';
+import { computeEffectiveMax, foldQuotaRemaining, foldCustomerWindow, clampCashAmount, exceedsVolumeLimit } from './maxTransaction';
 
 describe('computeEffectiveMax', () => {
   it('merchant only', () => {
@@ -57,15 +57,45 @@ describe('foldQuotaRemaining', () => {
   it('null max with a quota becomes the remaining volume', () => {
     expect(foldQuotaRemaining(null, unit, 'EUR')).toBe(300);
   });
-  it('what remains is counted in cents, whatever the sum of floats says', () => {
-    const at = (used: number) => ({ ...unit, quota_volume_limit: 3000, quota_volume_used: used });
-    // A hair under the limit: nothing to charge. A remainder of 4.5e-13 used to
-    // round to an amount of 0 in the clamp, and the seller read a brain error.
-    expect(foldQuotaRemaining(500, at(2999.9999999999995), 'EUR')).toBe(0);
-    expect(clampCashAmount(100, foldQuotaRemaining(500, at(2999.9999999999995), 'EUR'))).toEqual({ amount: 100, adjusted: false });
-    // A hair over a whole cent: the clamp takes an invoice of exactly what remains as it is.
-    expect(foldQuotaRemaining(500, at(2930.2100000000005), 'EUR')).toBe(69.79);
-    expect(clampCashAmount(69.79, foldQuotaRemaining(500, at(2930.2100000000005), 'EUR'))).toEqual({ amount: 69.79, adjusted: false });
+  it('a hair under the limit is nothing left to charge: refused, not sent on as 0', () => {
+    const at = { ...unit, quota_volume_limit: 3000, quota_volume_used: 2999.9999999999995 };
+    expect(foldQuotaRemaining(500, at, 'EUR')).toBe(0);
+    expect(clampCashAmount(100, foldQuotaRemaining(500, at, 'EUR'))).toEqual({ amount: 100, adjusted: false });
+    expect(exceedsVolumeLimit(at.quota_volume_used, 100, 3000)).toBe(true);
+    expect(exceedsVolumeLimit(at.quota_volume_used, 0.01, 3000)).toBe(true);
+  });
+  it('a hair over a whole cent: what remains is charged, and the pre-flight lets it through', () => {
+    const at = { ...unit, quota_volume_limit: 3000, quota_volume_used: 2930.2100000000005 };
+    const remaining = foldQuotaRemaining(500, at, 'EUR');
+    expect(remaining).toBe(69.79);
+    expect(at.quota_volume_used + 69.79 > 3000).toBe(true); // what a bare comparison sees
+    expect(clampCashAmount(69.79, remaining)).toEqual({ amount: 69.79, adjusted: false });
+    expect(exceedsVolumeLimit(at.quota_volume_used, 69.79, 3000)).toBe(false);
+    expect(clampCashAmount(69.8, remaining)).toEqual({ amount: 69.79, adjusted: true });
+    expect(exceedsVolumeLimit(at.quota_volume_used, 69.8, 3000)).toBe(true);
+  });
+  it('whatever a counter holds, what remains always passes the pre-flight it is checked by', () => {
+    // Whole cents, a fraction of a cent, half a cent, and sums of floats.
+    const counters = [2930.214, 2930.185, 2930.2100000000005, 2930.2099999999996, 0.004, 0.005, 2999.994, 2999.995, 2999.99];
+    for (let n = 0; n < 3000; n++) counters.push(n + (n % 1000) / 1000);
+    let sum = 0;
+    for (let n = 0; n < 2000; n++) { sum += ((n * 37) % 15000) / 100; if (sum < 3000) counters.push(sum); }
+    for (const used of counters) {
+      const remaining = foldQuotaRemaining(null, { ...unit, quota_volume_limit: 3000, quota_volume_used: used }, 'EUR') as number;
+      if (remaining > 0) expect(exceedsVolumeLimit(used, remaining, 3000), `used ${used}, remaining ${remaining}`).toBe(false);
+      // ...and it is never more than half a cent over the limit.
+      expect(used + remaining).toBeLessThanOrEqual(3000.005 + 1e-9);
+    }
+  });
+});
+
+describe('exceedsVolumeLimit', () => {
+  it('compares in cents, the same comparison as the brain', () => {
+    expect(exceedsVolumeLimit(295, 5, 300)).toBe(false);
+    expect(exceedsVolumeLimit(295, 5.01, 300)).toBe(true);
+    expect(exceedsVolumeLimit(301, 1, 300)).toBe(true);
+    expect(exceedsVolumeLimit(2930.2100000000005, 69.79, 3000)).toBe(false);
+    expect(exceedsVolumeLimit(2930.214, 69.79, 3000)).toBe(false);
   });
 });
 

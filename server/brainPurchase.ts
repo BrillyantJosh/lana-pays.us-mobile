@@ -8,7 +8,7 @@
  */
 import type { Request, Response } from 'express';
 import type Database from 'better-sqlite3';
-import { getMaxTransaction, foldQuotaRemaining, foldCustomerWindow, readCustomerWindowDays, clampCashAmount, round2 } from './lib/maxTransaction.js';
+import { getMaxTransaction, foldQuotaRemaining, foldCustomerWindow, readCustomerWindowDays, clampCashAmount, exceedsVolumeLimit, round2 } from './lib/maxTransaction.js';
 
 export function brainPurchaseHandler(db: Database.Database, BRAIN_API_URL: string, BRAIN_PURCHASE_KEY: string) {
   return async (req: Request, res: Response) => {
@@ -173,7 +173,7 @@ export function brainPurchaseHandler(db: Database.Database, BRAIN_API_URL: strin
           // since an amount cannot be adjusted down to nothing.
           const quotaCurrency = String(u.quota_currency || u.currency || 'EUR').toUpperCase();
           if (u.quota_volume_limit > 0 && reqCurrency === quotaCurrency
-              && u.quota_volume_used + effAmount > u.quota_volume_limit) {
+              && exceedsVolumeLimit(u.quota_volume_used, effAmount, u.quota_volume_limit)) {
             console.warn(`[mobile] Blocking CASH pre-flight: unit ${unitId.slice(0, 12)} would exceed volume quota`);
             return res.status(403).json({
               success: false,
