@@ -1504,13 +1504,7 @@ app.put('/api/admin/settings', (req, res) => {
   `);
   let updated = 0;
   for (const [key, value] of Object.entries(settings)) {
-    let stored = String(value);
-    // Normalize at the write so every reader can trust the stored value:
-    // the window length is whole days, 1..90 (90 caps the brain's scan).
-    if (key === 'customer_window_days') {
-      stored = String(Math.min(90, Math.max(1, parseInt(stored, 10) || 1)));
-    }
-    upsert.run(key, stored, adminHex);
+    upsert.run(key, String(value), adminHex);
     updated++;
   }
   res.json({ success: true, updated });
