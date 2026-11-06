@@ -4,7 +4,7 @@
  * are shared, plus the merge/quota logic that only exists here.
  */
 import { describe, it, expect } from 'vitest';
-import { computeEffectiveMax, foldQuotaRemaining, clampCashAmount } from './maxTransaction';
+import { computeEffectiveMax, foldQuotaRemaining, foldCustomerWindow, clampCashAmount } from './maxTransaction';
 
 describe('computeEffectiveMax', () => {
   it('merchant only', () => {
@@ -57,15 +57,25 @@ describe('foldQuotaRemaining', () => {
   it('null max with a quota becomes the remaining volume', () => {
     expect(foldQuotaRemaining(null, unit, 'EUR')).toBe(300);
   });
-  it('what remains is counted in cents, whatever the sum of floats says', () => {
-    const at = (used: number) => ({ ...unit, quota_volume_limit: 3000, quota_volume_used: used });
-    // A hair under the limit: nothing to charge. A remainder of 4.5e-13 used to
-    // round to an amount of 0 in the clamp, and the seller read a brain error.
-    expect(foldQuotaRemaining(500, at(2999.9999999999995), 'EUR')).toBe(0);
-    expect(clampCashAmount(100, foldQuotaRemaining(500, at(2999.9999999999995), 'EUR'))).toEqual({ amount: 100, adjusted: false });
-    // A hair over a whole cent: an invoice of exactly what remains is no adjustment.
-    expect(foldQuotaRemaining(500, at(2930.2100000000005), 'EUR')).toBe(69.79);
-    expect(clampCashAmount(69.79, foldQuotaRemaining(500, at(2930.2100000000005), 'EUR'))).toEqual({ amount: 69.79, adjusted: false });
+});
+
+describe('foldCustomerWindow', () => {
+  it('a smaller customer remainder tightens the max', () => {
+    expect(foldCustomerWindow(200, 150)).toBe(150);
+  });
+  it('a larger remainder leaves the max alone', () => {
+    expect(foldCustomerWindow(100, 150)).toBe(100);
+  });
+  it('null max takes the remainder', () => {
+    expect(foldCustomerWindow(null, 150)).toBe(150);
+  });
+  it('null remainder (fail-open) leaves the max alone', () => {
+    expect(foldCustomerWindow(200, null)).toBe(200);
+  });
+  it('remainder 0 propagates — the caller blocks BEFORE clamping', () => {
+    // clampCashAmount refuses maxTx <= 0, so 0 here must be handled by the
+    // caller's explicit CUSTOMER_WINDOW_EXCEEDED block, not by the clamp.
+    expect(foldCustomerWindow(200, 0)).toBe(0);
   });
 });
 

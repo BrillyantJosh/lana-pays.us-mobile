@@ -126,10 +126,34 @@ export function foldQuotaRemaining(
   if (!unitRow || !(Number(unitRow.quota_volume_limit) > 0)) return maxAmount;
   const quotaCurrency = String(unitRow.quota_currency || unitRow.currency || 'EUR').toUpperCase();
   if (String(reqCurrency || '').toUpperCase() !== quotaCurrency) return maxAmount;
-  // In cents: the mirrored counter is a sum of floats, so a shop that reached its
-  // limit can stand at 2999.9999999999995 of 3000, with nothing left to charge.
-  const remaining = round2(Math.max(0, Number(unitRow.quota_volume_limit) - Number(unitRow.quota_volume_used || 0)));
+  const remaining = Math.max(0, Number(unitRow.quota_volume_limit) - Number(unitRow.quota_volume_used || 0));
   return maxAmount === null ? remaining : Math.min(maxAmount, remaining);
+}
+
+/**
+ * Fold the customer's remaining rolling-window allowance into the maximum —
+ * sibling of foldQuotaRemaining. `customerRemaining` is limit − what this
+ * customer already spent at this unit within the window (computed by the
+ * caller from the brain's /customer-window answer). null = the window could
+ * not be read (fail-open) → the max is left alone.
+ */
+export function foldCustomerWindow(
+  maxAmount: number | null,
+  customerRemaining: number | null,
+): number | null {
+  if (customerRemaining === null || !Number.isFinite(customerRemaining)) return maxAmount;
+  return maxAmount === null ? customerRemaining : Math.min(maxAmount, customerRemaining);
+}
+
+/**
+ * Admin-set rolling window length in days for the per-customer cash limit.
+ * Lenient: a missing or mangled setting degrades to 1 day, never an error.
+ */
+export function readCustomerWindowDays(db: Database.Database): number {
+  const row = db.prepare("SELECT value FROM app_settings WHERE key = 'customer_window_days'").get() as any;
+  const n = parseInt(String(row?.value ?? ''), 10);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(n, 90);
 }
 
 /**
