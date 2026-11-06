@@ -152,7 +152,7 @@
   "cash.amount": "Сумма ({{symbol}})",
   "cash.amountPlaceholder": "0,00",
   "cash.noFunds": "Нет доступных инвестиционных средств",
-  "cash.amountAdjusted": "Сумма счёта {{symbol}}{{original}} превышает лимит транзакции — скорректирована до {{symbol}}{{amount}}.",
+  "cash.amountAdjusted": "Сумма счёта {{symbol}}{{original}} превышает лимит — скорректирована до {{symbol}}{{amount}}.",
   "cash.willAdjustToMax": "Выше лимита — списываемая сумма будет скорректирована до {{symbol}}{{amount}}.",
   "cash.receiptAttached": "Чек прикреплён",
   "cash.uploading": "Загрузка...",

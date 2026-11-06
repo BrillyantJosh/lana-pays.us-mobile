@@ -152,7 +152,7 @@
   "cash.amount": "Összeg ({{symbol}})",
   "cash.amountPlaceholder": "0,00",
   "cash.noFunds": "Nincsenek elérhető befektetői források",
-  "cash.amountAdjusted": "A számla összege ({{symbol}}{{original}}) meghaladja a tranzakciós limitet — módosítva erre: {{symbol}}{{amount}}.",
+  "cash.amountAdjusted": "A számla összege ({{symbol}}{{original}}) meghaladja a limitet — módosítva erre: {{symbol}}{{amount}}.",
   "cash.willAdjustToMax": "A limit felett — a felszámított összeg erre módosul: {{symbol}}{{amount}}.",
   "cash.receiptAttached": "Nyugta csatolva",
   "cash.uploading": "Feltöltés...",

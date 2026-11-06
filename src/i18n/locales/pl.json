@@ -152,7 +152,7 @@
   "cash.amount": "Kwota ({{symbol}})",
   "cash.amountPlaceholder": "0.00",
   "cash.noFunds": "Brak dostępnych funduszy inwestycyjnych",
-  "cash.amountAdjusted": "Kwota faktury {{symbol}}{{original}} przekracza limit transakcji — dostosowano do {{symbol}}{{amount}}.",
+  "cash.amountAdjusted": "Kwota faktury {{symbol}}{{original}} przekracza limit — dostosowano do {{symbol}}{{amount}}.",
   "cash.willAdjustToMax": "Powyżej limitu — pobrana kwota zostanie dostosowana do {{symbol}}{{amount}}.",
   "cash.receiptAttached": "Paragon załączony",
   "cash.uploading": "Przesyłanie...",

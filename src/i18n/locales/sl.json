@@ -164,7 +164,7 @@
   "cash.amount": "Znesek ({{symbol}})",
   "cash.amountPlaceholder": "0,00",
   "cash.noFunds": "Ni razpoložljivih investitorskih sredstev",
-  "cash.amountAdjusted": "Znesek računa {{symbol}}{{original}} presega omejitev transakcije — prilagojen na {{symbol}}{{amount}}.",
+  "cash.amountAdjusted": "Znesek računa {{symbol}}{{original}} presega omejitev — prilagojen na {{symbol}}{{amount}}.",
   "cash.willAdjustToMax": "Nad omejitvijo — zaračunani znesek bo prilagojen na {{symbol}}{{amount}}.",
   "cash.receiptAttached": "Račun priložen",
   "cash.uploading": "Nalaganje...",

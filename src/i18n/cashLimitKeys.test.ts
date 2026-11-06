@@ -33,4 +33,10 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
     const placeholders = (s: string) => (s.match(/\{\{\w+\}\}/g) || []).sort();
     expect(placeholders(strings[key])).toEqual(placeholders((en as Record<string, string>)[key]));
   });
+
+  // The same notice is shown when the fund, the default or the rest of the month
+  // reduced the sale, so it may not claim the cause was the transaction limit.
+  it('the notice about a reduced sale names no single cause', () => {
+    expect(strings['cash.amountAdjusted']).not.toMatch(/transacti|transakcij|transaktions|tranzakci|transação|transacción|транзакци|交易/i);
+  });
 });

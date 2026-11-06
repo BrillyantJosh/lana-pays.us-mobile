@@ -152,7 +152,7 @@
   "cash.amount": "Betrag ({{symbol}})",
   "cash.amountPlaceholder": "0,00",
   "cash.noFunds": "Keine Investorenmittel verfügbar",
-  "cash.amountAdjusted": "Rechnungsbetrag {{symbol}}{{original}} überschreitet das Transaktionslimit — angepasst auf {{symbol}}{{amount}}.",
+  "cash.amountAdjusted": "Rechnungsbetrag {{symbol}}{{original}} überschreitet das Limit — angepasst auf {{symbol}}{{amount}}.",
   "cash.willAdjustToMax": "Über dem Limit — der berechnete Betrag wird auf {{symbol}}{{amount}} angepasst.",
   "cash.receiptAttached": "Quittung angehängt",
   "cash.uploading": "Hochladen...",
