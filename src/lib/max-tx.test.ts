@@ -5,7 +5,7 @@
  * BLOCK, because silently charging nothing would be worse than either).
  */
 import { describe, it, expect } from 'vitest';
-import { parseAmountInput, clampCashAmount, round2 } from './max-tx';
+import { parseAmountInput, clampCashAmount, cashBlockReason, round2 } from './max-tx';
 
 describe('clampCashAmount', () => {
   it('exactly AT the limit is not an adjustment', () => {
@@ -36,6 +36,37 @@ describe('clampCashAmount', () => {
 
   it('a fractional limit is rounded to cents on clamp', () => {
     expect(clampCashAmount(600, 499.999)).toEqual({ amount: 500, adjusted: true });
+  });
+});
+
+describe('cashBlockReason', () => {
+  const unit = { currency: 'EUR', quota_currency: 'EUR', quota_volume_limit: 3000, quota_volume_used: 500, quota_tx_limit: 50, quota_tx_used: 5 };
+
+  it('nothing in the way', () => {
+    expect(cashBlockReason(unit, 200)).toBeNull();
+    expect(cashBlockReason(unit, null)).toBeNull();
+    expect(cashBlockReason(null, 200)).toBeNull();
+  });
+  it('the month\'s transactions are used up: the month, though the maximum reads 0', () => {
+    expect(cashBlockReason({ ...unit, quota_tx_used: 50 }, 0)).toBe('month');
+    expect(cashBlockReason({ ...unit, quota_tx_used: 50 }, null)).toBe('month');
+    expect(cashBlockReason({ ...unit, quota_volume_limit: 0, quota_tx_used: 50 }, 0)).toBe('month');
+  });
+  it('the month\'s volume is used up: the month, though the maximum reads 0', () => {
+    expect(cashBlockReason({ ...unit, quota_volume_used: 3000 }, 0)).toBe('month');
+    expect(cashBlockReason({ ...unit, quota_volume_used: 3000 }, null)).toBe('month');
+    expect(cashBlockReason({ ...unit, quota_volume_used: 2999.9999999999995 }, 0)).toBe('month');
+    expect(cashBlockReason({ ...unit, quota_volume_used: 3100 }, 0)).toBe('month');
+  });
+  it('a cent left is not used up', () => {
+    expect(cashBlockReason({ ...unit, quota_volume_used: 2999.99 }, 0.01)).toBeNull();
+  });
+  it('the month has room and the maximum is 0: the funds', () => {
+    expect(cashBlockReason(unit, 0)).toBe('funds');
+    expect(cashBlockReason(null, 0)).toBe('funds');
+  });
+  it('a quota in another currency cannot be compared here, so it says nothing', () => {
+    expect(cashBlockReason({ ...unit, quota_currency: 'GBP', quota_volume_used: 3000 }, 200)).toBeNull();
   });
 });
 

@@ -117,6 +117,48 @@ describe('the confirmation', () => {
   });
 });
 
+describe('under the amount field', () => {
+  const unit = { currency: 'EUR', quota_currency: 'EUR', quota_volume_limit: 3000, quota_volume_used: 500, quota_tx_limit: 50, quota_tx_used: 5 };
+
+  it('the month\'s transactions used up: the month is named, not the investors', async () => {
+    setUnit({ ...unit, quota_tx_used: 50 }, 0);
+    await toInvoiceStep();
+    expect(screen.getByText(MONTH_USED_UP)).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('cash.noFunds'))).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('cash.scanCustomerWallet') })).toBeDisabled();
+  });
+
+  it('the month\'s volume used up: the month is named, not the investors', async () => {
+    setUnit({ ...unit, quota_volume_used: 3000 }, 0);
+    await toInvoiceStep();
+    expect(screen.getByText(MONTH_USED_UP)).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('cash.noFunds'))).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('cash.scanCustomerWallet') })).toBeDisabled();
+  });
+
+  it('room in the month and no funds: the investors are named', async () => {
+    setUnit(unit, 0);
+    await toInvoiceStep();
+    expect(screen.getByText(i18n.t('cash.noFunds'))).toBeInTheDocument();
+    expect(screen.queryByText(MONTH_USED_UP)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('cash.scanCustomerWallet') })).toBeDisabled();
+  });
+
+  it('a transaction limit with no volume limit counts too', async () => {
+    setUnit({ ...unit, quota_volume_limit: 0, quota_tx_used: 50 }, 200);
+    await toInvoiceStep();
+    expect(screen.getByText(MONTH_USED_UP)).toBeInTheDocument();
+  });
+
+  it('room everywhere: nothing is said and the sale can go on', async () => {
+    setUnit(unit, 200);
+    await toInvoiceStep();
+    expect(screen.queryByText(MONTH_USED_UP)).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('cash.noFunds'))).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('cash.scanCustomerWallet') })).toBeEnabled();
+  });
+});
+
 describe('refused by the server', () => {
   it('CUSTOMER_WINDOW_EXCEEDED reads as the window\'s own message, with its numbers', async () => {
     purchase = { status: 403, body: { success: false, error: 'CUSTOMER_WINDOW_EXCEEDED', message: 'x', spent: 192.44, limit: 200, days: 1, currency: 'EUR' } };

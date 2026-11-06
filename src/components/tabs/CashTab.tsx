@@ -10,7 +10,7 @@ import { convertWifToIds } from "@/lib/crypto";
 import { createAndSignKind0, type Kind0Content } from "@/lib/nostr-sign";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { parseAmountInput, clampCashAmount, getCashMaxTx } from "@/lib/max-tx";
+import { parseAmountInput, clampCashAmount, getCashMaxTx, cashBlockReason } from "@/lib/max-tx";
 import { withCallerHex, withCallerField } from "@/lib/callerIdentity";
 import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
 import { localNameFor, registeredCardStep, newCardMode, regularCustomerStep, type ProfileStatus } from "@/lib/customerName";
@@ -150,20 +150,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   };
 
   /**
-   * Should CASH be hard-blocked outright? Only genuine cannot-charge states:
-   * zero effective capacity (which already folds in an exhausted volume
-   * quota) and an exhausted tx-count quota — a COUNT cannot be clamped.
-   * An amount merely above the limit no longer blocks; it gets adjusted.
+   * Should CASH be hard-blocked outright? Only genuine cannot-charge states: the
+   * month's volume or count used up, or a maximum of 0 — a COUNT cannot be
+   * clamped, and neither can an amount down to nothing. An amount merely above
+   * the limit does not block; it gets adjusted.
    */
-  const cashBlocked = (): boolean => {
-    const maxTx = getCashMaxTx();
-    if (maxTx !== null && maxTx <= 0) return true;
-    const u = (window as any).__selectedUnit;
-    if (u && (u.quota_tx_limit || 0) > 0) {
-      if (Math.max(0, u.quota_tx_limit - (u.quota_tx_used || 0)) <= 0) return true;
-    }
-    return false;
-  };
+  const cashBlocked = (): boolean =>
+    cashBlockReason((window as any).__selectedUnit, getCashMaxTx()) !== null;
 
   // Receipt state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1280,16 +1273,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           {(() => {
             const maxTx = getCashMaxTx();
             const parsed = parseAmountInput(amount);
-            if (maxTx !== null && maxTx <= 0) {
-              return <p className="text-xs text-destructive mt-1">{t('cash.noFunds')}</p>;
+            const blocked = cashBlockReason((window as any).__selectedUnit, maxTx);
+            if (blocked === 'month') {
+              return <p className="text-xs text-destructive mt-1">{t('cash.monthlyCashLimitReached')}</p>;
             }
-            // ── Tx-count quota stays a hard block (a count cannot be clamped).
-            const u = (window as any).__selectedUnit;
-            if (u && u.quota_volume_limit > 0) {
-              const remainingTx = Math.max(0, (u.quota_tx_limit || 0) - (u.quota_tx_used || 0));
-              if ((u.quota_tx_limit || 0) > 0 && remainingTx <= 0) {
-                return <p className="text-xs text-destructive mt-1">{t('cash.monthlyCashLimitReached')}</p>;
-              }
+            if (blocked === 'funds') {
+              return <p className="text-xs text-destructive mt-1">{t('cash.noFunds')}</p>;
             }
             // Over the effective max (merchant limit ∧ fund ∧ quota remaining)
             // is NOT an error anymore — the charge will be adjusted down.

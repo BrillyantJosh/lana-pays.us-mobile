@@ -55,3 +55,34 @@ export function getCashMaxTx(): number | null {
   const v = (window as any).__maxTransactionAmount;
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
+
+/** The KIND 30903 fields of the selected unit, as Index.tsx publishes it. */
+interface UnitQuota {
+  currency?: string;
+  quota_currency?: string;
+  quota_volume_limit?: number;
+  quota_volume_used?: number;
+  quota_tx_limit?: number;
+  quota_tx_used?: number;
+}
+
+/**
+ * Why cash cannot be taken at all right now, or null if it can.
+ *
+ * The month comes first. The maximum Index.tsx publishes reads 0 when the month's
+ * volume or count is used up as well as when no investor funds are available, and
+ * telling a shop at its monthly limit that there are no investor funds is wrong.
+ * A volume in another currency cannot be compared here and says nothing, the same
+ * as in effectiveMaxInvoice.
+ */
+export function cashBlockReason(
+  unit: UnitQuota | null | undefined,
+  maxTx: number | null,
+): 'month' | 'funds' | null {
+  const txLimit = unit?.quota_tx_limit ?? 0;
+  if (txLimit > 0 && (unit?.quota_tx_used ?? 0) >= txLimit) return 'month';
+  const volLimit = unit?.quota_volume_limit ?? 0;
+  if (volLimit > 0 && (unit?.quota_currency || unit?.currency) === unit?.currency
+      && round2(Math.max(0, volLimit - (unit?.quota_volume_used ?? 0))) <= 0) return 'month';
+  return maxTx !== null && maxTx <= 0 ? 'funds' : null;
+}
