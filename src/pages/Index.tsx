@@ -191,7 +191,9 @@ function effectiveMaxInvoice(
   const volLimit = unit.quota_volume_limit ?? 0;
   const volUsed = unit.quota_volume_used ?? 0;
   if (volLimit > 0 && (unit.quota_currency || unit.currency) === unit.currency) {
-    const remaining = Math.max(0, volLimit - volUsed);
+    // In cents, like the server: the counter is a sum of floats, and a shop a hair
+    // under its limit has nothing left to charge.
+    const remaining = Math.round(Math.max(0, volLimit - volUsed) * 100) / 100;
     if (remaining < max) max = remaining;
   }
   return max;

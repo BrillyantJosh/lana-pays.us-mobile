@@ -57,6 +57,16 @@ describe('foldQuotaRemaining', () => {
   it('null max with a quota becomes the remaining volume', () => {
     expect(foldQuotaRemaining(null, unit, 'EUR')).toBe(300);
   });
+  it('what remains is counted in cents, whatever the sum of floats says', () => {
+    const at = (used: number) => ({ ...unit, quota_volume_limit: 3000, quota_volume_used: used });
+    // A hair under the limit: nothing to charge. A remainder of 4.5e-13 used to
+    // round to an amount of 0 in the clamp, and the seller read a brain error.
+    expect(foldQuotaRemaining(500, at(2999.9999999999995), 'EUR')).toBe(0);
+    expect(clampCashAmount(100, foldQuotaRemaining(500, at(2999.9999999999995), 'EUR'))).toEqual({ amount: 100, adjusted: false });
+    // A hair over a whole cent: the clamp takes an invoice of exactly what remains as it is.
+    expect(foldQuotaRemaining(500, at(2930.2100000000005), 'EUR')).toBe(69.79);
+    expect(clampCashAmount(69.79, foldQuotaRemaining(500, at(2930.2100000000005), 'EUR'))).toEqual({ amount: 69.79, adjusted: false });
+  });
 });
 
 describe('foldCustomerWindow', () => {
