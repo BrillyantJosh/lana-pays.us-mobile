@@ -161,7 +161,8 @@ export function readCustomerWindowDays(db: Database.Database): number {
 /**
  * The clamp itself. Above the max → the max, with a flag; at or below → as
  * given. A max of null (unknown/none) or <= 0 never clamps: zero capacity is
- * a BLOCK handled elsewhere — silently charging 0 would be worse than either.
+ * a BLOCK the caller answers with a refusal — silently charging 0 would be
+ * worse than either.
  */
 export function clampCashAmount(
   amount: number,

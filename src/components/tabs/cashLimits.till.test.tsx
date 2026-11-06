@@ -113,4 +113,13 @@ describe('refused by the server', () => {
     await screen.findByText(MONTH_USED_UP);
     expect(screen.queryByText(/already spent/)).not.toBeInTheDocument();
   });
+
+  it('NO_FUND_CAPACITY reads as the no-funds wording', async () => {
+    purchase = { status: 403, body: { success: false, error: 'NO_FUND_CAPACITY', message: 'x' } };
+    await toInvoiceStep();
+    await pay();
+    await screen.findByText(i18n.t('cash.noFunds'));
+    expect(screen.queryByText('NO_FUND_CAPACITY')).not.toBeInTheDocument();
+    expect(screen.queryByText(/already spent/)).not.toBeInTheDocument();
+  });
 });

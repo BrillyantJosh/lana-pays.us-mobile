@@ -305,6 +305,11 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         currency: data?.currency || '',
       });
     }
+    // The proxy's refusal when the maximum is 0. The button is already disabled in
+    // that state, so this is for a stale bundle or a limit that fell a moment ago.
+    if (status === 403 && data?.error === 'NO_FUND_CAPACITY') {
+      return t('cash.noFunds');
+    }
     // Split in progress — cash is disabled, LANA still works.
     if (status === 403 && data?.error === 'SPLIT_HAPPENING') {
       return t('split.happening.body');

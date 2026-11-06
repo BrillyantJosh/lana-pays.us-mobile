@@ -313,6 +313,53 @@ describe('unit_id must be one string', () => {
   });
 });
 
+describe('an effective maximum of 0: there is nothing to reduce a sale to', () => {
+  it('limit 200, fund 0, invoice 500: refused, and the brain never sees it', async () => {
+    seed({ maxTx: '200.00' });
+    fundCapacity(0);
+    const r = await sell(cashSale(500));
+
+    expect(r.status).toBe(403);
+    expect(r.body.error).toBe('NO_FUND_CAPACITY');
+    expect(forwarded()).toEqual([]);
+  });
+
+  it('a merchant limit of 0: refused the same way', async () => {
+    seed({ maxTx: '0' });
+    const r = await sell(cashSale(19.9));
+
+    expect(r.status).toBe(403);
+    expect(r.body.error).toBe('NO_FUND_CAPACITY');
+    expect(forwarded()).toEqual([]);
+  });
+
+  it('the window is not asked: with a maximum of 0 it never was, and it has nothing to count from', async () => {
+    seed({ maxTx: '200.00' });
+    fundCapacity(0);
+    lookup = { spent: 192.44 };
+    await sell(cashSale(500));
+
+    expect(windowLookups()).toEqual([]);
+  });
+
+  it('no limit known at all is not a limit of 0: the sale goes on', async () => {
+    seed({ maxTx: '' });
+    const r = await sell(cashSale(500));
+
+    expect(r.status).toBe(200);
+    expect(forwarded()[0].body.amount).toBe(500);
+  });
+
+  it('a LANA sale is not refused here: it goes on with its amount', async () => {
+    seed({ maxTx: '200.00' });
+    fundCapacity(0);
+    const r = await sell({ payment_type: 'lana', amount: 500, signed_tx_hex: 'ab', ...CUSTOMER });
+
+    expect(r.status).toBe(200);
+    expect(forwarded()[0].body.amount).toBe(500);
+  });
+});
+
 describe('a LANA sale is untouched', () => {
   const lanaSale = (amount: number) => ({ payment_type: 'lana', amount, signed_tx_hex: 'ab', ...CUSTOMER });
 

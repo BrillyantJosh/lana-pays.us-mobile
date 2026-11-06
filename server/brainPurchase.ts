@@ -95,6 +95,19 @@ export function brainPurchaseHandler(db: Database.Database, BRAIN_API_URL: strin
           // is baked into the client-signed TX.
           if (Number.isFinite(amount) && amount > 0) {
             const limits = getMaxTransaction(db, unitId, reqCurrency || String(u.currency || 'EUR'));
+            // A maximum of 0 (no investor budget, or a merchant limit of 0) leaves
+            // nothing to reduce a sale to, and the clamp will not charge 0. Refused
+            // here whatever the client sent: nothing after this proxy applies the
+            // limit, so a sale sent on would go through whole. This comes before the
+            // window, which only ever ran on a maximum above 0.
+            if (limits.max_amount !== null && limits.max_amount <= 0) {
+              console.warn(`[mobile] Blocking CASH pre-flight: unit ${unitId.slice(0, 12)} has a maximum of 0 (source=${limits.source})`);
+              return res.status(403).json({
+                success: false,
+                error: 'NO_FUND_CAPACITY',
+                message: 'No investor funds are available for a cash sale right now',
+              });
+            }
             let effMax = foldQuotaRemaining(limits.max_amount, u, reqCurrency);
 
             // ── PER-CUSTOMER ROLLING WINDOW (owner rule, 2026-08-04). The same
