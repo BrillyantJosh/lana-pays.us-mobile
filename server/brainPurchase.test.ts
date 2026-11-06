@@ -467,3 +467,72 @@ describe('the check run on the live server after a deploy', () => {
     expect(windowLookups()).toEqual([]);
   });
 });
+
+// The limits together. The same table is in lana-pays-pos/server/paySale.test.ts:
+// same input, same result at both tills. A month of 400 of 1000 and 4 of 50
+// transactions unless a case says otherwise.
+interface LimitCase {
+  name: string;
+  invoice: number;
+  merchant?: string;
+  fund?: number;
+  spent?: number | 'fails';
+  used?: number;
+  monthLimit?: number;
+  txUsed?: number;
+  sent?: number;
+  refused?: string;
+  asked?: boolean;
+}
+const LIMIT_CASES: LimitCase[] = [
+  // The window alone, the real cases.
+  { name: '192.44 earlier, invoice 188.94, limit 200', spent: 192.44, invoice: 188.94, sent: 7.56 },
+  { name: '63.67 earlier, invoice 100, limit 100', merchant: '100.00', spent: 63.67, invoice: 100, sent: 36.33 },
+  { name: 'spent the whole limit', spent: 200, invoice: 19.9, refused: 'CUSTOMER_WINDOW_EXCEEDED' },
+  { name: 'spent over the limit', spent: 250, invoice: 19.9, refused: 'CUSTOMER_WINDOW_EXCEEDED' },
+  { name: 'failed lookup, invoice under the limit', spent: 'fails', invoice: 188.94, sent: 188.94 },
+  { name: 'failed lookup, invoice over the limit', spent: 'fails', invoice: 250, sent: 200 },
+  // A maximum of 0 comes first, where the window never ran.
+  { name: 'fund 0', fund: 0, spent: 192.44, invoice: 500, refused: 'NO_FUND_CAPACITY', asked: false },
+  { name: 'merchant limit 0', merchant: '0', spent: 192.44, invoice: 500, refused: 'NO_FUND_CAPACITY', asked: false },
+  { name: 'no limit known', merchant: '', spent: 192.44, invoice: 500, sent: 500, asked: false },
+  { name: 'the window counts from the effective maximum', fund: 150, spent: 100, invoice: 188.94, sent: 50 },
+  // Both limits: whichever remainder is smaller decides, and nothing that fits both is refused.
+  { name: 'window smaller than the month', spent: 192.44, used: 900, invoice: 188.94, sent: 7.56 },
+  { name: 'window larger than the month', spent: 63.67, used: 900, invoice: 188.94, sent: 100 },
+  { name: 'window smaller, counter a hair over a cent', spent: 192.44, used: 2930.2100000000005, monthLimit: 3000, invoice: 188.94, sent: 7.56 },
+  { name: 'window larger, counter a hair over a cent', spent: 63.67, used: 2930.2100000000005, monthLimit: 3000, invoice: 188.94, sent: 69.79 },
+  { name: 'both remainders the same, counter a hair over a cent', spent: 130.21, used: 2930.2100000000005, monthLimit: 3000, invoice: 188.94, sent: 69.79 },
+  { name: 'invoice exactly what remains of both', spent: 130.21, used: 2930.2100000000005, monthLimit: 3000, invoice: 69.79, sent: 69.79 },
+  { name: 'window larger, counter a hair under a cent', spent: 63.67, used: 2930.2099999999996, monthLimit: 3000, invoice: 188.94, sent: 69.79 },
+  { name: 'window larger, a fraction of a cent on the counter', spent: 63.67, used: 2930.214, monthLimit: 3000, invoice: 188.94, sent: 69.79 },
+  { name: 'window larger, half a cent on the counter', spent: 63.67, used: 2930.185, monthLimit: 3000, invoice: 188.94, sent: 69.81 },
+  { name: 'failed lookup, the month alone reduces', spent: 'fails', used: 2930.2100000000005, monthLimit: 3000, invoice: 188.94, sent: 69.79 },
+  // Which refusal: the window before the month, as it always was.
+  { name: 'month used up, window has room', spent: 63.67, used: 1000, invoice: 19.9, refused: 'MERCHANT_QUOTA_EXCEEDED' },
+  { name: 'a hair under the month\'s limit, window has room', spent: 63.67, used: 2999.9999999999995, monthLimit: 3000, invoice: 19.9, refused: 'MERCHANT_QUOTA_EXCEEDED' },
+  { name: 'month and window both used up', spent: 200, used: 1000, invoice: 19.9, refused: 'CUSTOMER_WINDOW_EXCEEDED' },
+  { name: 'count reached, window has room', spent: 63.67, txUsed: 50, invoice: 19.9, refused: 'MERCHANT_QUOTA_EXCEEDED' },
+  { name: 'count and window both used up', spent: 200, txUsed: 50, invoice: 19.9, refused: 'CUSTOMER_WINDOW_EXCEEDED' },
+];
+
+describe('the limits together', () => {
+  it.each(LIMIT_CASES)('$name', async (c) => {
+    seed({ maxTx: c.merchant ?? '200.00', volumeUsed: c.used ?? 400, volumeLimit: c.monthLimit ?? 1000, txUsed: c.txUsed ?? 4, txLimit: 50 });
+    if (c.fund !== undefined) fundCapacity(c.fund);
+    lookup = c.spent === 'fails' ? { status: 500 } : { spent: c.spent ?? 0 };
+
+    const r = await sell(cashSale(c.invoice));
+
+    if (c.refused) {
+      expect(r.status).toBe(403);
+      expect(r.body.error).toBe(c.refused);
+      expect(forwarded()).toEqual([]);
+    } else {
+      expect(r.status).toBe(200);
+      expect(forwarded()[0].body.amount).toBe(c.sent);
+      expect(r.body.amount_adjusted?.adjusted).toBe(c.sent === c.invoice ? undefined : c.sent);
+    }
+    expect(windowLookups()).toHaveLength(c.asked === false ? 0 : 1);
+  });
+});

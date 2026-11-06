@@ -73,7 +73,8 @@ interface UnitQuota {
  * volume or count is used up as well as when no investor funds are available, and
  * telling a shop at its monthly limit that there are no investor funds is wrong.
  * A volume in another currency cannot be compared here and says nothing, the same
- * as in effectiveMaxInvoice.
+ * as in effectiveMaxInvoice. The same customer's window is not among these: no
+ * customer has been scanned yet, so the server answers for it when the sale is sent.
  */
 export function cashBlockReason(
   unit: UnitQuota | null | undefined,
