@@ -30,6 +30,23 @@ export function unitForMerchant(db: Database.Database, hex: string, unitId: stri
   return null;
 }
 
+/**
+ * Is `hex` this unit's owner or one of its staff (a `p` tag of its KIND 30901)?
+ * Only that: the unit's status and origin are not asked here, and the case of a
+ * stored hex does not matter.
+ */
+export function isOwnerOrStaff(unit: { owner_hex?: string | null; authorized_hex?: string | null }, hex: string): boolean {
+  const who = String(hex || '').toLowerCase();
+  if (!HEX64.test(who)) return false;
+  if (String(unit.owner_hex || '').toLowerCase() === who) return true;
+  try {
+    const staff: unknown = JSON.parse(unit.authorized_hex || '[]');
+    return Array.isArray(staff) && staff.some(s => typeof s === 'string' && s.toLowerCase() === who);
+  } catch {
+    return false;
+  }
+}
+
 /** All unit_ids where `hex` is owner or authorized (for cross-unit notification). */
 export function unitIdsForMerchant(db: Database.Database, hex: string): string[] {
   if (!HEX64.test(hex || '')) return [];

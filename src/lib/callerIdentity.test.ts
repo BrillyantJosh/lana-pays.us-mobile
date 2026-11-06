@@ -129,6 +129,8 @@ describe('every call site that costs money actually attaches it', () => {
   };
 
   for (const tab of TABS) {
+    // The sale itself leaves through sendPurchase: purchaseRequest.test.ts pins the
+    // same name on it, and that no tab calls that route on its own.
     it(`${tab} sends x-lana-hex on every /api/brain/purchase* call`, () => {
       for (const call of callsIn(read(tab), "fetch('/api/brain/purchase")) {
         expect(call, `a purchase call in ${tab} carries no merchant identity`).toContain('withCallerHex(');

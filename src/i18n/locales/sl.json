@@ -458,6 +458,8 @@
   "purchase.cannotSellToYourself": "Nakup pri lastni poslovni enoti ni mogoč. Uporabite drugo strankino denarnico.",
   "purchase.personExcluded": "Te prodaje ni mogoče izvesti: skupnostna komisija je zaustavila dostop nekomu, ki je na njej naveden.",
   "purchase.merchantUnavailable": "Te prodaje ni mogoče izvesti: trgovina trenutno ne more sprejemati plačil.",
+  "purchase.sellerNotConfirmed": "Ta prodaja ni bila zapisana: blagajna ni mogla potrditi, kdo prodaja. Znova naložite stran in poskusite še enkrat. Če to ne pomaga, se znova prijavite.",
+  "purchase.sellerNotEntitled": "Ta prodaja ni bila zapisana: ta prijava ni navedena kot lastnik ali osebje te trgovine.",
   "purchase.invalidCustomerWallet": "Strankina denarnica ni veljavna. Ponovno skenirajte denarnico in poskusite znova.",
   "purchase.invalidMerchantWallet": "Ta poslovna enota ima nastavljeno neveljavno denarnico. Obrnite se na podporo.",
   "purchase.paymentFailedTitle": "Plačilo ni prejeto",

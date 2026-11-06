@@ -319,6 +319,8 @@
   "purchase.cannotSellToYourself": "您不能在自己的业务单位购物。请使用其他客户钱包。",
   "purchase.personExcluded": "此笔销售无法完成：社区委员会已暂停其中一位相关人员的访问权限。",
   "purchase.merchantUnavailable": "此笔销售无法完成：该商店目前无法接受付款。",
+  "purchase.sellerNotConfirmed": "此笔销售未被记录：收银台无法确认销售人员。请重新加载页面后再试。如果仍然不行，请重新登录。",
+  "purchase.sellerNotEntitled": "此笔销售未被记录：此登录身份未被列为该商店的所有者或员工。",
   "purchase.invalidCustomerWallet": "客户的钱包地址无效。请重新扫描钱包后再试。",
   "purchase.invalidMerchantWallet": "此业务单位配置了无效的钱包。请联系客服。",
   "purchase.paymentFailedTitle": "未收到付款",

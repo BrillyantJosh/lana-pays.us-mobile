@@ -319,6 +319,8 @@
   "purchase.cannotSellToYourself": "Não pode comprar na sua própria unidade de negócio. Use uma carteira de cliente diferente.",
   "purchase.personExcluded": "Esta venda não pode prosseguir: uma comissão da comunidade pausou o acesso de uma pessoa envolvida.",
   "purchase.merchantUnavailable": "Esta venda não pode prosseguir: a loja não pode aceitar pagamentos neste momento.",
+  "purchase.sellerNotConfirmed": "Esta venda não foi registada: a caixa não conseguiu confirmar quem está a vender. Recarregue a página e tente novamente. Se não ajudar, inicie sessão novamente.",
+  "purchase.sellerNotEntitled": "Esta venda não foi registada: este início de sessão não consta como proprietário nem como pessoal desta loja.",
   "purchase.invalidCustomerWallet": "O endereço da carteira do cliente é inválido. Faça novamente a leitura da carteira e tente outra vez.",
   "purchase.invalidMerchantWallet": "Esta unidade de negócio tem uma carteira inválida configurada. Entre em contacto com o suporte.",
   "purchase.paymentFailedTitle": "Pagamento não recebido",

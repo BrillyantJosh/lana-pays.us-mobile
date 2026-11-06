@@ -13,8 +13,8 @@
  *
  * WHAT THIS IS NOT. It is not authentication. Nothing signs it, and a caller who
  * wants to send a different hex — or none — can. It closes the case where the
- * server simply had no name to judge; it cannot close the case of a caller who
- * lies about the name. That needs signed requests, which is a separate decision.
+ * server simply had no name to judge. A sale also carries a signature of its own,
+ * which is separate from this name: see purchaseRequest.ts.
  */
 
 /** Where AuthContext keeps the signed-in session. One definition, imported there. */

@@ -54,8 +54,8 @@ describe('verifyNip98', () => {
 
   it('61 s in the past or the future is STALE; 60 s is still good', () => {
     const now = nowSec();
-    expect(verifyNip98(header(token({ createdAt: now - (MAX_SKEW_SEC + 1) })), 'GET', PATH, { nowSec: now })).toEqual({ ok: false, reason: 'STALE' });
-    expect(verifyNip98(header(token({ createdAt: now + (MAX_SKEW_SEC + 1) })), 'GET', PATH, { nowSec: now })).toEqual({ ok: false, reason: 'STALE' });
+    expect(verifyNip98(header(token({ createdAt: now - (MAX_SKEW_SEC + 1) })), 'GET', PATH, { nowSec: now })).toEqual({ ok: false, reason: 'STALE', skewSec: -(MAX_SKEW_SEC + 1) });
+    expect(verifyNip98(header(token({ createdAt: now + (MAX_SKEW_SEC + 1) })), 'GET', PATH, { nowSec: now })).toEqual({ ok: false, reason: 'STALE', skewSec: MAX_SKEW_SEC + 1 });
     expect(verifyNip98(header(token({ createdAt: now - MAX_SKEW_SEC })), 'GET', PATH, { nowSec: now }).ok).toBe(true);
   });
 
@@ -73,7 +73,7 @@ describe('verifyNip98', () => {
     expect(verifyNip98(h, 'GET', PATH, { nowSec: t0 + 1 }).ok).toBe(true);
     expect(verifyNip98(h, 'GET', PATH, { nowSec: t0 + 30 })).toEqual({ ok: false, reason: 'REPLAYED' });
     expect(verifyNip98(h, 'GET', PATH, { nowSec: t0 + MAX_SKEW_SEC })).toEqual({ ok: false, reason: 'REPLAYED' });
-    expect(verifyNip98(h, 'GET', PATH, { nowSec: t0 + MAX_SKEW_SEC + 1 })).toEqual({ ok: false, reason: 'STALE' });
+    expect(verifyNip98(h, 'GET', PATH, { nowSec: t0 + MAX_SKEW_SEC + 1 })).toEqual({ ok: false, reason: 'STALE', skewSec: -(MAX_SKEW_SEC + 1) });
   });
 
   it('two tokens in the same second with different nonces both pass', () => {
@@ -115,6 +115,64 @@ describe('verifyNip98', () => {
     const forged = { ...good, pubkey: victim };
     expect(verifyNip98(header(forged), 'GET', PATH).ok).toBe(false);
     expect(verifyNip98(header(good), 'GET', PATH).ok).toBe(true);
+  });
+});
+
+describe('a token bound to a body', () => {
+  const POST_PATH = '/api/brain/purchase';
+  const BODY = Buffer.from('{"unit_id":"u","amount":10,"customer_name":"Živa"}');
+  const sha = (b: Uint8Array) => crypto.createHash('sha256').update(b).digest('hex');
+  const bound = (payload?: string) => finalizeEvent({
+    kind: 27235,
+    created_at: nowSec(),
+    tags: [
+      ['u', POST_PATH], ['method', 'POST'], ['nonce', crypto.randomBytes(16).toString('hex')],
+      ...(payload === undefined ? [] : [['payload', payload]]),
+    ],
+    content: '',
+  }, sk) as any;
+
+  it('passes when the payload tag is the sha256 of the exact bytes', () => {
+    expect(verifyNip98(header(bound(sha(BODY))), 'POST', POST_PATH, { body: BODY })).toMatchObject({ ok: true, hex: pk });
+  });
+
+  it('one changed byte is PAYLOAD_MISMATCH', () => {
+    const other = Buffer.from('{"unit_id":"u","amount":11,"customer_name":"Živa"}');
+    expect(verifyNip98(header(bound(sha(BODY))), 'POST', POST_PATH, { body: other })).toEqual({ ok: false, reason: 'PAYLOAD_MISMATCH' });
+  });
+
+  it('a token with no payload tag is PAYLOAD_MISSING when the route binds a body', () => {
+    expect(verifyNip98(header(bound()), 'POST', POST_PATH, { body: BODY })).toEqual({ ok: false, reason: 'PAYLOAD_MISSING' });
+  });
+
+  it('a body expected and not there matches nothing', () => {
+    expect(verifyNip98(header(bound(sha(BODY))), 'POST', POST_PATH, { body: null })).toEqual({ ok: false, reason: 'PAYLOAD_MISMATCH' });
+    expect(verifyNip98(header(bound(sha(Buffer.alloc(0)))), 'POST', POST_PATH, { body: null })).toEqual({ ok: false, reason: 'PAYLOAD_MISMATCH' });
+  });
+
+  it('a token refused for its body is not spent', () => {
+    const h = header(bound(sha(BODY)));
+    expect(verifyNip98(h, 'POST', POST_PATH, { body: Buffer.from('{}') }).ok).toBe(false);
+    expect(verifyNip98(h, 'POST', POST_PATH, { body: BODY }).ok).toBe(true);
+  });
+
+  it('the tag cannot be swapped: it is inside the signature', () => {
+    const ev = bound(sha(BODY));
+    const other = Buffer.from('{}');
+    ev.tags = ev.tags.map((t: string[]) => (t[0] === 'payload' ? ['payload', sha(other)] : t));
+    expect(verifyNip98(header(ev), 'POST', POST_PATH, { body: other })).toEqual({ ok: false, reason: 'BAD_SIG' });
+  });
+
+  it('the same bytes signed twice in one second are two tokens, both good', () => {
+    const a = header(bound(sha(BODY)));
+    const b = header(bound(sha(BODY)));
+    expect(a).not.toBe(b);
+    expect(verifyNip98(a, 'POST', POST_PATH, { body: BODY }).ok).toBe(true);
+    expect(verifyNip98(b, 'POST', POST_PATH, { body: BODY }).ok).toBe(true);
+  });
+
+  it('a route that binds no body does not look at the tag', () => {
+    expect(verifyNip98(header(bound('not a hash')), 'POST', POST_PATH).ok).toBe(true);
   });
 });
 

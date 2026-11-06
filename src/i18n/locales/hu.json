@@ -319,6 +319,8 @@
   "purchase.cannotSellToYourself": "Nem vásárolhat a saját üzleti egységében. Használjon másik vásárlói tárcát.",
   "purchase.personExcluded": "Ez az eladás nem mehet végbe: egy közösségi bizottság felfüggesztette az egyik érintett hozzáférését.",
   "purchase.merchantUnavailable": "Ez az eladás nem mehet végbe: az üzlet jelenleg nem tud fizetést fogadni.",
+  "purchase.sellerNotConfirmed": "Ez az eladás nem lett rögzítve: a pénztár nem tudta megerősíteni, ki az eladó. Töltsd újra az oldalt, és próbáld meg ismét. Ha ez nem segít, jelentkezz be újra.",
+  "purchase.sellerNotEntitled": "Ez az eladás nem lett rögzítve: ez a bejelentkezés nem szerepel az üzlet tulajdonosaként vagy munkatársaként.",
   "purchase.invalidCustomerWallet": "Az ügyfél tárcacíme érvénytelen. Olvassa be újra a tárcát, és próbálja meg ismét.",
   "purchase.invalidMerchantWallet": "Ehhez az üzleti egységhez érvénytelen tárca van beállítva. Forduljon az ügyfélszolgálathoz.",
   "purchase.paymentFailedTitle": "A fizetés nem érkezett meg",

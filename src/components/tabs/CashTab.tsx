@@ -12,6 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { parseAmountInput, clampCashAmount, getCashMaxTx, cashBlockReason } from "@/lib/max-tx";
 import { withCallerHex, withCallerField } from "@/lib/callerIdentity";
+import { sendPurchase, sellerRefusalKey } from "@/lib/purchaseRequest";
 import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
 import { localNameFor, registeredCardStep, newCardMode, regularCustomerStep, type ProfileStatus } from "@/lib/customerName";
 import { freshReceiptFields, duplicateRefusal, checkDedup, canContinueAfterHit, type DedupHit } from "@/lib/receiptDedup";
@@ -242,6 +243,8 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   // Translate Brain's 409 dedup responses into a localized seller-facing
   // message. Falls through to the generic error path for anything else.
   const formatPurchaseError = (status: number, data: any): string => {
+    const sellerKey = sellerRefusalKey(status, data);
+    if (sellerKey) return t(sellerKey);
     // A commission decision (KIND 87058) standing against SOMEBODY on this sale
     // — the shopper, the shop, or the person holding the phone. Without this
     // branch the till showed the raw English refusal body, so the money was
@@ -691,25 +694,21 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           }
 
           setIsSubmitting(true);
-          const res = await fetch('/api/brain/purchase', {
-            method: 'POST',
-            headers: withCallerHex({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({
-              unit_id: pd.unitId,
-              payment_type: 'cash',
-              customer_hex: resolvedHexId,
-              customer_wallet: resolvedWalletId,
-              // Snapshot the customer name so brain admin can show it even
-              // if the KIND 0 event later disappears from relays.
-              customer_name: customerName,
-              amount: parsedAmount,
-              currency: pd.currency,
-              invoice_number: pd.invoiceNumber.trim(),
-              receipt_url: pd.receiptUrl || undefined,
-              receipt_hash: pd.receiptHash || undefined,
-              receipt_type: pd.receiptType || 'receipt',
-              receipt_description: pd.receiptDescription || undefined,
-            }),
+          const res = await sendPurchase(session, {
+            unit_id: pd.unitId,
+            payment_type: 'cash',
+            customer_hex: resolvedHexId,
+            customer_wallet: resolvedWalletId,
+            // Snapshot the customer name so brain admin can show it even
+            // if the KIND 0 event later disappears from relays.
+            customer_name: customerName,
+            amount: parsedAmount,
+            currency: pd.currency,
+            invoice_number: pd.invoiceNumber.trim(),
+            receipt_url: pd.receiptUrl || undefined,
+            receipt_hash: pd.receiptHash || undefined,
+            receipt_type: pd.receiptType || 'receipt',
+            receipt_description: pd.receiptDescription || undefined,
           });
           const purchaseData = await res.json();
           setIsSubmitting(false);
@@ -803,23 +802,19 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     setSubmitError(null);
 
     try {
-      const res = await fetch('/api/brain/purchase', {
-        method: 'POST',
-        headers: withCallerHex({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          unit_id: pd.unitId,
-          payment_type: 'cash',
-          customer_hex: customer.customer_hex_id,
-          customer_wallet: customer.customer_wallet,
-          customer_name: regularName,
-          amount: parsedAmount,
-          currency: pd.currency,
-          invoice_number: pd.invoiceNumber.trim(),
-          receipt_url: pd.receiptUrl || undefined,
-          receipt_hash: pd.receiptHash || undefined,
-          receipt_type: pd.receiptType || 'receipt',
-          receipt_description: pd.receiptDescription || undefined,
-        }),
+      const res = await sendPurchase(session, {
+        unit_id: pd.unitId,
+        payment_type: 'cash',
+        customer_hex: customer.customer_hex_id,
+        customer_wallet: customer.customer_wallet,
+        customer_name: regularName,
+        amount: parsedAmount,
+        currency: pd.currency,
+        invoice_number: pd.invoiceNumber.trim(),
+        receipt_url: pd.receiptUrl || undefined,
+        receipt_hash: pd.receiptHash || undefined,
+        receipt_type: pd.receiptType || 'receipt',
+        receipt_description: pd.receiptDescription || undefined,
       });
       const data = await res.json();
 
@@ -936,23 +931,19 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           }
 
           console.log('[CashTab] Auto-submitting purchase after registration...');
-          const purchaseRes = await fetch('/api/brain/purchase', {
-            method: 'POST',
-            headers: withCallerHex({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({
-              unit_id: pd.unitId,
-              payment_type: 'cash',
-              customer_hex: nostrHexId,
-              customer_wallet: walletId,
-              customer_name: fullName.trim() || '',
-              amount: parsedAmount,
-              currency: pd.currency,
-              invoice_number: pd.invoiceNumber.trim(),
-              receipt_url: pd.receiptUrl || undefined,
-              receipt_hash: pd.receiptHash || undefined,
-              receipt_type: pd.receiptType || 'receipt',
-              receipt_description: pd.receiptDescription || undefined,
-            }),
+          const purchaseRes = await sendPurchase(session, {
+            unit_id: pd.unitId,
+            payment_type: 'cash',
+            customer_hex: nostrHexId,
+            customer_wallet: walletId,
+            customer_name: fullName.trim() || '',
+            amount: parsedAmount,
+            currency: pd.currency,
+            invoice_number: pd.invoiceNumber.trim(),
+            receipt_url: pd.receiptUrl || undefined,
+            receipt_hash: pd.receiptHash || undefined,
+            receipt_type: pd.receiptType || 'receipt',
+            receipt_description: pd.receiptDescription || undefined,
           });
           const purchaseData = await purchaseRes.json();
 

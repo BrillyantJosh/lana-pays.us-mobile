@@ -14,6 +14,7 @@ import {
 } from "@/lib/blockWait";
 import { useAuth } from "@/contexts/AuthContext";
 import { withCallerHex, withCallerField } from "@/lib/callerIdentity";
+import { sendPurchase, sellerRefusalKey } from "@/lib/purchaseRequest";
 import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
 import { freshReceiptFields, duplicateRefusal, checkDedup, canContinueAfterHit, type DedupHit } from "@/lib/receiptDedup";
 import { DuplicateNumberFix, RefusedNumberHint } from "@/components/DuplicateNumberFix";
@@ -432,11 +433,7 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         // From here on the signed payment has left the till: a lost answer means
         // "we do not know", never "not received".
         purchaseSent = true;
-        const purchaseRes = await fetch('/api/brain/purchase', {
-          method: 'POST',
-          headers: withCallerHex({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify(purchaseBody),
-        });
+        const purchaseRes = await sendPurchase(session, purchaseBody);
 
         const brainData = await purchaseRes.json();
 
@@ -479,6 +476,9 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             else setPurchaseError(t('purchase.customerLanaFailed'));
           } else if (isOutcomeUnknown(purchaseRes.status, brainData)) {
             setInReview(true);
+          } else if (sellerRefusalKey(purchaseRes.status, brainData)) {
+            // Refused before it reached the brain, so the signed payment never left.
+            setPurchaseError(t(sellerRefusalKey(purchaseRes.status, brainData)!));
           } else {
             setPurchaseError(excludedMessage(purchaseRes.status, brainData, t) || brainData.error || t('lana.purchaseFailed'));
           }

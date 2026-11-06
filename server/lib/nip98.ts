@@ -24,8 +24,10 @@
  *
  * The spent list is held in memory. A restart of the server forgets it, so a
  * token captured in the minute before a restart could be used once more after
- * it, inside what is left of its 60 seconds. That is accepted: the route is
- * read-only, and the token is bound to one method and path.
+ * it, inside what is left of its 60 seconds. That is accepted: the overview is
+ * read-only and the token is bound to one method and path; a purchase token is
+ * also bound to its exact body (`payload` below), so it can only ever repeat the
+ * same sale, and the brain refuses a second sale with the same invoice number.
  *
  * ⚠ Two identical requests in the same second produce the SAME event id — the
  * id is sha256 over [0, pubkey, created_at, kind, tags, content] and the
@@ -35,6 +37,7 @@
  * signature, so nobody can strip one.
  */
 
+import { createHash } from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import { verifyEvent } from 'nostr-tools/pure';
 
@@ -42,13 +45,23 @@ export const AUTH_KIND = 27235;
 /** How long a token is good for. A captured header dies with it. */
 export const MAX_SKEW_SEC = 60;
 
-export type Nip98Result = { ok: true; hex: string; id: string } | { ok: false; reason: string };
+export type Nip98Result =
+  | { ok: true; hex: string; id: string }
+  /** `skewSec` comes with STALE only: how far ahead (+) or behind (-) of this server the token was. */
+  | { ok: false; reason: string; skewSec?: number };
 
 export interface Nip98Options {
   nowSec?: number;
   /** Returns false when this id was already spent. Defaults to the module store. */
   consume?: (id: string, expiresAt: number, nowSec: number) => boolean;
   verify?: (ev: any) => boolean;
+  /**
+   * The exact bytes of the request body, for a route whose token must be bound to
+   * them: the token then has to carry a `payload` tag holding their sha256, as
+   * NIP-98 defines it. Left out, nothing is bound (a GET has no body). null means
+   * a body was expected and none arrived, which no token can match.
+   */
+  body?: Uint8Array | null;
 }
 
 /** Spent token ids → the last second their token is still fresh. In memory:
@@ -122,7 +135,9 @@ export function verifyNip98(
   if (typeof sig !== 'string' || !/^[0-9a-f]{128}$/i.test(sig)) return { ok: false, reason: 'BAD_SIG' };
   if (typeof id !== 'string' || !/^[0-9a-f]{64}$/i.test(id)) return { ok: false, reason: 'BAD_ID' };
   if (typeof created_at !== 'number' || !Number.isFinite(created_at)) return { ok: false, reason: 'BAD_TIME' };
-  if (Math.abs(nowSec - created_at) > MAX_SKEW_SEC) return { ok: false, reason: 'STALE' };
+  if (Math.abs(nowSec - created_at) > MAX_SKEW_SEC) {
+    return { ok: false, reason: 'STALE', skewSec: Math.max(-1e9, Math.min(1e9, Math.round(created_at - nowSec))) };
+  }
   if (!Array.isArray(tags) || !tags.every(isStringTag)) return { ok: false, reason: 'BAD_TAGS' };
 
   // Bound to this verb and this path: a captured header for one route is not a
@@ -131,6 +146,15 @@ export function verifyNip98(
   if (methodTag.toUpperCase() !== String(method).toUpperCase()) return { ok: false, reason: 'METHOD_MISMATCH' };
   const uTag = String(tags.find((t: string[]) => t[0] === 'u')?.[1] || '');
   if (!pathMatches(uTag, path)) return { ok: false, reason: 'PATH_MISMATCH' };
+
+  // Bound to this body: the same path with another amount is another request.
+  if (opts.body !== undefined) {
+    const payload = String(tags.find((t: string[]) => t[0] === 'payload')?.[1] || '');
+    if (!payload) return { ok: false, reason: 'PAYLOAD_MISSING' };
+    if (!opts.body || payload.toLowerCase() !== createHash('sha256').update(opts.body).digest('hex')) {
+      return { ok: false, reason: 'PAYLOAD_MISMATCH' };
+    }
+  }
 
   // Recomputes the id from the seven fields and checks the schnorr signature,
   // so a token with someone else's pubkey or edited tags fails here.
@@ -155,6 +179,14 @@ function pathMatches(uTag: string, path: string): boolean {
   }
 }
 
+/**
+ * express.json({ verify: keepRawBody }) keeps the exact bytes the client sent, so a
+ * `payload` tag is checked against what arrived, not against a re-serialisation.
+ */
+export function keepRawBody(req: any, _res: unknown, buf: Buffer): void {
+  req.rawBody = buf;
+}
+
 /** The path a token must be signed for: what the client asked, without the query. */
 export function requestPath(req: Request): string {
   return String(req.originalUrl || req.url || '').split('?')[0];
@@ -165,7 +197,7 @@ export function verifyRequestSignature(req: Request, opts: Nip98Options = {}): N
 }
 
 /** At most the first 12 hex characters of the key a token CLAIMS — for the log only. */
-function claimedPrefix(header: string | undefined): string {
+export function claimedPrefix(header: string | undefined): string {
   try {
     const m = /^Nostr\s+(.+)$/i.exec(String(header || '').trim());
     if (!m) return '';

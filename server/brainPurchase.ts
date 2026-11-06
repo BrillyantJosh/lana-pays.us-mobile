@@ -3,8 +3,8 @@
  * till sends on its way to the brain. It lives apart from index.ts so a test can
  * run it, against a real database and a stub brain, instead of reading it as text.
  *
- * The route itself, with its rate limit and its KIND 87058 gate, stays
- * registered in index.ts.
+ * The route itself, with its rate limit, its KIND 87058 gate and the seller check
+ * (purchaseSeller.ts), stays registered in index.ts.
  */
 import type { Request, Response } from 'express';
 import type Database from 'better-sqlite3';

@@ -4,8 +4,8 @@
  * A Nostr public key is public, so a route that believes a hex the client
  * sends believes anybody. Routes that show a merchant money owed to them ask
  * for a NIP-98 token instead (see server/lib/nip98.ts): a kind-27235 event
- * signed with the session key, bound to this method and path, good for about a
- * minute, and spendable once.
+ * signed with the session key, bound to this method and path (and to the exact
+ * body, on a route that asks for it), good for about a minute, and spendable once.
  *
  * THE KEY IS PASSED IN, from useAuth().session.privateKeyHex. This app's session
  * calls the field `privateKeyHex`; the shop's copy of this file reads
@@ -23,6 +23,7 @@
  */
 
 import { finalizeEvent } from 'nostr-tools/pure';
+import { sha256 } from '@noble/hashes/sha2.js';
 
 const HEX64 = /^[0-9a-f]{64}$/i;
 
@@ -33,10 +34,13 @@ function hexToBytes(hex: string): Uint8Array {
   return out;
 }
 
+const bytesToHex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+
 function randomNonce(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return bytesToHex(bytes);
 }
 
 /** The path the token is bound to — what the server sees, without the query. */
@@ -45,23 +49,34 @@ export function signedPath(url: string): string {
   return withoutOrigin.split('?')[0];
 }
 
+export interface SignOptions {
+  /** The exact string that goes out as the request body. The token is then bound to its bytes. */
+  body?: string;
+  /** Sign as of this second instead of this device's clock (a clock the server said is off). */
+  nowSec?: number;
+}
+
 /**
- * Headers proving this key signed this method+path. Returns {} when there is no
- * usable key, so the caller degrades to an unsigned request the server refuses
- * (with a reason the page can explain), rather than throwing mid-render.
+ * Headers proving this key signed this method+path (and body, when given). Returns
+ * {} when there is no usable key, so the caller degrades to an unsigned request the
+ * server refuses (with a reason the page can explain), rather than throwing
+ * mid-render.
  */
-export function signedAuthHeaders(privateKeyHex: string | null | undefined, method: string, url: string): Record<string, string> {
+export function signedAuthHeaders(privateKeyHex: string | null | undefined, method: string, url: string, opts: SignOptions = {}): Record<string, string> {
   if (!privateKeyHex || !HEX64.test(privateKeyHex)) return {};
   try {
+    const tags = [
+      ['u', signedPath(url)],
+      ['method', method.toUpperCase()],
+      ['nonce', randomNonce()],
+    ];
+    // TextEncoder is how fetch itself turns a string body into bytes (UTF-8).
+    if (opts.body !== undefined) tags.push(['payload', bytesToHex(sha256(new TextEncoder().encode(opts.body)))]);
     const ev = finalizeEvent(
       {
         kind: 27235, // NIP-98 HTTP Auth
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [
-          ['u', signedPath(url)],
-          ['method', method.toUpperCase()],
-          ['nonce', randomNonce()],
-        ],
+        created_at: opts.nowSec ?? Math.floor(Date.now() / 1000),
+        tags,
         content: '',
       },
       hexToBytes(privateKeyHex),

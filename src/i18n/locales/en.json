@@ -458,6 +458,8 @@
   "purchase.cannotSellToYourself": "You cannot purchase from your own business unit. Please use a different customer wallet.",
   "purchase.personExcluded": "This sale cannot go through: a community commission has paused the access of someone named on it.",
   "purchase.merchantUnavailable": "This sale cannot go through: the shop cannot take payments at the moment.",
+  "purchase.sellerNotConfirmed": "This sale was not recorded: the till could not confirm who is selling. Reload the page and try again. If that does not help, sign in again.",
+  "purchase.sellerNotEntitled": "This sale was not recorded: this sign-in is not listed as the owner or staff of this shop.",
   "purchase.invalidCustomerWallet": "The customer's wallet address is invalid. Please re-scan the wallet and try again.",
   "purchase.invalidMerchantWallet": "This business unit has an invalid wallet configured. Please contact support.",
   "purchase.paymentFailedTitle": "Payment not received",

@@ -25,6 +25,8 @@ import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js
 import { registerPaymentRequestRoutes } from './paymentRequests.js';
 import { registerOrderRoutes } from './orders.js';
 import { brainPurchaseHandler } from './brainPurchase.js';
+import { purchaseSellerCheck, logPurchaseCheckState } from './purchaseSeller.js';
+import { keepRawBody } from './lib/nip98.js';
 import { devRelays } from './lib/devOverrides.js';
 import { getMaxTransaction } from './lib/maxTransaction.js';
 import { analyzeReceiptImage } from './lib/receiptAnalysis.js';
@@ -68,8 +70,9 @@ const PORT = parseInt(process.env.SERVER_PORT || process.env.PORT || '3005');
 // Trust proxy (behind nginx-proxy)
 app.set('trust proxy', 1);
 
-// Body size limit
-app.use(express.json({ limit: '50kb' }));
+// Body size limit. The exact bytes are kept beside the parsed body: a signed
+// purchase request is bound to them (server/purchaseSeller.ts).
+app.use(express.json({ limit: '50kb', verify: keepRawBody }));
 
 // Security headers
 app.use((req, res, next) => {
@@ -1260,7 +1263,8 @@ app.post('/api/brain/purchase/check-dedup', purchaseLimiter, gateNames(db, purch
   }
 });
 
-app.post('/api/brain/purchase', purchaseLimiter, gateNames(db, purchaseNames), brainPurchaseHandler(db, BRAIN_API_URL, BRAIN_PURCHASE_KEY));
+logPurchaseCheckState();
+app.post('/api/brain/purchase', purchaseLimiter, gateNames(db, purchaseNames), purchaseSellerCheck(db), brainPurchaseHandler(db, BRAIN_API_URL, BRAIN_PURCHASE_KEY));
 
 // ─── Invoice Image Uploads ────────────────────────────
 

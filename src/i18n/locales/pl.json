@@ -319,6 +319,8 @@
   "purchase.cannotSellToYourself": "Nie możesz kupować we własnej jednostce biznesowej. Użyj innego portfela klienta.",
   "purchase.personExcluded": "Ta sprzedaż nie może dojść do skutku: komisja społeczności wstrzymała dostęp jednej z wymienionych osób.",
   "purchase.merchantUnavailable": "Ta sprzedaż nie może dojść do skutku: sklep nie może w tej chwili przyjmować płatności.",
+  "purchase.sellerNotConfirmed": "Ta sprzedaż nie została zapisana: kasa nie mogła potwierdzić, kto sprzedaje. Odśwież stronę i spróbuj ponownie. Jeśli to nie pomoże, zaloguj się ponownie.",
+  "purchase.sellerNotEntitled": "Ta sprzedaż nie została zapisana: to logowanie nie figuruje jako właściciel ani personel tego sklepu.",
   "purchase.invalidCustomerWallet": "Adres portfela klienta jest nieprawidłowy. Zeskanuj portfel ponownie i spróbuj jeszcze raz.",
   "purchase.invalidMerchantWallet": "Ta jednostka biznesowa ma skonfigurowany nieprawidłowy portfel. Skontaktuj się z pomocą techniczną.",
   "purchase.paymentFailedTitle": "Płatność nieotrzymana",

@@ -319,6 +319,8 @@
   "purchase.cannotSellToYourself": "No puede comprar en su propia unidad de negocio. Use una billetera de cliente diferente.",
   "purchase.personExcluded": "Esta venta no puede realizarse: una comisión de la comunidad ha pausado el acceso de una persona implicada.",
   "purchase.merchantUnavailable": "Esta venta no puede realizarse: la tienda no puede aceptar pagos en este momento.",
+  "purchase.sellerNotConfirmed": "Esta venta no se ha registrado: la caja no ha podido confirmar quién vende. Recarga la página e inténtalo de nuevo. Si no funciona, inicia sesión de nuevo.",
+  "purchase.sellerNotEntitled": "Esta venta no se ha registrado: este inicio de sesión no figura como propietario ni como personal de esta tienda.",
   "purchase.invalidCustomerWallet": "La dirección de la billetera del cliente no es válida. Vuelva a escanear la billetera e inténtelo de nuevo.",
   "purchase.invalidMerchantWallet": "Esta unidad de negocio tiene configurada una billetera no válida. Póngase en contacto con el soporte.",
   "purchase.paymentFailedTitle": "Pago no recibido",

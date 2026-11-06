@@ -60,6 +60,49 @@ describe('signedAuthHeaders', () => {
   });
 });
 
+describe('signedAuthHeaders with a body', () => {
+  const POST_PATH = '/api/brain/purchase';
+  const text = JSON.stringify({ unit_id: 'u', amount: 10, customer_name: 'Živa 日本 🌱' });
+  const bytes = () => Buffer.from(text, 'utf8');
+
+  it('binds the token to the exact bytes fetch will send', () => {
+    const { privateKeyHex, nostrHexId } = sessionLikeAuthContext();
+    const { Authorization } = signedAuthHeaders(privateKeyHex, 'POST', POST_PATH, { body: text });
+    expect(verifyNip98(Authorization, 'POST', POST_PATH, { body: bytes() })).toMatchObject({ ok: true, hex: nostrHexId });
+  });
+
+  it('another body does not match the same token', () => {
+    const { privateKeyHex } = sessionLikeAuthContext();
+    const { Authorization } = signedAuthHeaders(privateKeyHex, 'POST', POST_PATH, { body: text });
+    expect(verifyNip98(Authorization, 'POST', POST_PATH, { body: Buffer.from(text.replace('10', '11')) })).toEqual({ ok: false, reason: 'PAYLOAD_MISMATCH' });
+  });
+
+  it('with no body there is no payload tag, and the route that binds a body says so', () => {
+    const { privateKeyHex } = sessionLikeAuthContext();
+    const { Authorization } = signedAuthHeaders(privateKeyHex, 'POST', POST_PATH);
+    expect(verifyNip98(Authorization, 'POST', POST_PATH, { body: bytes() })).toEqual({ ok: false, reason: 'PAYLOAD_MISSING' });
+  });
+
+  it('signs as of the second it is told to, not this device\'s clock', () => {
+    const { privateKeyHex } = sessionLikeAuthContext();
+    const told = Math.floor(Date.now() / 1000) + 86400;
+    const { Authorization } = signedAuthHeaders(privateKeyHex, 'POST', POST_PATH, { body: text, nowSec: told });
+    const ev = JSON.parse(atob(Authorization.replace('Nostr ', '')));
+    expect(ev.created_at).toBe(told);
+    expect(verifyNip98(Authorization, 'POST', POST_PATH, { body: bytes(), nowSec: told }).ok).toBe(true);
+    expect(verifyNip98(Authorization, 'POST', POST_PATH, { body: bytes() })).toMatchObject({ ok: false, reason: 'STALE' });
+  });
+
+  it('the same body twice in a second is two tokens', () => {
+    const { privateKeyHex } = sessionLikeAuthContext();
+    const a = signedAuthHeaders(privateKeyHex, 'POST', POST_PATH, { body: text }).Authorization;
+    const b = signedAuthHeaders(privateKeyHex, 'POST', POST_PATH, { body: text }).Authorization;
+    expect(a).not.toBe(b);
+    expect(verifyNip98(a, 'POST', POST_PATH, { body: bytes() }).ok).toBe(true);
+    expect(verifyNip98(b, 'POST', POST_PATH, { body: bytes() }).ok).toBe(true);
+  });
+});
+
 describe('signedFetch', () => {
   it('attaches the signature and keeps the caller\'s headers', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(new Response('{}'));
