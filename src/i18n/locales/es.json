@@ -152,7 +152,7 @@
   "cash.amount": "Monto ({{symbol}})",
   "cash.amountPlaceholder": "0.00",
   "cash.noFunds": "No hay fondos de inversión disponibles",
-  "cash.amountAdjusted": "El importe de la factura {{symbol}}{{original}} supera el límite de transacción — ajustado a {{symbol}}{{amount}}.",
+  "cash.amountAdjusted": "El importe de la factura {{symbol}}{{original}} supera el límite — ajustado a {{symbol}}{{amount}}.",
   "cash.willAdjustToMax": "Por encima del límite — el importe cobrado se ajustará a {{symbol}}{{amount}}.",
   "cash.receiptAttached": "Recibo adjunto",
   "cash.uploading": "Subiendo...",

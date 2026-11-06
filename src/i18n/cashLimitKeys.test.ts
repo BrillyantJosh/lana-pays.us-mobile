@@ -35,4 +35,11 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
   it('the window\'s refusal says what the customer spent, of what limit, in how many days', () => {
     for (const p of ['{{spent}}', '{{limit}}', '{{days}}', '{{currency}}']) expect(strings['cash.customerWindowExceeded']).toContain(p);
   });
+
+  // The same notice is shown when the fund, the default, the rest of the month or
+  // the customer's window reduced the sale, so it may not claim the cause was the
+  // transaction limit.
+  it('the notice about a reduced sale names no single cause', () => {
+    expect(strings['cash.amountAdjusted']).not.toMatch(/transacti|transakcij|transaktions|tranzakci|transação|transacción|транзакци|交易/i);
+  });
 });

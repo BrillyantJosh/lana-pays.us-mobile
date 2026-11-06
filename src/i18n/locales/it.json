@@ -152,7 +152,7 @@
   "cash.amount": "Importo ({{symbol}})",
   "cash.amountPlaceholder": "0,00",
   "cash.noFunds": "Nessun fondo investitore disponibile",
-  "cash.amountAdjusted": "L'importo della fattura {{symbol}}{{original}} supera il limite di transazione — adeguato a {{symbol}}{{amount}}.",
+  "cash.amountAdjusted": "L'importo della fattura {{symbol}}{{original}} supera il limite — adeguato a {{symbol}}{{amount}}.",
   "cash.willAdjustToMax": "Oltre il limite — l'importo addebitato sarà adeguato a {{symbol}}{{amount}}.",
   "cash.receiptAttached": "Scontrino allegato",
   "cash.uploading": "Caricamento...",

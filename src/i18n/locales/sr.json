@@ -152,7 +152,7 @@
   "cash.amount": "Iznos ({{symbol}})",
   "cash.amountPlaceholder": "0,00",
   "cash.noFunds": "Nema dostupnih investitorskih sredstava",
-  "cash.amountAdjusted": "Iznos računa {{symbol}}{{original}} premašuje limit transakcije — prilagođen na {{symbol}}{{amount}}.",
+  "cash.amountAdjusted": "Iznos računa {{symbol}}{{original}} premašuje limit — prilagođen na {{symbol}}{{amount}}.",
   "cash.willAdjustToMax": "Iznad limita — naplaćeni iznos biće prilagođen na {{symbol}}{{amount}}.",
   "cash.receiptAttached": "Račun priložen",
   "cash.uploading": "Otpremanje...",

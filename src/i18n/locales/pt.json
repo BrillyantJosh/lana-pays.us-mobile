@@ -152,7 +152,7 @@
   "cash.amount": "Valor ({{symbol}})",
   "cash.amountPlaceholder": "0.00",
   "cash.noFunds": "Sem fundos de investimento disponíveis",
-  "cash.amountAdjusted": "O valor da fatura {{symbol}}{{original}} excede o limite de transação — ajustado para {{symbol}}{{amount}}.",
+  "cash.amountAdjusted": "O valor da fatura {{symbol}}{{original}} excede o limite — ajustado para {{symbol}}{{amount}}.",
   "cash.willAdjustToMax": "Acima do limite — o valor cobrado será ajustado para {{symbol}}{{amount}}.",
   "cash.receiptAttached": "Recibo anexado",
   "cash.uploading": "Enviando...",

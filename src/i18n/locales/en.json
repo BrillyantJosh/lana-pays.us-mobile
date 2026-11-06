@@ -164,7 +164,7 @@
   "cash.amount": "Amount ({{symbol}})",
   "cash.amountPlaceholder": "0.00",
   "cash.noFunds": "No investor funds available",
-  "cash.amountAdjusted": "Invoice amount {{symbol}}{{original}} exceeds the transaction limit — adjusted to {{symbol}}{{amount}}.",
+  "cash.amountAdjusted": "Invoice amount {{symbol}}{{original}} exceeds the limit — adjusted to {{symbol}}{{amount}}.",
   "cash.willAdjustToMax": "Above the limit — the charged amount will be adjusted to {{symbol}}{{amount}}.",
   "cash.receiptAttached": "Receipt attached",
   "cash.uploading": "Uploading...",
