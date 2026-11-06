@@ -190,6 +190,18 @@ export function brainPurchaseHandler(db: Database.Database, BRAIN_API_URL: strin
             });
           }
         }
+      } else if (String(req.body?.payment_type) === 'cash') {
+        // Every limit above is read from this unit's row, and nothing after this
+        // proxy applies the invoice limit, so a cash sale for a unit not in the
+        // table would go on unchecked. The till only ever offers units from this
+        // table (GET /api/business-units), and no row is ever deleted. LANA goes on:
+        // none of those limits apply to it, and the brain answers for the unit.
+        console.warn(`[mobile] Blocking CASH pre-flight: unit ${unitId.slice(0, 12)} is not known here`);
+        return res.status(404).json({
+          success: false,
+          error: 'UNIT_NOT_FOUND',
+          message: 'This unit is not known here',
+        });
       }
     }
 

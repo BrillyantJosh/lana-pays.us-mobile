@@ -393,6 +393,38 @@ describe('the rest of the month, in cents, the way the brain counts it', () => {
   });
 });
 
+describe('a unit this till does not know', () => {
+  const stranger = 'f'.repeat(32);
+
+  it('a cash sale is refused with a 404, and nothing is asked or sent on', async () => {
+    seed({ maxTx: '200.00' });
+    const r = await sell({ ...cashSale(99999), unit_id: stranger });
+
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe('UNIT_NOT_FOUND');
+    expect(forwarded()).toEqual([]);
+    expect(windowLookups()).toEqual([]);
+  });
+
+  it('a LANA sale goes on as before, the brain answers for it', async () => {
+    seed({ maxTx: '200.00' });
+    const r = await sell({ payment_type: 'lana', amount: 99999, signed_tx_hex: 'ab', ...CUSTOMER, unit_id: stranger });
+
+    expect(r.status).toBe(200);
+    expect(forwarded()[0].body.amount).toBe(99999);
+  });
+
+  it('no unit_id at all is still the brain\'s own 400 to give', async () => {
+    seed({ maxTx: '200.00' });
+    brainAnswer = { status: 400, body: { error: 'Missing required fields' } };
+    const r = await sell({ ...cashSale(100), unit_id: '' });
+
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe('Missing required fields');
+    expect(forwarded()).toHaveLength(1);
+  });
+});
+
 describe('a LANA sale is untouched', () => {
   const lanaSale = (amount: number) => ({ payment_type: 'lana', amount, signed_tx_hex: 'ab', ...CUSTOMER });
 

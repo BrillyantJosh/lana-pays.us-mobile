@@ -310,6 +310,11 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     if (status === 403 && data?.error === 'NO_FUND_CAPACITY') {
       return t('cash.noFunds');
     }
+    // The proxy does not know the unit. The till only offers units it knows, so
+    // this is a stale page: trying again is the honest thing to ask for.
+    if (status === 404 && data?.error === 'UNIT_NOT_FOUND') {
+      return t('cash.purchaseFailed');
+    }
     // Split in progress — cash is disabled, LANA still works.
     if (status === 403 && data?.error === 'SPLIT_HAPPENING') {
       return t('split.happening.body');

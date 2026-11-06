@@ -144,4 +144,12 @@ describe('refused by the server', () => {
     expect(screen.queryByText('NO_FUND_CAPACITY')).not.toBeInTheDocument();
     expect(screen.queryByText(/already spent/)).not.toBeInTheDocument();
   });
+
+  it('UNIT_NOT_FOUND reads as a failed purchase to try again, not as a code', async () => {
+    purchase = { status: 404, body: { success: false, error: 'UNIT_NOT_FOUND', message: 'x' } };
+    await toInvoiceStep();
+    await pay();
+    await screen.findByText(i18n.t('cash.purchaseFailed'));
+    expect(screen.queryByText('UNIT_NOT_FOUND')).not.toBeInTheDocument();
+  });
 });
