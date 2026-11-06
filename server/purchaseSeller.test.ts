@@ -6,7 +6,7 @@
  * Real check, real handler, real schema in memory, the browser's real signing code,
  * and a stub brain on its own port that records every request it gets.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import express from 'express';
@@ -14,9 +14,13 @@ import type { AddressInfo } from 'net';
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { initializeSchema } from './db/schema.js';
 import { brainPurchaseHandler } from './brainPurchase.js';
-import { purchaseSellerCheck } from './purchaseSeller.js';
+import { purchaseSellerCheck, purchaseSignatureRequired, logPurchaseCheckState } from './purchaseSeller.js';
 import { keepRawBody, forgetSpentTokens } from './lib/nip98.js';
+import { gateNames } from './lib/exclusionGate.js';
+import { ensureExclusionTables } from './lib/personExclusion.js';
+import { exclusionFromRefusal } from '../src/lib/exclusion';
 import { signedAuthHeaders } from '../src/lib/signedRequest';
+import { sendPurchase } from '../src/lib/purchaseRequest';
 
 const PATH = '/api/brain/purchase';
 const UNIT = '1e3e722ad51d39b4c91039a9112c021e';
@@ -622,6 +626,436 @@ describe('the brain sees what it saw before', () => {
     expect(forwarded()[0].authorization).toBe('Bearer test-key');
     expect(forwarded()[0].body).toEqual(JSON.parse(s.body));
     expect(await nthVerdict(0)).toMatchObject({ verdict: 'ok', status: 200 });
+  });
+});
+
+describe('phase 2: with PURCHASE_SIGNATURE_REQUIRED=on, only someone entitled records a sale', () => {
+  beforeEach(() => { process.env.PURCHASE_SIGNATURE_REQUIRED = 'on'; });
+  afterEach(() => { delete process.env.PURCHASE_SIGNATURE_REQUIRED; });
+
+  it('the owner sells', async () => {
+    const r = await sellAs(OWNER, cashSale());
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ success: true, data: { transaction_id: 'tx_1' } });
+    expect(forwarded()).toHaveLength(1);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'ok', status: 200 });
+  });
+
+  it('a staff member sells, cash and LANA', async () => {
+    expect((await sellAs(STAFF, cashSale())).status).toBe(200);
+    expect((await sellAs(STAFF, lanaSale({ invoice_number: 'INV-2' }))).status).toBe(200);
+    expect(forwarded()).toHaveLength(2);
+    expect(await nthVerdict(1)).toMatchObject({ verdict: 'ok', payment_type: 'lana', signer_prefix: STAFF.hex.slice(0, 12) });
+  });
+
+  it('an unsigned request is refused, the brain never hears of it, and the refusal says what to do', async () => {
+    const r = await post(JSON.stringify(cashSale()), { 'x-lana-hex': OWNER.hex });
+    expect(r.status).toBe(401);
+    expect(r.body).toMatchObject({ success: false, code: 'SIGNATURE_REQUIRED', reason: 'MISSING' });
+    expect(r.body.error).toMatch(/Reload the page/);
+    expect(brainRequests).toHaveLength(0);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'unsigned', status: 401 });
+  });
+
+  it.each([
+    ['a stranger', STRANGER],
+    ['the unit\'s caretaker', CARETAKER],
+  ])('%s is refused, cash and LANA', async (_who, who) => {
+    const cash = await sellAs(who, cashSale());
+    const lana = await sellAs(who, lanaSale({ invoice_number: 'INV-2' }));
+    for (const r of [cash, lana]) {
+      expect(r.status).toBe(403);
+      expect(r.body).toMatchObject({ success: false, code: 'NOT_ENTITLED' });
+    }
+    expect(brainRequests).toHaveLength(0);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'not_entitled', reason: 'NOT_OWNER_OR_STAFF', status: 403 });
+  });
+
+  it.each([
+    ['the amount', { amount: 49 }],
+    ['the unit', { unit_id: 'another-unit-0000000000000000' }],
+    ['the customer', { customer_hex: 'd'.repeat(64) }],
+    ['the wallet', { customer_wallet: 'LfDJmg13pwCjG3u6T6GH4Y3MUEdRuj68Nd' }],
+    ['the invoice number', { invoice_number: 'INV-2' }],
+  ])('%s changed after signing: refused, and nothing reaches the brain', async (_what, change) => {
+    const s = signedBy(OWNER, cashSale());
+    const r = await post(JSON.stringify({ ...JSON.parse(s.body), ...change }), s.headers);
+    expect(r.status).toBe(401);
+    expect(r.body).toMatchObject({ code: 'SIGNATURE_REQUIRED', reason: 'PAYLOAD_MISMATCH' });
+    expect(brainRequests).toHaveLength(0);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'bad_signature', status: 401 });
+  });
+
+  it('a body changed after signing does not spend the token: the real sale still goes', async () => {
+    const s = signedBy(OWNER, cashSale());
+    expect((await post(JSON.stringify({ ...JSON.parse(s.body), amount: 49 }), s.headers)).status).toBe(401);
+    expect((await post(s.body, s.headers)).status).toBe(200);
+    expect(forwarded()).toHaveLength(1);
+    expect(forwarded()[0].body.amount).toBe(50);
+  });
+
+  it('a token for another path is refused', async () => {
+    const body = JSON.stringify(cashSale());
+    const r = await post(body, signedAuthHeaders(OWNER.key, 'POST', '/api/brain/purchase/preview', { body }));
+    expect(r.status).toBe(401);
+    expect(r.body.reason).toBe('PATH_MISMATCH');
+    expect(brainRequests).toHaveLength(0);
+  });
+
+  it('a retry of the same sale passes: the same bytes signed again in the same second', async () => {
+    const sale = cashSale();
+    brainAnswer = { status: 502, body: { success: false, error: 'brain is down' } };
+    expect((await sellAs(OWNER, sale)).status).toBe(502);
+    brainAnswer = { status: 200, body: { success: true, data: { transaction_id: 'tx_2' } } };
+    const again = await sellAs(OWNER, sale);
+    expect(again.status).toBe(200);
+    expect(again.body.data.transaction_id).toBe('tx_2');
+    expect(forwarded()).toHaveLength(2);
+    expect(forwarded()[0].body).toEqual(forwarded()[1].body);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'ok', status: 502 });
+    expect(await nthVerdict(1)).toMatchObject({ verdict: 'ok', status: 200 });
+  });
+
+  it('the same token a second time is refused: the brain saw one sale', async () => {
+    const s = signedBy(OWNER, cashSale());
+    expect((await post(s.body, s.headers)).status).toBe(200);
+    const twice = await post(s.body, s.headers);
+    expect(twice.status).toBe(401);
+    expect(twice.body.reason).toBe('REPLAYED');
+    expect(forwarded()).toHaveLength(1);
+  });
+
+  it('a stale token is refused with the server\'s time, and signing as of that time passes', async () => {
+    const skewed = Math.floor(Date.now() / 1000) - 600;
+    const stale = await sellAs(OWNER, cashSale(), { nowSec: skewed });
+    expect(stale.status).toBe(401);
+    expect(stale.body.reason).toBe('STALE');
+    expect(brainRequests).toHaveLength(0);
+    expect(Math.abs(stale.body.server_time - Math.floor(Date.now() / 1000))).toBeLessThanOrEqual(2);
+    const again = await sellAs(OWNER, cashSale(), { nowSec: stale.body.server_time });
+    expect(again.status).toBe(200);
+    expect(forwarded()).toHaveLength(1);
+  });
+
+  it('a unit nobody here knows, or none at all, is refused for LANA too', async () => {
+    expect((await sellAs(OWNER, lanaSale({ unit_id: 'unknown-unit' }))).status).toBe(403);
+    expect((await sellAs(OWNER, lanaSale({ unit_id: '', invoice_number: 'INV-2' }))).status).toBe(403);
+    expect((await sellAs(OWNER, lanaSale({ unit_id: 12345, invoice_number: 'INV-3' }))).status).toBe(403);
+    expect(brainRequests).toHaveLength(0);
+  });
+
+  it('a check that throws refuses with 503: not able to confirm is not a yes', async () => {
+    const failing = new Proxy(db, {
+      get(target: any, prop) {
+        if (prop === 'prepare') {
+          return (sql: string) => {
+            if (sql.includes('owner_hex, authorized_hex')) throw new Error('database is busy');
+            return target.prepare(sql);
+          };
+        }
+        const v = target[prop];
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    });
+    const flaky = await listen(mount(failing));
+    try {
+      const s = signedBy(OWNER, cashSale());
+      const r = await post(s.body, s.headers, flaky.url);
+      expect(r.status).toBe(503);
+      expect(r.body.code).toBe('SELLER_CHECK_FAILED');
+      expect(brainRequests).toHaveLength(0);
+    } finally {
+      await new Promise(r => flaky.server.close(r));
+    }
+  });
+
+  it('a refused sale costs the brain nothing: not even the customer window is asked', async () => {
+    await post(JSON.stringify(cashSale()), {});
+    expect(brainRequests).toHaveLength(0);
+  });
+
+  it('the limits are unchanged for someone entitled', async () => {
+    seed({ maxTx: '200.00', volumeUsed: 0, volumeLimit: 0, txUsed: 0, txLimit: 0 });
+    lookup = { spent: 192.44 };
+    const clamped = await sellAs(STAFF, cashSale({ amount: 188.94 }));
+    expect(clamped.status).toBe(200);
+    expect(forwarded()[0].body.amount).toBe(7.56);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'ok', status: 200, signer_prefix: STAFF.hex.slice(0, 12) });
+
+    lookup = { spent: 200 };
+    const window = await sellAs(STAFF, cashSale({ amount: 10, invoice_number: 'INV-2' }));
+    expect(window.status).toBe(403);
+    expect(window.body.error).toBe('CUSTOMER_WINDOW_EXCEEDED');
+
+    seed({ volumeUsed: 1000, volumeLimit: 1000 });
+    lookup = { spent: 0 };
+    const month = await sellAs(STAFF, cashSale({ amount: 10, invoice_number: 'INV-3' }));
+    expect(month.status).toBe(403);
+    expect(month.body.error).toBe('MERCHANT_QUOTA_EXCEEDED');
+  });
+});
+
+describe('a standing KIND 87058 decision against the person who signed', () => {
+  /** The route as index.ts mounts it, the gate in front: the same names purchaseNames gives. */
+  let gated: { server: any; url: string };
+  const asked: string[] = [];
+
+  const exclude = (hex: string, active = 1) => db.prepare(`
+    INSERT INTO person_exclusions (d_tag, person_hex, active, ground, since, event_id, event_created_at)
+    VALUES (?, ?, ?, 'The ground as the commission wrote it', 1, 'ev', 1)
+  `).run(`d-${hex}`, hex, active);
+
+  beforeAll(async () => {
+    ensureExclusionTables(db);
+    const noted = new Proxy(db, {
+      get(target: any, prop) {
+        if (prop === 'prepare') return (sql: string) => { asked.push(sql); return target.prepare(sql); };
+        const v = target[prop];
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    });
+    const app = express();
+    app.use(express.json({ limit: '50kb', verify: keepRawBody }));
+    app.post(PATH,
+      gateNames(db, (req: any) => ({
+        hex: [req.body?.customer_hex, req.headers?.['x-lana-hex'], req.body?.staff_hex, req.body?.merchant_hex],
+        wallet: [req.body?.customer_wallet],
+        unit: [req.body?.unit_id],
+      })),
+      purchaseSellerCheck(noted),
+      brainPurchaseHandler(db, brainUrl, 'test-key'));
+    gated = await listen(app);
+  });
+  afterAll(async () => { await new Promise(r => gated.server.close(r)); });
+
+  beforeEach(() => {
+    asked.length = 0;
+    db.prepare('DELETE FROM person_exclusions').run();
+  });
+  afterEach(() => {
+    delete process.env.PURCHASE_SIGNATURE_REQUIRED;
+    delete process.env.EXCLUSION_GATE;
+  });
+
+  const on = () => { process.env.PURCHASE_SIGNATURE_REQUIRED = 'on'; };
+  const sellThroughTheGate = (who: { key: string }, headers: Record<string, string> = {}) => {
+    const s = signedBy(who, cashSale());
+    return post(s.body, { ...s.headers, ...headers }, gated.url);
+  };
+
+  it.each([
+    ['the header left out', {}],
+    ['the header naming the owner', { 'x-lana-hex': OWNER.hex }],
+    ['the header naming someone else', { 'x-lana-hex': STRANGER.hex }],
+  ])('setting on, %s: refused in their own name, and the brain never hears of it', async (_how, headers) => {
+    on();
+    exclude(STAFF.hex);
+    const r = await sellThroughTheGate(STAFF, headers);
+    expect(r.status).toBe(403);
+    expect(r.body).toMatchObject({ code: 'PERSON_EXCLUDED', excluded: true, ground: 'The ground as the commission wrote it' });
+    expect(brainRequests).toHaveLength(0);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'not_entitled', reason: 'PERSON_EXCLUDED', status: 403, signer_prefix: STAFF.hex.slice(0, 12) });
+  });
+
+  it('the refusal is one the till already knows how to read', async () => {
+    on();
+    exclude(STAFF.hex);
+    const r = await sellThroughTheGate(STAFF);
+    expect(exclusionFromRefusal(r.body)?.ground).toBe('The ground as the commission wrote it');
+  });
+
+  it.each([
+    ['the header left out', {}],
+    ['the header naming the owner', { 'x-lana-hex': OWNER.hex }],
+  ])('setting off, %s: the same sale goes through, as it does today', async (_how, headers) => {
+    exclude(STAFF.hex);
+    const r = await sellThroughTheGate(STAFF, headers);
+    expect(r.status).toBe(200);
+    expect(forwarded()).toHaveLength(1);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'ok', status: 200, signer_prefix: STAFF.hex.slice(0, 12) });
+  });
+
+  it('setting off: the check does not ask about the signer at all', async () => {
+    exclude(STAFF.hex);
+    await sellThroughTheGate(STAFF);
+    await nthVerdict(0);
+    expect(asked.filter(sql => sql.includes('person_exclusions'))).toEqual([]);
+  });
+
+  it('setting off: the gate in front still refuses the name it is given', async () => {
+    exclude(STAFF.hex);
+    const r = await sellThroughTheGate(STAFF, { 'x-lana-hex': STAFF.hex });
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('PERSON_EXCLUDED');
+    expect(brainRequests).toHaveLength(0);
+  });
+
+  it('setting on: a clean staff member sells while someone else on the unit has a decision', async () => {
+    on();
+    exclude(STRANGER.hex);
+    const r = await sellThroughTheGate(STAFF);
+    expect(r.status).toBe(200);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'ok' });
+  });
+
+  it('setting on: a decision no longer standing does not stop the sale', async () => {
+    on();
+    exclude(STAFF.hex, 0);
+    expect((await sellThroughTheGate(STAFF)).status).toBe(200);
+  });
+
+  it('setting on: the one kill switch applies here too', async () => {
+    on();
+    process.env.EXCLUSION_GATE = 'off';
+    exclude(STAFF.hex);
+    expect((await sellThroughTheGate(STAFF)).status).toBe(200);
+  });
+
+  it('setting on: when the standing set cannot be read, the signer passes, as on every gated route', async () => {
+    on();
+    db.exec('ALTER TABLE person_exclusions RENAME TO person_exclusions_aside');
+    try {
+      const r = await sellThroughTheGate(STAFF);
+      expect(r.status).toBe(200);
+      expect(await nthVerdict(0)).toMatchObject({ verdict: 'ok', status: 200 });
+    } finally {
+      db.exec('ALTER TABLE person_exclusions_aside RENAME TO person_exclusions');
+    }
+  });
+
+  it('setting on: someone not on the unit is told that, whatever stands against them', async () => {
+    on();
+    exclude(STRANGER.hex);
+    const r = await sellThroughTheGate(STRANGER);
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('NOT_ENTITLED');
+    expect(r.body.ground).toBeUndefined();
+  });
+});
+
+describe('the till against the refusing server', () => {
+  const realFetch = globalThis.fetch;
+  const realNow = Date.now;
+
+  beforeEach(() => { process.env.PURCHASE_SIGNATURE_REQUIRED = 'on'; });
+  afterEach(() => {
+    delete process.env.PURCHASE_SIGNATURE_REQUIRED;
+    globalThis.fetch = realFetch;
+    Date.now = realNow;
+  });
+
+  /**
+   * The tab's fetch. It asks for a relative URL, which goes to the test server through
+   * `send`. The handler in this same process calls the brain with an absolute URL, and
+   * that one is left alone.
+   */
+  const tillFetch = (send: (url: string, init: any) => Promise<Response>) => {
+    globalThis.fetch = ((url: string, init: any) =>
+      (url.startsWith('/') ? send(`${base}${url}`, init) : realFetch(url, init))) as any;
+  };
+
+  it('a phone whose clock is 10 minutes off still sells: refused once, signed again, recorded once', async () => {
+    const phone = () => realNow() - 600_000;
+    tillFetch(async (url, init) => {
+      Date.now = realNow; // this server's clock while it answers
+      try { return await realFetch(url, init); } finally { Date.now = phone; }
+    });
+
+    Date.now = phone; // the phone's clock while it signs
+    const res = await sendPurchase({ privateKeyHex: OWNER.key, nostrHexId: OWNER.hex }, cashSale());
+    Date.now = realNow;
+
+    expect(res.status).toBe(200);
+    expect(forwarded()).toHaveLength(1);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'bad_signature', reason: 'STALE', status: 401 });
+    expect(await nthVerdict(1)).toMatchObject({ verdict: 'ok', status: 200, signer_prefix: OWNER.hex.slice(0, 12) });
+  });
+
+  it('a server whose clock is an hour off: the same, seen from the other side', async () => {
+    const server = () => realNow() - 3_600_000;
+    tillFetch(async (url, init) => {
+      Date.now = server;
+      try { return await realFetch(url, init); } finally { Date.now = realNow; }
+    });
+
+    const res = await sendPurchase({ privateKeyHex: STAFF.key, nostrHexId: STAFF.hex }, cashSale());
+    expect(res.status).toBe(200);
+    expect(forwarded()).toHaveLength(1);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'bad_signature', reason: 'STALE', status: 401 });
+    expect(await nthVerdict(1)).toMatchObject({ verdict: 'ok', status: 200 });
+  });
+
+  it('a request the browser itself sent twice: the second is told so, and the sale goes on to the brain\'s own answer', async () => {
+    const seen: string[] = [];
+    let repeated = false;
+    tillFetch(async (url, init) => {
+      seen.push(init.headers.Authorization);
+      if (!repeated) {
+        repeated = true;
+        await (await realFetch(url, init)).text(); // the first answer never reaches the page
+      }
+      return realFetch(url, init);
+    });
+
+    brainAnswer = { status: 409, body: { success: false, error: 'DUPLICATE_INVOICE' } };
+    const res = await sendPurchase({ privateKeyHex: OWNER.key, nostrHexId: OWNER.hex }, cashSale());
+    expect(res.status).toBe(409);
+    expect((await res.json() as any).error).toBe('DUPLICATE_INVOICE');
+    expect(new Set(seen).size).toBe(2);
+    expect(await nthVerdict(1)).toMatchObject({ verdict: 'bad_signature', reason: 'REPLAYED', status: 401 });
+    expect(await nthVerdict(2)).toMatchObject({ verdict: 'ok', status: 409 });
+  });
+
+  it('a seller the unit does not know is told so, once, with nothing sent again', async () => {
+    const seen: string[] = [];
+    tillFetch(async (url, init) => { seen.push(url); return realFetch(url, init); });
+    const res = await sendPurchase({ privateKeyHex: STRANGER.key, nostrHexId: STRANGER.hex }, cashSale());
+    expect(res.status).toBe(403);
+    expect((await res.json() as any).code).toBe('NOT_ENTITLED');
+    expect(seen).toHaveLength(1);
+    expect(brainRequests).toHaveLength(0);
+  });
+});
+
+describe('the setting', () => {
+  afterEach(() => { delete process.env.PURCHASE_SIGNATURE_REQUIRED; });
+
+  it('is off when it is not set: nothing is refused', async () => {
+    delete process.env.PURCHASE_SIGNATURE_REQUIRED;
+    expect(purchaseSignatureRequired()).toBe(false);
+    const r = await post(JSON.stringify(cashSale()), {});
+    expect(r.status).toBe(200);
+    expect(forwarded()).toHaveLength(1);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'unsigned', status: 200 });
+  });
+
+  it.each(['off', '', 'true', '1', 'ON', 'yes', ' on'])('%j is not on: only the exact word turns it on', async (value) => {
+    process.env.PURCHASE_SIGNATURE_REQUIRED = value;
+    expect(purchaseSignatureRequired()).toBe(false);
+    expect((await post(JSON.stringify(cashSale()), {})).status).toBe(200);
+    expect(await nthVerdict(0)).toMatchObject({ verdict: 'unsigned', status: 200 });
+  });
+
+  it('on and back off takes effect on the next request', async () => {
+    process.env.PURCHASE_SIGNATURE_REQUIRED = 'on';
+    expect((await post(JSON.stringify(cashSale()), {})).status).toBe(401);
+    process.env.PURCHASE_SIGNATURE_REQUIRED = 'off';
+    expect((await post(JSON.stringify(cashSale()), {})).status).toBe(200);
+  });
+
+  it('the boot line says which of the two this container is doing', () => {
+    logLines.length = 0;
+    delete process.env.PURCHASE_SIGNATURE_REQUIRED;
+    logPurchaseCheckState();
+    process.env.PURCHASE_SIGNATURE_REQUIRED = 'on';
+    logPurchaseCheckState();
+    expect(logLines[0]).toMatch(/^\[purchase-auth\] mode=logging: .*PURCHASE_SIGNATURE_REQUIRED=unset/);
+    expect(logLines[1]).toMatch(/^\[purchase-auth\] mode=refusing: .*PURCHASE_SIGNATURE_REQUIRED=on/);
+  });
+
+  it('the compose file names it, and defaults it to off', () => {
+    const compose = readFileSync(new URL('../docker-compose.prod.yml', import.meta.url), 'utf8');
+    expect(compose).toContain('- PURCHASE_SIGNATURE_REQUIRED=${PURCHASE_SIGNATURE_REQUIRED:-off}');
   });
 });
 

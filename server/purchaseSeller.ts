@@ -10,9 +10,17 @@
  * :hexId): its owner, or a staff hex from its KIND 30901. Nothing else is decided
  * here. Suspension, the limits and the split stay with the handler and the brain.
  *
- * WHAT HAPPENS WITH THE VERDICT TODAY: IT IS WRITTEN DOWN AND NOTHING ELSE. A tab
- * opened before this shipped sends no signature, and a refusal at a live till costs
- * a real sale, so no sale is stopped for any verdict here.
+ * WHAT HAPPENS WITH THE VERDICT DEPENDS ON ONE SETTING, PURCHASE_SIGNATURE_REQUIRED:
+ *
+ *  - not "on" (the default): it is written down and nothing else. A tab opened before
+ *    signing shipped sends no signature, and a refusal at a live till costs a real
+ *    sale, so no sale is stopped for any verdict.
+ *  - "on": anything but ok is refused here and the brain is never asked, and the
+ *    KIND 87058 check also asks about the person the signature proved. This is turned
+ *    on only when the checks in README.md, "Signed purchase requests", say so.
+ *
+ * A till signs a sale afresh once when it is told its token was stale or already used
+ * (src/lib/purchaseRequest.ts), so a phone with a wrong clock keeps selling either way.
  *
  * Each sale leaves one line in the container log and one row in `purchase_auth_log`:
  * the verdict, the HTTP status the till got (200 means the brain recorded the sale,
@@ -31,12 +39,14 @@ import type { Request, Response, NextFunction } from 'express';
 import type Database from 'better-sqlite3';
 import { verifyRequestSignature, claimedPrefix } from './lib/nip98.js';
 import { isOwnerOrStaff } from './lib/merchantAuth.js';
+import { excludedNow } from './lib/exclusionGate.js';
+import { exclusionRefusal, type ActiveExclusion } from './lib/personExclusion.js';
 
 export type SellerVerdict = 'ok' | 'unsigned' | 'bad_signature' | 'not_entitled' | 'check_failed';
 
 export interface SellerJudgement {
   verdict: SellerVerdict;
-  /** '' when ok. A NIP-98 reason for bad_signature. NO_UNIT, UNKNOWN_UNIT or NOT_OWNER_OR_STAFF for not_entitled. */
+  /** '' when ok. A NIP-98 reason for bad_signature. NO_UNIT, UNKNOWN_UNIT, NOT_OWNER_OR_STAFF or PERSON_EXCLUDED for not_entitled. */
   reason: string;
   /** The hex the signature PROVED, lower-case. null when nothing was proved. */
   signer: string | null;
@@ -138,9 +148,70 @@ function writeDown(db: Database.Database, d: ReturnType<typeof summarise>, statu
   }
 }
 
+/**
+ * Refuse instead of only writing it down? Read on every call, so the value in the
+ * environment is always the value that decides. Only the exact word "on" turns it on:
+ * a mistyped value leaves the till selling.
+ */
+export function purchaseSignatureRequired(): boolean {
+  return process.env.PURCHASE_SIGNATURE_REQUIRED === 'on';
+}
+
 /** Say at boot what this route does with a verdict. */
 export function logPurchaseCheckState(): void {
-  console.log('[purchase-auth] purchase signatures are checked and logged; no sale is refused for them');
+  const setting = `PURCHASE_SIGNATURE_REQUIRED=${process.env.PURCHASE_SIGNATURE_REQUIRED ?? 'unset'}`;
+  if (purchaseSignatureRequired()) {
+    console.log(`[purchase-auth] mode=refusing: a purchase not signed by the unit's owner or staff is refused (${setting})`);
+  } else {
+    console.log(`[purchase-auth] mode=logging: purchase signatures are checked and logged; no sale is refused for them (${setting})`);
+  }
+}
+
+const SELLER_NOT_CONFIRMED = 'This till could not confirm who is selling. Reload the page and try again. If that does not help, sign in again.';
+const SELLER_NOT_ENTITLED = 'This sign-in is not listed as the owner or staff of this shop.';
+
+/**
+ * The answer to a request that is not ok. `code` is what a till reads; `error` is
+ * words, because a tab with older code prints that field as it is, and "reload the
+ * page" is exactly what that tab needs to hear. `server_time` lets a till sign again
+ * as of this server's clock.
+ */
+function refuse(res: Response, j: SellerJudgement): void {
+  if (j.verdict === 'not_entitled') {
+    res.status(403).json({ success: false, code: 'NOT_ENTITLED', error: SELLER_NOT_ENTITLED, message: SELLER_NOT_ENTITLED });
+    return;
+  }
+  if (j.verdict === 'check_failed') {
+    res.status(503).json({ success: false, code: 'SELLER_CHECK_FAILED', error: SELLER_NOT_CONFIRMED, message: SELLER_NOT_CONFIRMED });
+    return;
+  }
+  res.status(401).json({
+    success: false,
+    code: 'SIGNATURE_REQUIRED',
+    error: SELLER_NOT_CONFIRMED,
+    message: SELLER_NOT_CONFIRMED,
+    reason: j.reason,
+    server_time: Math.floor(Date.now() / 1000),
+  });
+}
+
+/**
+ * The decision standing against the person the signature proved, or null.
+ *
+ * The gate in front of this route reads the names a request gives (purchaseNames in
+ * index.ts). Once a signature can be required, the person it proved is asked about
+ * too. This is the same question the gate asks, by way of the same excludedNow(): the
+ * one kill switch applies, and when the standing set cannot be read the answer is
+ * "no decision known here", as on every gated route (see findExclusion). With the
+ * setting off this is never called, so the gate works exactly as it did.
+ */
+function decisionAgainstSigner(db: Database.Database, signer: string | null): ActiveExclusion | null {
+  try {
+    return excludedNow(db, signer);
+  } catch (e: any) {
+    console.warn('[purchase-auth] could not ask about the signer:', e?.message || e);
+    return null;
+  }
 }
 
 /**
@@ -151,6 +222,7 @@ export function logPurchaseCheckState(): void {
 export function purchaseSellerCheck(db: Database.Database) {
   ensureLogTable(db);
   return (req: Request, res: Response, next: NextFunction) => {
+    const refusing = purchaseSignatureRequired();
     let judgement: SellerJudgement;
     try {
       judgement = judgeSeller(db, req);
@@ -158,6 +230,8 @@ export function purchaseSellerCheck(db: Database.Database) {
       console.warn('[purchase-auth] the check itself failed:', e?.message || e);
       judgement = judged('check_failed', 'ERROR');
     }
+    const decision = refusing && judgement.verdict === 'ok' ? decisionAgainstSigner(db, judgement.signer) : null;
+    if (decision) judgement = judged('not_entitled', 'PERSON_EXCLUDED', judgement.signer);
     try {
       const summary = summarise(req, judgement);
       // On close, so the status the till got is known. A connection dropped before
@@ -166,6 +240,14 @@ export function purchaseSellerCheck(db: Database.Database) {
     } catch (e: any) {
       console.warn('[purchase-auth] could not note the verdict:', e?.message || e);
     }
-    next();
+    if (judgement.verdict === 'ok' || !refusing) {
+      next();
+      return;
+    }
+    if (decision) {
+      res.status(403).json(exclusionRefusal(decision));
+      return;
+    }
+    refuse(res, judgement);
   };
 }

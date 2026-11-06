@@ -28,6 +28,13 @@ services:
       # a .env nobody opens. Compose interpolates it from THIS directory's .env
       # — the same file env_file names — so put it there, not in .env.local.
       - BRAIN_PEER_KEY=${BRAIN_PEER_KEY:-}
+      # What the server does with the seller's signature on a purchase
+      # (server/purchaseSeller.ts). Anything but "on": it is checked and logged, and
+      # no sale is refused for it. "on": a purchase not signed by the unit's owner or
+      # staff is refused. Turned on only when the checks in README.md, "Signed purchase
+      # requests", say so. Compose reads this from THIS directory's .env, not from
+      # .env.local, and a value only reaches the container once it has been recreated.
+      - PURCHASE_SIGNATURE_REQUIRED=${PURCHASE_SIGNATURE_REQUIRED:-off}
     volumes:
       - ./data:/app/data
     networks:
