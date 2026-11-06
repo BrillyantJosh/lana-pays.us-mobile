@@ -95,6 +95,28 @@ async function pay() {
   await waitFor(() => expect(purchaseCalls).toHaveLength(1));
 }
 
+describe('the confirmation', () => {
+  it('shows what was sent: "1.000,50" is 1000.50, not 1.00', async () => {
+    await toInvoiceStep();
+    fireEvent.change(screen.getByPlaceholderText(i18n.t('cash.amountPlaceholder')), { target: { value: '1.000,50' } });
+    await pay();
+
+    expect(purchaseCalls[0].amount).toBe(1000.5);
+    await screen.findByText(i18n.t('cash.confirmedTitle'));
+    expect(screen.getByText('€1000.50')).toBeInTheDocument();
+  });
+
+  it('"500,5" is still 500.50', async () => {
+    await toInvoiceStep();
+    fireEvent.change(screen.getByPlaceholderText(i18n.t('cash.amountPlaceholder')), { target: { value: '500,5' } });
+    await pay();
+
+    expect(purchaseCalls[0].amount).toBe(500.5);
+    await screen.findByText(i18n.t('cash.confirmedTitle'));
+    expect(screen.getByText('€500.50')).toBeInTheDocument();
+  });
+});
+
 describe('refused by the server', () => {
   it('CUSTOMER_WINDOW_EXCEEDED reads as the window\'s own message, with its numbers', async () => {
     purchase = { status: 403, body: { success: false, error: 'CUSTOMER_WINDOW_EXCEEDED', message: 'x', spent: 192.44, limit: 200, days: 1, currency: 'EUR' } };

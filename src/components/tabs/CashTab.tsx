@@ -1159,7 +1159,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         <div className="flex flex-col items-center gap-4 py-10">
           <CheckCircle2 className="w-16 h-16 text-primary" />
           <h2 className="text-3xl font-black text-foreground">{t('cash.confirmedTitle')}</h2>
-          <p className="text-2xl font-bold text-primary text-center">{currencySymbol}{pd ? parseFloat(pd.amount.replace(',', '.')).toFixed(2) : '0.00'}</p>
+          <p className="text-2xl font-bold text-primary text-center">{currencySymbol}{pd ? parseAmountInput(pd.amount).toFixed(2) : '0.00'}</p>
           <p className="text-lg text-muted-foreground text-center">{t('cash.invoiceLabel', { number: pd?.invoiceNumber || invoiceNumber })}</p>
           <p className="text-xs text-muted-foreground truncate max-w-full">{t('cash.walletLabel', { address: walletId })}</p>
         </div>
