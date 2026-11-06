@@ -499,6 +499,12 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
     // (the processor's verified events only — nostr.ts selectProcessorEvents).
     applySuspensions(db, await fetchKind30903(systemParams.relays));
 
+    // ── Sync merchant_quota_usage from brain ────────────────────────────
+    // Straight after the snapshot, over it: the snapshot can be ten minutes old,
+    // and the till must not judge a sale on it while KIND 30902 is read, which
+    // takes seconds. heartbeatOrder.test.ts pins this. It swallows its own errors.
+    await mirrorMerchantUsageFromBrain(db);
+
     // Fetch KIND 30902 fee policies (includes max_tx_amount)
     const feePolicies = await fetchKind30902(systemParams.relays);
 
@@ -533,12 +539,6 @@ export async function runHeartbeat(db: Database.Database): Promise<void> {
       insertPolicies(feePolicies);
       console.log(`KIND 30902: upserted ${feePolicies.length} fee policies`);
     }
-
-    // ── Sync merchant_quota_usage from brain ────────────────────────────
-    // Lifted out of this function (see mirrorMerchantUsageFromBrain below) so
-    // the credential it uses can be tested without running a heartbeat's worth
-    // of relay traffic. It swallows its own errors, exactly as it did inline.
-    await mirrorMerchantUsageFromBrain(db);
 
     // Fetch Direct Fund capacity
     const DIRECT_FUND_URL = process.env.DIRECT_FUND_URL || 'http://lana-direct-fund-web:3005';
