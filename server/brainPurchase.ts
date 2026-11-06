@@ -39,6 +39,12 @@ export function brainPurchaseHandler(db: Database.Database, BRAIN_API_URL: strin
     // freshest), but a quick local check catches the obvious blocked-merchant
     // and quota-exceeded cases without burning a brain round-trip.
     const unitId = req.body?.unit_id;
+    // One shop, as one string. Every check below looks at a string, and the body
+    // is forwarded as it came, so anything else would pass them all, the
+    // per-invoice limit among them, which nothing after this proxy applies.
+    if (unitId !== undefined && typeof unitId !== 'string') {
+      return res.status(400).json({ success: false, error: 'unit_id must be a string' });
+    }
     const amount = Number(req.body?.amount || 0);
     // Set when the cash clamp below rewrites the amount; echoed in the response
     // so the client can tell the user what was actually charged.

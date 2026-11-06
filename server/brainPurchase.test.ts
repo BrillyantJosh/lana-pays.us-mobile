@@ -235,6 +235,36 @@ describe('the monthly limits stay', () => {
   });
 });
 
+describe('the rest of a month can be less than a cent', () => {
+  // A monthly counter is a sum of floats. A shop that reached its limit exactly
+  // can stand at 2999.9999999999995 of 3000: not at the limit, nothing to charge.
+  it('refused as the month being used up, not forwarded with an amount of 0', async () => {
+    seed({ maxTx: '200.00', volumeUsed: 2999.9999999999995, volumeLimit: 3000 });
+    const r = await sell(cashSale(100));
+
+    expect(r.status).toBe(403);
+    expect(r.body.error).toBe('MERCHANT_QUOTA_EXCEEDED');
+    expect(forwarded()).toEqual([]);
+  });
+});
+
+describe('unit_id must be one string', () => {
+  // Every check here looks at a string, and the body is forwarded as it came.
+  it.each([
+    ['an array', [UNIT]],
+    ['an object', { unit: UNIT }],
+    ['a number', 1],
+  ])('%s is refused, on cash and on LANA, and nothing reaches the brain', async (_label, unit_id) => {
+    seed({ maxTx: '200.00' });
+    const cash = await sell({ ...cashSale(10000), unit_id });
+    const lana = await sell({ payment_type: 'lana', amount: 10000, signed_tx_hex: 'ab', ...CUSTOMER, unit_id });
+
+    expect(cash.status).toBe(400);
+    expect(lana.status).toBe(400);
+    expect(forwarded()).toEqual([]);
+  });
+});
+
 describe('a LANA sale is untouched', () => {
   const lanaSale = (amount: number) => ({ payment_type: 'lana', amount, signed_tx_hex: 'ab', ...CUSTOMER });
 

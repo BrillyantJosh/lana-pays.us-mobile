@@ -126,7 +126,9 @@ export function foldQuotaRemaining(
   if (!unitRow || !(Number(unitRow.quota_volume_limit) > 0)) return maxAmount;
   const quotaCurrency = String(unitRow.quota_currency || unitRow.currency || 'EUR').toUpperCase();
   if (String(reqCurrency || '').toUpperCase() !== quotaCurrency) return maxAmount;
-  const remaining = Math.max(0, Number(unitRow.quota_volume_limit) - Number(unitRow.quota_volume_used || 0));
+  // In cents: the mirrored counter is a sum of floats, so a shop that reached its
+  // limit can stand at 2999.9999999999995 of 3000, with nothing left to charge.
+  const remaining = round2(Math.max(0, Number(unitRow.quota_volume_limit) - Number(unitRow.quota_volume_used || 0)));
   return maxAmount === null ? remaining : Math.min(maxAmount, remaining);
 }
 
