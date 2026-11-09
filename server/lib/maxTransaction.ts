@@ -148,7 +148,7 @@ export function foldQuotaRemaining(
 }
 
 /**
- * Fold the customer's remaining rolling-window allowance into the maximum —
+ * Fold the customer's remaining window allowance into the maximum —
  * sibling of foldQuotaRemaining. `customerRemaining` is limit − what this
  * customer already spent at this unit within the window (computed by the
  * caller from the brain's /customer-window answer). null = the window could
@@ -163,7 +163,7 @@ export function foldCustomerWindow(
 }
 
 /**
- * Admin-set rolling window length in days for the per-customer cash limit.
+ * Admin-set window length in calendar days for the per-customer cash limit.
  * Lenient: a missing or mangled setting degrades to 1 day, never an error.
  */
 export function readCustomerWindowDays(db: Database.Database): number {

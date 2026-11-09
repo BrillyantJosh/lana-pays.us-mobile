@@ -164,10 +164,17 @@ describe('refused by the server', () => {
     purchase = { status: 403, body: { success: false, error: 'CUSTOMER_WINDOW_EXCEEDED', message: 'x', spent: 192.44, limit: 200, days: 1, currency: 'EUR' } };
     await toInvoiceStep();
     await pay();
-    await screen.findByText(i18n.t('cash.customerWindowExceeded', { spent: '192.44', limit: '200.00', days: 1, currency: 'EUR' }));
+    await screen.findByText(i18n.t('cash.customerWindowExceededToday', { spent: '192.44', limit: '200.00', currency: 'EUR' }));
     expect(screen.queryByText('CUSTOMER_WINDOW_EXCEEDED')).not.toBeInTheDocument();
     expect(screen.queryByText(MONTH_USED_UP)).not.toBeInTheDocument();
     expect(screen.queryByText(i18n.t('cash.noFunds'))).not.toBeInTheDocument();
+  });
+
+  it('a window of more than one day names the calendar days, not "today"', async () => {
+    purchase = { status: 403, body: { success: false, error: 'CUSTOMER_WINDOW_EXCEEDED', message: 'x', spent: 192.44, limit: 200, days: 3, currency: 'EUR' } };
+    await toInvoiceStep();
+    await pay();
+    await screen.findByText(i18n.t('cash.customerWindowExceeded', { spent: '192.44', limit: '200.00', days: 3, currency: 'EUR' }));
   });
 
   it('MERCHANT_QUOTA_EXCEEDED reads as the monthly message, from the till or from the brain', async () => {

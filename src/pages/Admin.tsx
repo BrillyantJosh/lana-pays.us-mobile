@@ -216,7 +216,8 @@ const Admin = () => {
               className="w-full h-11 rounded-xl bg-background border border-input px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
             <p className="text-[11px] text-muted-foreground">
-              Within this many rolling days, the same customer's total CASH purchases at a shop
+              Within this many calendar days (today and the days before it, counted from midnight
+              in Slovenia), the same customer's total CASH purchases at a shop
               cannot exceed the shop's transaction limit. Cash only \u2014 LANA is never limited. Minimum 1.
             </p>
           </div>

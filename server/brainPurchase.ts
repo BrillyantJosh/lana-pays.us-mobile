@@ -110,10 +110,12 @@ export function brainPurchaseHandler(db: Database.Database, BRAIN_API_URL: strin
             }
             let effMax = foldQuotaRemaining(limits.max_amount, u, reqCurrency);
 
-            // ── PER-CUSTOMER ROLLING WINDOW (owner rule, 2026-08-04). The same
+            // ── PER-CUSTOMER WINDOW (owner rule, 2026-08-04). The same
             // customer may buy repeatedly at this shop, but the SUM of their
-            // CASH purchases within the last N days must not exceed the shop's
-            // transaction limit. The history lives only in the brain, so we ask
+            // CASH purchases within the window (today plus the N-1 calendar days
+            // before it, in Slovenia) must not exceed the shop's transaction
+            // limit. The history lives only in the brain, and the window is
+            // counted there, so we ask
             // it; FAIL-OPEN on any read failure — a lookup must never stop a
             // sale at the till. Known residual race: two truly simultaneous
             // purchases can both pass this pre-flight; the brain counts
@@ -142,7 +144,7 @@ export function brainPurchaseHandler(db: Database.Database, BRAIN_API_URL: strin
                     return res.status(403).json({
                       success: false,
                       error: 'CUSTOMER_WINDOW_EXCEEDED',
-                      message: `Customer reached the ${limits.max_amount.toFixed(2)} ${windowCurrency} cash limit for the last ${windowDays} day(s) — already spent ${spent.toFixed(2)}. Sell for LANA instead.`,
+                      message: `Customer reached the ${limits.max_amount.toFixed(2)} ${windowCurrency} cash limit ${windowDays > 1 ? `for the last ${windowDays} calendar days, today included` : 'for today'} — already spent ${spent.toFixed(2)}. Sell for LANA instead.`,
                       spent,
                       limit: limits.max_amount,
                       days: windowDays,

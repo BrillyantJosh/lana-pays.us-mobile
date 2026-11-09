@@ -25,7 +25,7 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
   const strings = LOCALES[name];
 
   it.each([
-    'cash.customerWindowExceeded', 'cash.amountAdjusted', 'cash.willAdjustToMax', 'cash.monthlyCashLimitReached', 'cash.noFunds',
+    'cash.customerWindowExceeded', 'cash.customerWindowExceededToday', 'cash.amountAdjusted', 'cash.willAdjustToMax', 'cash.monthlyCashLimitReached', 'cash.noFunds',
   ])('%s is there, with the placeholders of English', (key) => {
     expect(strings[key], `${name} is missing ${key}`).toBeTruthy();
     const placeholders = (s: string) => (s.match(/\{\{\w+\}\}/g) || []).sort();
@@ -34,6 +34,16 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
 
   it('the window\'s refusal says what the customer spent, of what limit, in how many days', () => {
     for (const p of ['{{spent}}', '{{limit}}', '{{days}}', '{{currency}}']) expect(strings['cash.customerWindowExceeded']).toContain(p);
+  });
+
+  // With a window of one day the refusal says "today", and no number of days.
+  it('the one-day refusal says what the customer spent, of what limit', () => {
+    for (const p of ['{{spent}}', '{{limit}}', '{{currency}}']) expect(strings['cash.customerWindowExceededToday']).toContain(p);
+    expect(strings['cash.customerWindowExceededToday']).not.toContain('{{days}}');
+  });
+
+  it('the refusal for a window of several days says they are calendar days', () => {
+    expect(strings['cash.customerWindowExceeded']).toMatch(/calendar|koledarsk|naptári|calendario|naturales|kalendarzow|calendário|Kalendertag|po kalendaru|календарн|自然日/);
   });
 
   // The same notice is shown when the fund, the default, the rest of the month or
