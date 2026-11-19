@@ -223,8 +223,14 @@ export async function fetchKind38888(): Promise<Kind38888Data | null> {
  */
 export async function fetchKind0Profile(hexId: string): Promise<{ name?: string; display_name?: string; picture?: string; currency?: string; lang?: string } | null> {
   return new Promise((resolve) => {
-    const timeout = setTimeout(() => resolve(null), 5000);
+    const timeout = setTimeout(() => { closeAll(); resolve(null); }, 5000);
     let resolved = false;
+    // Every socket this lookup opens is closed when the lookup ends — on the
+    // first answer, on the timeout, and on each relay's EOSE. Closing only the
+    // winner leaked the slower relay's socket forever (19 Nov 2026: 461 open
+    // sockets to relay.lanacoin-eternity.com, which always loses the race).
+    const sockets: WebSocket[] = [];
+    const closeAll = () => { for (const s of sockets) { try { s.close(); } catch { /* already gone */ } } };
 
     // Track how many relays have finished (EOSE received OR socket error) so we
     // can resolve null as soon as the answer is definitively "no profile",
@@ -237,6 +243,7 @@ export async function fetchKind0Profile(hexId: string): Promise<{ name?: string;
       if (!resolved && finished >= total) {
         resolved = true;
         clearTimeout(timeout);
+        closeAll();
         resolve(null);
       }
     };
@@ -251,6 +258,7 @@ export async function fetchKind0Profile(hexId: string): Promise<{ name?: string;
         markFinished();
         continue;
       }
+      sockets.push(ws);
 
       // Guard so each relay contributes to `finished` exactly once, even if it
       // fires both EOSE and a subsequent close/error.
@@ -275,7 +283,7 @@ export async function fetchKind0Profile(hexId: string): Promise<{ name?: string;
             if (event.kind === 0) {
               resolved = true;
               clearTimeout(timeout);
-              ws.close();
+              closeAll();
               try {
                 const content = JSON.parse(event.content);
                 const langTag = (event.tags || []).find((t: string[]) => t[0] === 'lang');
@@ -291,7 +299,7 @@ export async function fetchKind0Profile(hexId: string): Promise<{ name?: string;
               }
             }
           }
-          if (msg[0] === 'EOSE' && !resolved) {
+          if (msg[0] === 'EOSE') {
             ws.close();
             finishRelay();
           }
@@ -1073,8 +1081,14 @@ export async function fetchEventsFromRelays(
  */
 export async function fetchKind0Full(hexId: string): Promise<{ content: any; tags: string[][]; created_at: number } | null> {
   return new Promise((resolve) => {
-    const timeout = setTimeout(() => resolve(null), 8000);
+    const timeout = setTimeout(() => { closeAll(); resolve(null); }, 8000);
     let resolved = false;
+    // Every socket this lookup opens is closed when the lookup ends — on the
+    // first answer, on the timeout, and on each relay's EOSE. Closing only the
+    // winner leaked the slower relay's socket forever (19 Nov 2026: 461 open
+    // sockets to relay.lanacoin-eternity.com, which always loses the race).
+    const sockets: WebSocket[] = [];
+    const closeAll = () => { for (const s of sockets) { try { s.close(); } catch { /* already gone */ } } };
 
     for (const relayUrl of LANA_RELAYS) {
       let ws: WebSocket;
@@ -1083,6 +1097,7 @@ export async function fetchKind0Full(hexId: string): Promise<{ content: any; tag
       } catch {
         continue;
       }
+      sockets.push(ws);
 
       const subId = `kind0full_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
@@ -1102,7 +1117,7 @@ export async function fetchKind0Full(hexId: string): Promise<{ content: any; tag
             if (event.kind === 0) {
               resolved = true;
               clearTimeout(timeout);
-              ws.close();
+              closeAll();
               try {
                 const content = JSON.parse(event.content);
                 resolve({ content, tags: event.tags || [], created_at: event.created_at });
@@ -1111,7 +1126,7 @@ export async function fetchKind0Full(hexId: string): Promise<{ content: any; tag
               }
             }
           }
-          if (msg[0] === 'EOSE' && !resolved) {
+          if (msg[0] === 'EOSE') {
             ws.close();
           }
         } catch {}
