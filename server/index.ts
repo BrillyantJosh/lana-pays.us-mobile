@@ -29,6 +29,7 @@ import { purchaseSellerCheck, logPurchaseCheckState } from './purchaseSeller.js'
 import { keepRawBody } from './lib/nip98.js';
 import { devRelays } from './lib/devOverrides.js';
 import { getMaxTransaction } from './lib/maxTransaction.js';
+import { createStatusChecker, settleWithin } from './lib/statusChecks.js';
 import { analyzeReceiptImage } from './lib/receiptAnalysis.js';
 
 // Seed list used only on a fresh DB before the first heartbeat (see line ~964).
@@ -883,6 +884,10 @@ app.get('/api/wallets/:hexId', async (req, res) => {
 const STATUS_TTL_CHECK_MS = 120_000;  // enrolment + freeze change rarely
 const STATUS_TTL_BALANCE_MS = 60_000;
 const CHECK_CONCURRENCY = 6;          // be a good neighbour to check.lanapays.us
+// How long one request waits for check.lanapays.us before answering with what it
+// has. Balances do not wait for it at all. The lookups still running carry on and
+// fill the cache; the client asks again while `complete` is false.
+const CHECK_DEADLINE_MS = 12_000;
 const statusCache = new Map<string, { at: number; value: any }>();
 
 function cacheGet(key: string, ttlMs: number): any | null {
@@ -897,50 +902,31 @@ function cacheSet(key: string, value: any): void {
   // process should not accumulate entries for people who left the list.
   if (statusCache.size > 5000) {
     for (const [k, v] of statusCache) {
-      if (Date.now() - v.at > STATUS_TTL_CHECK_MS) statusCache.delete(k);
+      if (Date.now() - v.at > STATUS_TTL_BALANCE_MS) statusCache.delete(k);
     }
   }
   statusCache.set(key, { at: Date.now(), value });
 }
 
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let next = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, async () => {
-      for (let i = next++; i < items.length; i = next++) {
-        out[i] = await fn(items[i]);
-      }
-    })
-  );
-  return out;
-}
-
-app.get('/api/customers-status', gate(db, req => req.query.staff_hex), async (req, res) => {
-  const staffHex = req.query.staff_hex as string;
-  if (!staffHex) return res.status(400).json({ error: 'Missing staff_hex' });
-
-  const customers = authorizedRegularCustomers(staffHex);
-  if (customers.length === 0) return res.json({ statuses: {} });
-
-  // ── 1. check.lanapays.us: enrolment + wallet/freeze, one cached pair per person
-  const checks = await mapLimit(customers, CHECK_CONCURRENCY, async (c: any) => {
-    const key = `chk:${c.customer_hex_id}`;
-    const cached = cacheGet(key, STATUS_TTL_CHECK_MS);
-    if (cached) return cached;
-
+// check.lanapays.us: enrolment + wallet/freeze, one lookup per person at a time
+// for the whole process (see lib/statusChecks.ts for why).
+type CheckValue = { enrolled: boolean | null; wallets: any[]; freeze: 'frozen' | 'active' | null; reached: boolean };
+const customerChecks = createStatusChecker<CheckValue>({
+  concurrency: CHECK_CONCURRENCY,
+  ttlMs: STATUS_TTL_CHECK_MS,
+  cacheable: v => v.reached, // never cache a total failure
+  fetchOne: async (hex: string) => {
     const [enrolled, walletInfo] = await Promise.all([
-      fetch(`https://check.lanapays.us/api/lana8wonder/${c.customer_hex_id}`, { signal: AbortSignal.timeout(8000) })
+      fetch(`https://check.lanapays.us/api/lana8wonder/${hex}`, { signal: AbortSignal.timeout(8000) })
         .then(r => r.json())
         .then((d: any) => d.enrolled === true)
         .catch(() => null),
-      fetch(`https://check.lanapays.us/api/wallets/${c.customer_hex_id}`, { signal: AbortSignal.timeout(10000) })
+      fetch(`https://check.lanapays.us/api/wallets/${hex}`, { signal: AbortSignal.timeout(10000) })
         .then(r => r.json())
         .catch(() => null),
     ]);
-
     const wallets: any[] = walletInfo?.wallets || [];
-    const value = {
+    return {
       enrolled,
       wallets,
       // null = upstream unreachable. Do NOT collapse that to "active": a dead
@@ -948,12 +934,25 @@ app.get('/api/customers-status', gate(db, req => req.query.staff_hex), async (re
       freeze: walletInfo
         ? ((walletInfo.accountStatus === 'frozen' || wallets.some((w: any) => w.frozen === true)) ? 'frozen' : 'active')
         : null,
+      reached: enrolled !== null || !!walletInfo,
     };
-    if (enrolled !== null || walletInfo) cacheSet(key, value); // never cache a total failure
-    return value;
-  });
+  },
+});
 
-  // ── 2. balances: one Electrum socket for every address still uncached
+app.get('/api/customers-status', gate(db, req => req.query.staff_hex), async (req, res) => {
+  const staffHex = req.query.staff_hex as string;
+  if (!staffHex) return res.status(400).json({ error: 'Missing staff_hex' });
+
+  const customers = authorizedRegularCustomers(staffHex);
+  if (customers.length === 0) return res.json({ statuses: {}, complete: true });
+
+  // ── 1. check.lanapays.us — started now, waited for at most CHECK_DEADLINE_MS
+  const checksPromise = settleWithin(
+    customers.map((c: any) => customerChecks.get(c.customer_hex_id)),
+    CHECK_DEADLINE_MS
+  );
+
+  // ── 2. balances, in parallel: one Electrum socket for every address still uncached
   const sysRow = db.prepare(
     'SELECT electrum_servers, exchange_rates FROM kind_38888 ORDER BY id DESC LIMIT 1'
   ).get() as any;
@@ -963,14 +962,16 @@ app.get('/api/customers-status', gate(db, req => req.query.staff_hex), async (re
 
   const balanceKey = (c: any) => `bal:${c.customer_wallet}:${c.currency}`;
   const uncached = customers.filter((c: any) => c.customer_wallet && !cacheGet(balanceKey(c), STATUS_TTL_BALANCE_MS));
-  let fetched = new Map<string, any>();
-  if (uncached.length > 0 && electrumServers.length > 0) {
-    fetched = await fetchBalancesBatch(electrumServers, uncached.map((c: any) => c.customer_wallet));
-  }
+  const balancesPromise: Promise<Map<string, any>> = (uncached.length > 0 && electrumServers.length > 0)
+    ? fetchBalancesBatch(electrumServers, uncached.map((c: any) => c.customer_wallet)).catch(() => new Map())
+    : Promise.resolve(new Map());
 
+  const [checks, fetched] = await Promise.all([checksPromise, balancesPromise]);
+
+  const complete = checks.complete;
   const statuses: Record<string, any> = {};
   customers.forEach((c: any, i: number) => {
-    const chk = checks[i] as any;
+    const chk = checks.values[i];
     let balance = cacheGet(balanceKey(c), STATUS_TTL_BALANCE_MS);
     if (!balance) {
       const raw = fetched.get(c.customer_wallet);
@@ -989,10 +990,16 @@ app.get('/api/customers-status', gate(db, req => req.query.staff_hex), async (re
       enrolled: chk?.enrolled ?? null,
       freeze: chk?.freeze ?? null,
       wallets: chk?.wallets || [],
+      // false = check.lanapays.us has not answered for this person YET (still
+      // running server-side); true = the lookup finished, even if it failed.
+      checked: checks.settled[i],
     };
   });
 
-  res.json({ statuses });
+  // Still running lookups: tell the client to ask again (cheap — cached rows
+  // answer at once, running ones are not started twice).
+  res.set('Cache-Control', 'no-store');
+  res.json({ statuses, complete });
 });
 
 /**

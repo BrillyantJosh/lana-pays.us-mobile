@@ -43,6 +43,8 @@ interface CustomerStatus {
   enrolled: boolean | null;
   freeze: string | null;
   wallets: CustomerWallet[];
+  /** false = check.lanapays.us has not answered for this person yet. */
+  checked?: boolean;
 }
 
 interface CustomerWallet {
@@ -135,6 +137,10 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
   // scanned wallet IS Retail; other rows for the same customer with a
   // Main/etc wallet keep the warning.
   const [walletsByHex, setWalletsByHex] = useState<Record<string, any[]>>({});
+  // Whose freeze / wallet-type lookup has finished. Until it has, we do not know
+  // whether the person is frozen or holds a Retail wallet, so the cap warning
+  // (which both of those suppress) waits for it instead of flashing up.
+  const [checkedHex, setCheckedHex] = useState<Record<string, true>>({});
 
   // Most LANA a non-retail wallet may carry into a Split, from KIND 38888
   // (`max_cap_lanas_on_split`). It HALVES at every Split, so it must never be
@@ -208,35 +214,59 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
   useEffect(() => {
     if (!staffHexId || customers.length === 0) return;
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
 
-    fetch(`/api/customers-status?staff_hex=${staffHexId}`)
-      .then(r => r.json())
-      .then(data => {
-        if (cancelled) return;
-        const statuses: Record<string, CustomerStatus> = data.statuses || {};
-        const nextBalances: Record<string, CustomerBalance> = {};
-        const nextWonder: Record<string, boolean> = {};
-        const nextFreeze: Record<string, string> = {};
-        const nextWallets: Record<string, CustomerWallet[]> = {};
+    // The server answers within ~20 s with every balance and whatever
+    // check.lanapays.us has returned so far (`complete: false` while lookups are
+    // still running there). Ask again until it is complete — the repeat asks are
+    // cheap: finished rows come from the server's cache and running lookups are
+    // not started twice. A failed ask (network, 5xx) is retried the same way
+    // instead of leaving the list on "loading" for good.
+    const load = () => {
+      attempt++;
+      fetch(`/api/customers-status?staff_hex=${staffHexId}`)
+        .then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+        .then(data => {
+          if (cancelled) return;
+          const statuses: Record<string, CustomerStatus> = data.statuses || {};
+          const nextBalances: Record<string, CustomerBalance> = {};
+          const nextWonder: Record<string, boolean> = {};
+          const nextFreeze: Record<string, string> = {};
+          const nextWallets: Record<string, CustomerWallet[]> = {};
+          const nextChecked: Record<string, true> = {};
 
-        Object.entries(statuses).forEach(([hex, st]) => {
-          // Anything the server could not establish comes back null — leave the
-          // previous value in place rather than showing a confident wrong one
-          // (no zero balances, no "not frozen" from a dead upstream).
-          if (st.balance) nextBalances[hex] = st.balance;
-          if (st.enrolled !== null && st.enrolled !== undefined) nextWonder[hex] = st.enrolled === true;
-          if (st.freeze) nextFreeze[hex] = st.freeze;
-          if (st.wallets) nextWallets[hex] = st.wallets;
+          Object.entries(statuses).forEach(([hex, st]) => {
+            // Anything the server could not establish comes back null — leave the
+            // previous value in place rather than showing a confident wrong one
+            // (no zero balances, no "not frozen" from a dead upstream).
+            if (st.balance) nextBalances[hex] = st.balance;
+            if (st.enrolled !== null && st.enrolled !== undefined) nextWonder[hex] = st.enrolled === true;
+            if (st.freeze) nextFreeze[hex] = st.freeze;
+            if (st.wallets && st.wallets.length > 0) nextWallets[hex] = st.wallets;
+            // Older servers do not send `checked`; their answer was always final.
+            if (st.checked !== false) nextChecked[hex] = true;
+          });
+
+          setBalances(prev => ({ ...prev, ...nextBalances }));
+          setWonderStatus(prev => ({ ...prev, ...nextWonder }));
+          setFreezeStatus(prev => ({ ...prev, ...nextFreeze }));
+          setWalletsByHex(prev => ({ ...prev, ...nextWallets }));
+          setCheckedHex(prev => ({ ...prev, ...nextChecked }));
+
+          if (data.complete === false && attempt < 30) timer = setTimeout(load, 3000);
+        })
+        .catch(() => {
+          // keep whatever is already on screen, and try again a little later
+          if (!cancelled && attempt < 30) timer = setTimeout(load, 10000);
         });
+    };
+    load();
 
-        setBalances(prev => ({ ...prev, ...nextBalances }));
-        setWonderStatus(prev => ({ ...prev, ...nextWonder }));
-        setFreezeStatus(prev => ({ ...prev, ...nextFreeze }));
-        setWalletsByHex(prev => ({ ...prev, ...nextWallets }));
-      })
-      .catch(() => { /* keep whatever is already on screen */ });
-
-    return () => { cancelled = true; };
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [staffHexId, customerKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Profile search — debounced lookup against mejmoSeFajn Lana Transparency
@@ -629,7 +659,8 @@ const RegularCustomersTab = ({ staffHexId, businessUnits = [] }: RegularCustomer
             const isScannedRetail =
               !!scannedWallet && typeof scannedWallet.walletType === 'string'
                 && scannedWallet.walletType.toLowerCase() === 'retail';
-            const isNearMaxCap = splitApproaching && maxCapLana !== null && bal && bal.lana > maxCapLana && !isFrozen && !isScannedRetail;
+            const isNearMaxCap = splitApproaching && maxCapLana !== null && bal && bal.lana > maxCapLana && !isFrozen && !isScannedRetail
+              && checkedHex[customer.customer_hex_id] === true;
 
             return (
               <div key={delKey} className={`rounded-2xl p-4 space-y-3 ${
