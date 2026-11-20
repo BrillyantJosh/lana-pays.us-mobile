@@ -26,8 +26,14 @@ jobs:
             # removed it and the merchant quota mirror froze — merchants saw a
             # stale quota bar in the app for the four days between two deploys
             # (18–22 Sept 2026), while everything else in the container kept
-            # working. The rule now: this workflow owns exactly the three names
+            # working. The rule now: this workflow owns exactly the two names
             # written below and leaves every other line on the server alone.
+            #
+            # BRAIN_PURCHASE_KEY is not one of them: since 20 Nov 2026 it lives
+            # in the server .env alone, like BRAIN_PEER_KEY. Written from a
+            # GitHub secret, a stale one went back on with the deploy of 19 Nov
+            # 15:14 UTC and brain refused every sale with 401 until 18:52 UTC.
+            # When brain's purchase key changes, change it in this .env.
             #
             # Written through a temp file in the same directory, so .env is
             # replaced in one atomic mv and never exists half-written. The trap
@@ -38,17 +44,23 @@ jobs:
             cat > "$tmp" << 'ENVEOF'
             LANA_REGISTER_API_KEY=${{ secrets.LANA_REGISTER_API_KEY }}
             BRAIN_API_URL=https://brain.lanapays.us
-            BRAIN_PURCHASE_KEY=${{ secrets.BRAIN_PURCHASE_KEY }}
             ENVEOF
             # Keep everything this workflow does not own, exactly as it is —
-            # comments and blank lines included. The three managed names are
+            # comments and blank lines included. The two managed names are
             # dropped from the old file first, so none can end up written twice.
             # grep exits 1 when nothing survives the filter, which is a normal
             # outcome here, not an error.
             if [ -f .env ]; then
-              grep -vE '^[[:space:]]*(LANA_REGISTER_API_KEY|BRAIN_API_URL|BRAIN_PURCHASE_KEY)=' .env >> "$tmp" || true
+              grep -vE '^[[:space:]]*(LANA_REGISTER_API_KEY|BRAIN_API_URL)=' .env >> "$tmp" || true
             fi
             chmod 600 "$tmp"
             mv -f "$tmp" .env
+            # Sales need BRAIN_PURCHASE_KEY and nothing above supplies it, so
+            # nothing is rebuilt without it. Stopping here leaves the running
+            # container on the key it was started with.
+            if ! grep -qE '^[[:space:]]*BRAIN_PURCHASE_KEY=[^[:space:]]' .env; then
+              echo "BRAIN_PURCHASE_KEY is missing or empty in the server .env: not deploying" >&2
+              exit 1
+            fi
             docker compose -f docker-compose.prod.yml build
             docker compose -f docker-compose.prod.yml up -d
