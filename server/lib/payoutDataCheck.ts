@@ -9,7 +9,11 @@
  *
  *   PROBLEMS — the bank refuses the WHOLE file, every merchant in it waits,
  *   and the Lana.Discount part of the batch with it (Brilly, 21 Nov 2026):
- *     ACCOUNT_MISSING  no IBAN (or, outside SEPA, no account)
+ *     ACCOUNT_MISSING  no IBAN (or, outside SEPA, no account) — also only
+ *                      the country part typed ("SI56")
+ *     IBAN_HAS_WORD    a right IBAN with the word "IBAN" typed in front of
+ *                      it ("IBAN SI56 …"): the bank file takes the field as
+ *                      it is, so the bank refuses it all the same (21 Nov)
  *     IBAN_INVALID     an IBAN whose check digits fail, or not a SEPA country
  *     STREET_MISSING   no street in the receiver's address
  *     TOWN_MISSING     no town in the receiver's address
@@ -26,7 +30,7 @@
  *     ZIP_MISSING          no post code
  */
 
-export type PayoutProblem = 'ACCOUNT_MISSING' | 'IBAN_INVALID' | 'STREET_MISSING' | 'TOWN_MISSING';
+export type PayoutProblem = 'ACCOUNT_MISSING' | 'IBAN_HAS_WORD' | 'IBAN_INVALID' | 'STREET_MISSING' | 'TOWN_MISSING';
 export type PayoutAdvice = 'RECEIVER_NOT_CHOSEN' | 'HOLDER_DIFFERS' | 'COUNTRY_UNCLEAR' | 'BIC_INVALID' | 'ZIP_MISSING';
 
 export interface PayoutCheck {
@@ -86,8 +90,11 @@ export function checkPayoutData(tags: unknown): PayoutCheck {
   const scheme = tag('payment_scheme') || (tag('bank_account') ? 'EU.IBAN' : '');
   if (scheme === 'EU.IBAN' || (!scheme && (field('iban') || tag('bank_account')))) {
     const iban = field('iban') || tag('bank_account');
-    if (!iban) problems.push('ACCOUNT_MISSING');
-    else if (!validSepaIban(iban)) problems.push('IBAN_INVALID');
+    const compact = compactIban(iban);
+    if (compact.length <= 4) problems.push('ACCOUNT_MISSING');
+    else if (!validSepaIban(iban)) {
+      problems.push(compact.startsWith('IBAN') && validSepaIban(compact.slice(4)) ? 'IBAN_HAS_WORD' : 'IBAN_INVALID');
+    }
     const bic = field('bic') || tag('bank_swift');
     if (bic && !validBic(bic)) advice.push('BIC_INVALID');
   } else if (!scheme || !Object.values(fields).some(v => String(v ?? '').trim() && v !== fields.account_holder)) {

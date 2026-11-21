@@ -23,6 +23,11 @@ describe('the bank file rules, read from the signed unit', () => {
     expect(checkPayoutData(unit({}, { iban: 'SI56 1920 0123 4567 893', account_holder: 'Ana Novak' })).problems).toEqual(['IBAN_INVALID']);
     expect(validSepaIban('BR15 0000 0000 0000 1093 2840 814 P2')).toBe(false);
   });
+  it('the word "IBAN" typed in front of a right IBAN, or only the country part typed', () => {
+    expect(checkPayoutData(unit({}, { iban: `IBAN ${GOOD_IBAN}`, account_holder: 'Ana Novak' })).problems).toEqual(['IBAN_HAS_WORD']);
+    expect(checkPayoutData(unit({}, { iban: 'SI56', account_holder: 'Ana Novak' })).problems).toEqual(['ACCOUNT_MISSING']);
+    expect(checkPayoutData(unit({}, { iban: 'IBAN SI56 1920 0123 4567 893', account_holder: 'Ana Novak' })).problems).toEqual(['IBAN_INVALID']);
+  });
   it('an older unit with only the legacy bank_account tag is read too', () => {
     const legacy = unit({ payment_scheme: '__drop', payment_scheme_fields: '__drop', bank_account: GOOD_IBAN });
     expect(checkPayoutData(legacy).problems).toEqual([]);
