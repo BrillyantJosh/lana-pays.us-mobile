@@ -474,7 +474,7 @@
   "payoutCheck.addressTitle": "A kedvezményezett címe",
   "payoutCheck.fixOnShop": "Javítás a shop.lanapays.us oldalon",
   "payoutCheck.code.ACCOUNT_MISSING": "Nincs megadva bankszámla (IBAN)",
-  "payoutCheck.code.IBAN_HAS_WORD": "A szám elé be van írva az „IBAN” szó — töröld, és csak a szám maradjon (SI56 …); különben a bank elutasítja a kifizetést",
+  "payoutCheck.code.IBAN_HAS_WORD": "A szám elé be van írva az „IBAN” szó — kérjük, töröld, és csak a szám maradjon (SI56 …)",
   "payoutCheck.code.IBAN_INVALID": "Az IBAN nem helyes (hibás számjegyek)",
   "payoutCheck.code.STREET_MISSING": "Hiányzik a kedvezményezett utcája és házszáma",
   "payoutCheck.code.TOWN_MISSING": "Hiányzik a kedvezményezett települése",

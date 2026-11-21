@@ -474,7 +474,7 @@
   "payoutCheck.addressTitle": "收款人地址",
   "payoutCheck.fixOnShop": "在 shop.lanapays.us 修改",
   "payoutCheck.code.ACCOUNT_MISSING": "未填写银行账户（IBAN）",
-  "payoutCheck.code.IBAN_HAS_WORD": "号码前面写了“IBAN”这个词——请删除，只保留号码（SI56 …）；否则银行会拒绝付款",
+  "payoutCheck.code.IBAN_HAS_WORD": "号码前面写了“IBAN”这个词——请删除，只保留号码（SI56 …）",
   "payoutCheck.code.IBAN_INVALID": "IBAN 不正确（数字错误）",
   "payoutCheck.code.STREET_MISSING": "缺少收款人的街道和门牌号",
   "payoutCheck.code.TOWN_MISSING": "缺少收款人的城市",

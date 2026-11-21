@@ -474,7 +474,7 @@
   "payoutCheck.addressTitle": "Adresse des Empfängers",
   "payoutCheck.fixOnShop": "Auf shop.lanapays.us korrigieren",
   "payoutCheck.code.ACCOUNT_MISSING": "Kein Bankkonto (IBAN) eingetragen",
-  "payoutCheck.code.IBAN_HAS_WORD": "Vor der Nummer steht das Wort „IBAN“ — lösche es und lass nur die Nummer stehen (SI56 …); sonst lehnt die Bank die Auszahlung ab",
+  "payoutCheck.code.IBAN_HAS_WORD": "Vor der Nummer steht das Wort „IBAN“ — bitte lösche es und lass nur die Nummer stehen (SI56 …)",
   "payoutCheck.code.IBAN_INVALID": "Die IBAN ist nicht korrekt (falsche Ziffern)",
   "payoutCheck.code.STREET_MISSING": "Straße und Hausnummer des Empfängers fehlen",
   "payoutCheck.code.TOWN_MISSING": "Der Ort des Empfängers fehlt",

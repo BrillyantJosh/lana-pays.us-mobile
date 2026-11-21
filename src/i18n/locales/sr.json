@@ -474,7 +474,7 @@
   "payoutCheck.addressTitle": "Adresa primaoca",
   "payoutCheck.fixOnShop": "Ispravi na shop.lanapays.us",
   "payoutCheck.code.ACCOUNT_MISSING": "Nije upisan bankovni račun (IBAN)",
-  "payoutCheck.code.IBAN_HAS_WORD": "Ispred broja je upisana reč „IBAN” — izbriši je i ostavi samo broj (SI56 …); inače banka odbija isplatu",
+  "payoutCheck.code.IBAN_HAS_WORD": "Ispred broja je upisana reč „IBAN” — molimo izbriši je i ostavi samo broj (SI56 …)",
   "payoutCheck.code.IBAN_INVALID": "IBAN nije ispravan (pogrešne cifre)",
   "payoutCheck.code.STREET_MISSING": "Nedostaju ulica i kućni broj primaoca",
   "payoutCheck.code.TOWN_MISSING": "Nedostaje mesto primaoca",

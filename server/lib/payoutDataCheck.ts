@@ -11,9 +11,6 @@
  *   and the Lana.Discount part of the batch with it (Brilly, 21 Nov 2026):
  *     ACCOUNT_MISSING  no IBAN (or, outside SEPA, no account) — also only
  *                      the country part typed ("SI56")
- *     IBAN_HAS_WORD    a right IBAN with the word "IBAN" typed in front of
- *                      it ("IBAN SI56 …"): the bank file takes the field as
- *                      it is, so the bank refuses it all the same (21 Nov)
  *     IBAN_INVALID     an IBAN whose check digits fail, or not a SEPA country
  *     STREET_MISSING   no street in the receiver's address
  *     TOWN_MISSING     no town in the receiver's address
@@ -27,11 +24,15 @@
  *     COUNTRY_UNCLEAR      the receiver's country is not a two-letter code
  *                          (the bank file then uses the IBAN's country)
  *     BIC_INVALID          a BIC that is not one (the bank file leaves it out)
+ *     IBAN_HAS_WORD        a right IBAN with the word "IBAN" typed in front of
+ *                          it ("IBAN SI56 …"): the bank file drops the word
+ *                          (direct.lana.fund compactIban, Brilly 21 Nov), but
+ *                          a financer paying by hand copies the field as it is
  *     ZIP_MISSING          no post code
  */
 
-export type PayoutProblem = 'ACCOUNT_MISSING' | 'IBAN_HAS_WORD' | 'IBAN_INVALID' | 'STREET_MISSING' | 'TOWN_MISSING';
-export type PayoutAdvice = 'RECEIVER_NOT_CHOSEN' | 'HOLDER_DIFFERS' | 'COUNTRY_UNCLEAR' | 'BIC_INVALID' | 'ZIP_MISSING';
+export type PayoutProblem = 'ACCOUNT_MISSING' | 'IBAN_INVALID' | 'STREET_MISSING' | 'TOWN_MISSING';
+export type PayoutAdvice = 'RECEIVER_NOT_CHOSEN' | 'HOLDER_DIFFERS' | 'COUNTRY_UNCLEAR' | 'BIC_INVALID' | 'IBAN_HAS_WORD' | 'ZIP_MISSING';
 
 export interface PayoutCheck {
   problems: PayoutProblem[];
@@ -93,7 +94,8 @@ export function checkPayoutData(tags: unknown): PayoutCheck {
     const compact = compactIban(iban);
     if (compact.length <= 4) problems.push('ACCOUNT_MISSING');
     else if (!validSepaIban(iban)) {
-      problems.push(compact.startsWith('IBAN') && validSepaIban(compact.slice(4)) ? 'IBAN_HAS_WORD' : 'IBAN_INVALID');
+      if (compact.startsWith('IBAN') && validSepaIban(compact.slice(4).replace(/^:/, ''))) advice.push('IBAN_HAS_WORD');
+      else problems.push('IBAN_INVALID');
     }
     const bic = field('bic') || tag('bank_swift');
     if (bic && !validBic(bic)) advice.push('BIC_INVALID');

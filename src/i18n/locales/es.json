@@ -474,7 +474,7 @@
   "payoutCheck.addressTitle": "Dirección del receptor",
   "payoutCheck.fixOnShop": "Corregir en shop.lanapays.us",
   "payoutCheck.code.ACCOUNT_MISSING": "No hay cuenta bancaria (IBAN)",
-  "payoutCheck.code.IBAN_HAS_WORD": "Delante del número está escrita la palabra \"IBAN\" — bórrala y deja solo el número (SI56 …); si no, el banco rechaza el pago",
+  "payoutCheck.code.IBAN_HAS_WORD": "Delante del número está escrita la palabra \"IBAN\" — por favor bórrala y deja solo el número (SI56 …)",
   "payoutCheck.code.IBAN_INVALID": "El IBAN no es correcto (dígitos erróneos)",
   "payoutCheck.code.STREET_MISSING": "Faltan la calle y el número del receptor",
   "payoutCheck.code.TOWN_MISSING": "Falta la localidad del receptor",

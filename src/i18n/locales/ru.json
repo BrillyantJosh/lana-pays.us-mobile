@@ -474,7 +474,7 @@
   "payoutCheck.addressTitle": "Адрес получателя",
   "payoutCheck.fixOnShop": "Исправить на shop.lanapays.us",
   "payoutCheck.code.ACCOUNT_MISSING": "Не указан банковский счёт (IBAN)",
-  "payoutCheck.code.IBAN_HAS_WORD": "Перед номером написано слово «IBAN» — удалите его и оставьте только номер (SI56 …); иначе банк отклонит выплату",
+  "payoutCheck.code.IBAN_HAS_WORD": "Перед номером написано слово «IBAN» — пожалуйста, удалите его и оставьте только номер (SI56 …)",
   "payoutCheck.code.IBAN_INVALID": "IBAN неверный (ошибка в цифрах)",
   "payoutCheck.code.STREET_MISSING": "Не указаны улица и номер дома получателя",
   "payoutCheck.code.TOWN_MISSING": "Не указан город получателя",
