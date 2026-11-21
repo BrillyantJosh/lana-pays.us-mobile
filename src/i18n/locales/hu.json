@@ -465,5 +465,22 @@
   "onlinePayments.listReadAt": "Lista beolvasva: {{time}}",
   "onlinePayments.sigClock": "Az eszköz órája több mint egy perccel eltér. Állítsa be a dátumot és az időt, majd próbálja újra.",
   "onlinePayments.sigRelogin": "Jelentkezzen ki, majd jelentkezzen be újra, és próbálja meg még egyszer.",
-  "onlinePayments.loadError": "A listát nem sikerült betölteni. Próbálja újra."
+  "onlinePayments.loadError": "A listát nem sikerült betölteni. Próbálja újra.",
+  "payoutCheck.titleBlocking": "A kifizetési adataid hiányosak — a bank elutasítja a kifizetéseidet",
+  "payoutCheck.titleAdvice": "Ellenőrizd a kifizetési adataidat — egy kifizetés leállhat",
+  "payoutCheck.fix": "Javítás most",
+  "payoutCheck.pageTitle": "Kifizetési adatok",
+  "payoutCheck.pageWhy": "A banknak tudnia kell, ki kapja a pénzt, a címét és a helyes számlát. Egy hiányos adatú üzlet miatt a bank az egész fizetési fájlt elutasítja, és minden benne lévő kifizetés vár.",
+  "payoutCheck.addressTitle": "A kedvezményezett címe",
+  "payoutCheck.fixOnShop": "Javítás a shop.lanapays.us oldalon",
+  "payoutCheck.code.ACCOUNT_MISSING": "Nincs megadva bankszámla (IBAN)",
+  "payoutCheck.code.IBAN_INVALID": "Az IBAN nem helyes (hibás számjegyek)",
+  "payoutCheck.code.STREET_MISSING": "Hiányzik a kedvezményezett utcája és házszáma",
+  "payoutCheck.code.TOWN_MISSING": "Hiányzik a kedvezményezett települése",
+  "payoutCheck.code.RECEIVER_NOT_CHOSEN": "A kedvezményezett nincs a nyilvántartásból kiválasztva — a bank ezt a nevet veti össze a számlával",
+  "payoutCheck.code.HOLDER_DIFFERS": "A számlatulajdonos nem azonos a kedvezményezettel",
+  "payoutCheck.code.COUNTRY_UNCLEAR": "Az ország nincs a listából kiválasztva",
+  "payoutCheck.code.BIC_INVALID": "A BIC / SWIFT kód nem helyes",
+  "payoutCheck.code.ZIP_MISSING": "Hiányzik az irányítószám",
+  "payoutCheck.fixOnSimple": "Javítás a simple.lanapays.us oldalon"
 }

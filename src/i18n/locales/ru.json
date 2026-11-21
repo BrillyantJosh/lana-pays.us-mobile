@@ -465,5 +465,22 @@
   "onlinePayments.listReadAt": "Список прочитан в {{time}}",
   "onlinePayments.sigClock": "Часы на этом устройстве отличаются более чем на минуту. Исправьте дату и время, затем повторите попытку.",
   "onlinePayments.sigRelogin": "Выйдите и войдите снова, затем попробуйте ещё раз.",
-  "onlinePayments.loadError": "Не удалось загрузить список. Попробуйте ещё раз."
+  "onlinePayments.loadError": "Не удалось загрузить список. Попробуйте ещё раз.",
+  "payoutCheck.titleBlocking": "Данные для выплат неполные — банк отклонит твои выплаты",
+  "payoutCheck.titleAdvice": "Проверь данные для выплат — выплата может быть остановлена",
+  "payoutCheck.fix": "Исправить сейчас",
+  "payoutCheck.pageTitle": "Данные для выплат",
+  "payoutCheck.pageWhy": "Банку нужны получатель денег, его адрес и правильный счёт. Одна точка с неполными данными приводит к тому, что банк отклоняет весь платёжный файл, и все выплаты в нём ждут.",
+  "payoutCheck.addressTitle": "Адрес получателя",
+  "payoutCheck.fixOnShop": "Исправить на shop.lanapays.us",
+  "payoutCheck.code.ACCOUNT_MISSING": "Не указан банковский счёт (IBAN)",
+  "payoutCheck.code.IBAN_INVALID": "IBAN неверный (ошибка в цифрах)",
+  "payoutCheck.code.STREET_MISSING": "Не указаны улица и номер дома получателя",
+  "payoutCheck.code.TOWN_MISSING": "Не указан город получателя",
+  "payoutCheck.code.RECEIVER_NOT_CHOSEN": "Получатель не выбран из реестра — банк сверяет это имя со счётом",
+  "payoutCheck.code.HOLDER_DIFFERS": "Владелец счёта не совпадает с получателем",
+  "payoutCheck.code.COUNTRY_UNCLEAR": "Страна не выбрана из списка",
+  "payoutCheck.code.BIC_INVALID": "Код BIC / SWIFT неверный",
+  "payoutCheck.code.ZIP_MISSING": "Не указан почтовый индекс",
+  "payoutCheck.fixOnSimple": "Исправить на simple.lanapays.us"
 }

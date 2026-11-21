@@ -46,6 +46,7 @@ const LANA_RELAYS = devRelays.length
 // our lanatrace.us server; the /functions/v1/* path shape is preserved.
 const LANA_REGISTRAR_URL = process.env.LANA_REGISTRAR_URL || 'https://lanatrace.us';
 import rateLimit from 'express-rate-limit';
+import { checkPayoutData } from './lib/payoutDataCheck.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -606,10 +607,20 @@ app.get('/api/business-units/:hexId', gate(db, req => req.params.hexId), (req, r
   const result = filtered.map((u) => {
     // Strip the raw payout fields; expose only the computed booleans.
     const { raw_event, bank_account, ...rest } = u;
+    // What the bank would refuse / what will likely stop a payout, by
+    // direct.lana.fund's bank-file rules (lib/payoutDataCheck.ts, Brilly
+    // 21 Nov 2026), and where the owner fixes it. Codes only, no IBAN.
+    let tags: any[] = [];
+    try { tags = JSON.parse(raw_event || '{}').tags || []; } catch { tags = []; }
+    const payout = checkPayoutData(tags);
+    const simple = tags.some((t: any[]) => Array.isArray(t) && t[0] === 'unit_type' && t[1] === 'simple.lanapays.us');
     return {
       ...rest,
       payout_configured: hasPayout({ raw_event, bank_account }),
       online_shop: isOnlineShopUnit(raw_event),
+      payout_problems: payout.problems,
+      payout_advice: payout.advice,
+      payout_fix_url: simple ? 'https://simple.lanapays.us' : 'https://shop.lanapays.us',
     };
   });
 

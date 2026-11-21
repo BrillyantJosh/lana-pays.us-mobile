@@ -684,5 +684,22 @@
   "onlinePayments.listReadAt": "Seznam prebran ob {{time}}",
   "onlinePayments.sigClock": "Ura na tej napravi je zamaknjena za več kot minuto. Popravite datum in uro, nato poskusite znova.",
   "onlinePayments.sigRelogin": "Odjavite se in se znova prijavite, nato poskusite znova.",
-  "onlinePayments.loadError": "Seznama ni bilo mogoče naložiti. Poskusite znova."
+  "onlinePayments.loadError": "Seznama ni bilo mogoče naložiti. Poskusite znova.",
+  "payoutCheck.titleBlocking": "Podatki za izplačilo niso popolni — banka bo tvoja izplačila zavrnila",
+  "payoutCheck.titleAdvice": "Preveri podatke za izplačilo — izplačilo se lahko ustavi",
+  "payoutCheck.fix": "Popravi zdaj",
+  "payoutCheck.pageTitle": "Podatki za izplačilo",
+  "payoutCheck.pageWhy": "Banka potrebuje, komu se nakaže denar, njegov naslov in pravilen račun. Ena trgovina z nepopolnimi podatki povzroči, da banka zavrne celo plačilno datoteko, zato čakajo vsa izplačila v njej.",
+  "payoutCheck.addressTitle": "Naslov prejemnika",
+  "payoutCheck.fixOnShop": "Popravi na shop.lanapays.us",
+  "payoutCheck.code.ACCOUNT_MISSING": "Ni vpisanega bančnega računa (IBAN)",
+  "payoutCheck.code.IBAN_INVALID": "IBAN ni pravilen (napačne številke)",
+  "payoutCheck.code.STREET_MISSING": "Manjka ulica in hišna številka prejemnika",
+  "payoutCheck.code.TOWN_MISSING": "Manjka kraj prejemnika",
+  "payoutCheck.code.RECEIVER_NOT_CHOSEN": "Prejemnik ni izbran iz registra — banka to ime preveri ob računu",
+  "payoutCheck.code.HOLDER_DIFFERS": "Imetnik računa ni enak prejemniku",
+  "payoutCheck.code.COUNTRY_UNCLEAR": "Država ni izbrana s seznama",
+  "payoutCheck.code.BIC_INVALID": "BIC / SWIFT koda ni pravilna",
+  "payoutCheck.code.ZIP_MISSING": "Manjka poštna številka",
+  "payoutCheck.fixOnSimple": "Popravi na simple.lanapays.us"
 }

@@ -465,5 +465,22 @@
   "onlinePayments.listReadAt": "Lista leída a las {{time}}",
   "onlinePayments.sigClock": "El reloj de este dispositivo tiene un desfase de más de un minuto. Corrige la fecha y la hora y vuelve a intentarlo.",
   "onlinePayments.sigRelogin": "Cierra sesión y vuelve a iniciarla; luego inténtalo otra vez.",
-  "onlinePayments.loadError": "No se pudo cargar la lista. Inténtalo de nuevo."
+  "onlinePayments.loadError": "No se pudo cargar la lista. Inténtalo de nuevo.",
+  "payoutCheck.titleBlocking": "Tus datos de pago no están completos — el banco rechazará tus pagos",
+  "payoutCheck.titleAdvice": "Revisa tus datos de pago — un pago puede detenerse",
+  "payoutCheck.fix": "Corregir ahora",
+  "payoutCheck.pageTitle": "Datos de pago",
+  "payoutCheck.pageWhy": "El banco necesita quién recibe el dinero, su dirección y una cuenta correcta. Un comercio con datos incompletos hace que el banco rechace todo el archivo de pagos, y todos los pagos en él esperan.",
+  "payoutCheck.addressTitle": "Dirección del receptor",
+  "payoutCheck.fixOnShop": "Corregir en shop.lanapays.us",
+  "payoutCheck.code.ACCOUNT_MISSING": "No hay cuenta bancaria (IBAN)",
+  "payoutCheck.code.IBAN_INVALID": "El IBAN no es correcto (dígitos erróneos)",
+  "payoutCheck.code.STREET_MISSING": "Faltan la calle y el número del receptor",
+  "payoutCheck.code.TOWN_MISSING": "Falta la localidad del receptor",
+  "payoutCheck.code.RECEIVER_NOT_CHOSEN": "El receptor no se eligió del registro — el banco compara este nombre con la cuenta",
+  "payoutCheck.code.HOLDER_DIFFERS": "El titular de la cuenta no es el receptor",
+  "payoutCheck.code.COUNTRY_UNCLEAR": "El país no se eligió de la lista",
+  "payoutCheck.code.BIC_INVALID": "El código BIC / SWIFT no es correcto",
+  "payoutCheck.code.ZIP_MISSING": "Falta el código postal",
+  "payoutCheck.fixOnSimple": "Corregir en simple.lanapays.us"
 }

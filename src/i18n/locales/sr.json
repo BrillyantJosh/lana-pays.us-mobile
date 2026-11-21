@@ -465,5 +465,22 @@
   "onlinePayments.listReadAt": "Lista pročitana u {{time}}",
   "onlinePayments.sigClock": "Sat na ovom uređaju odstupa više od minuta. Ispravite datum i vreme, zatim pokušajte ponovo.",
   "onlinePayments.sigRelogin": "Odjavite se i ponovo se prijavite, zatim pokušajte još jednom.",
-  "onlinePayments.loadError": "Spisak nije bilo moguće učitati. Pokušajte ponovo."
+  "onlinePayments.loadError": "Spisak nije bilo moguće učitati. Pokušajte ponovo.",
+  "payoutCheck.titleBlocking": "Podaci za isplatu nisu potpuni — banka će odbiti tvoje isplate",
+  "payoutCheck.titleAdvice": "Proveri podatke za isplatu — isplata se može zaustaviti",
+  "payoutCheck.fix": "Ispravi sada",
+  "payoutCheck.pageTitle": "Podaci za isplatu",
+  "payoutCheck.pageWhy": "Banci treba primalac novca, njegova adresa i ispravan račun. Jedna radnja s nepotpunim podacima uzrokuje da banka odbije celu datoteku plaćanja, pa čekaju sve isplate u njoj.",
+  "payoutCheck.addressTitle": "Adresa primaoca",
+  "payoutCheck.fixOnShop": "Ispravi na shop.lanapays.us",
+  "payoutCheck.code.ACCOUNT_MISSING": "Nije upisan bankovni račun (IBAN)",
+  "payoutCheck.code.IBAN_INVALID": "IBAN nije ispravan (pogrešne cifre)",
+  "payoutCheck.code.STREET_MISSING": "Nedostaju ulica i kućni broj primaoca",
+  "payoutCheck.code.TOWN_MISSING": "Nedostaje mesto primaoca",
+  "payoutCheck.code.RECEIVER_NOT_CHOSEN": "Primalac nije izabran iz registra — banka proverava to ime uz račun",
+  "payoutCheck.code.HOLDER_DIFFERS": "Vlasnik računa nije isti kao primalac",
+  "payoutCheck.code.COUNTRY_UNCLEAR": "Država nije izabrana sa spiska",
+  "payoutCheck.code.BIC_INVALID": "BIC / SWIFT kod nije ispravan",
+  "payoutCheck.code.ZIP_MISSING": "Nedostaje poštanski broj",
+  "payoutCheck.fixOnSimple": "Ispravi na simple.lanapays.us"
 }

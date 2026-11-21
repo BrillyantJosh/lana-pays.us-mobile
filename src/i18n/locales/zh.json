@@ -465,5 +465,22 @@
   "onlinePayments.listReadAt": "列表读取时间 {{time}}",
   "onlinePayments.sigClock": "此设备的时钟偏差超过一分钟。请校正日期和时间，然后重试。",
   "onlinePayments.sigRelogin": "请退出并重新登录，然后再试一次。",
-  "onlinePayments.loadError": "无法加载列表。请重试。"
+  "onlinePayments.loadError": "无法加载列表。请重试。",
+  "payoutCheck.titleBlocking": "你的付款资料不完整——银行会拒绝你的付款",
+  "payoutCheck.titleAdvice": "请检查你的付款资料——付款可能会被停止",
+  "payoutCheck.fix": "立即修改",
+  "payoutCheck.pageTitle": "付款资料",
+  "payoutCheck.pageWhy": "银行需要知道收款人、其地址和正确的账户。只要有一家店资料不完整，银行就会拒绝整个付款文件，其中所有付款都要等待。",
+  "payoutCheck.addressTitle": "收款人地址",
+  "payoutCheck.fixOnShop": "在 shop.lanapays.us 修改",
+  "payoutCheck.code.ACCOUNT_MISSING": "未填写银行账户（IBAN）",
+  "payoutCheck.code.IBAN_INVALID": "IBAN 不正确（数字错误）",
+  "payoutCheck.code.STREET_MISSING": "缺少收款人的街道和门牌号",
+  "payoutCheck.code.TOWN_MISSING": "缺少收款人的城市",
+  "payoutCheck.code.RECEIVER_NOT_CHOSEN": "收款人不是从登记册中选择的——银行会用这个名字核对账户",
+  "payoutCheck.code.HOLDER_DIFFERS": "账户持有人与收款人不同",
+  "payoutCheck.code.COUNTRY_UNCLEAR": "国家不是从列表中选择的",
+  "payoutCheck.code.BIC_INVALID": "BIC / SWIFT 代码不正确",
+  "payoutCheck.code.ZIP_MISSING": "缺少邮政编码",
+  "payoutCheck.fixOnSimple": "在 simple.lanapays.us 修改"
 }

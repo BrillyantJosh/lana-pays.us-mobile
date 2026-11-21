@@ -465,5 +465,22 @@
   "onlinePayments.listReadAt": "Lista odczytana o {{time}}",
   "onlinePayments.sigClock": "Zegar tego urządzenia różni się o ponad minutę. Popraw datę i godzinę, a następnie spróbuj ponownie.",
   "onlinePayments.sigRelogin": "Wyloguj się i zaloguj ponownie, a potem spróbuj jeszcze raz.",
-  "onlinePayments.loadError": "Nie udało się wczytać listy. Spróbuj ponownie."
+  "onlinePayments.loadError": "Nie udało się wczytać listy. Spróbuj ponownie.",
+  "payoutCheck.titleBlocking": "Twoje dane do wypłat są niepełne — bank odrzuci twoje wypłaty",
+  "payoutCheck.titleAdvice": "Sprawdź dane do wypłat — wypłata może zostać zatrzymana",
+  "payoutCheck.fix": "Popraw teraz",
+  "payoutCheck.pageTitle": "Dane do wypłat",
+  "payoutCheck.pageWhy": "Bank potrzebuje odbiorcy pieniędzy, jego adresu i poprawnego rachunku. Jeden sklep z niepełnymi danymi sprawia, że bank odrzuca cały plik płatności, a wszystkie wypłaty w nim czekają.",
+  "payoutCheck.addressTitle": "Adres odbiorcy",
+  "payoutCheck.fixOnShop": "Popraw na shop.lanapays.us",
+  "payoutCheck.code.ACCOUNT_MISSING": "Nie wpisano rachunku bankowego (IBAN)",
+  "payoutCheck.code.IBAN_INVALID": "IBAN jest niepoprawny (błędne cyfry)",
+  "payoutCheck.code.STREET_MISSING": "Brak ulicy i numeru domu odbiorcy",
+  "payoutCheck.code.TOWN_MISSING": "Brak miejscowości odbiorcy",
+  "payoutCheck.code.RECEIVER_NOT_CHOSEN": "Odbiorca nie jest wybrany z rejestru — bank porównuje tę nazwę z rachunkiem",
+  "payoutCheck.code.HOLDER_DIFFERS": "Właściciel rachunku nie jest odbiorcą",
+  "payoutCheck.code.COUNTRY_UNCLEAR": "Kraj nie jest wybrany z listy",
+  "payoutCheck.code.BIC_INVALID": "Kod BIC / SWIFT jest niepoprawny",
+  "payoutCheck.code.ZIP_MISSING": "Brak kodu pocztowego",
+  "payoutCheck.fixOnSimple": "Popraw na simple.lanapays.us"
 }

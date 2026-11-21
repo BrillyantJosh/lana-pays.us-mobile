@@ -465,5 +465,22 @@
   "onlinePayments.listReadAt": "Lista lida às {{time}}",
   "onlinePayments.sigClock": "O relógio deste dispositivo está desfasado mais de um minuto. Corrija a data e a hora e tente novamente.",
   "onlinePayments.sigRelogin": "Termine sessão e inicie sessão novamente; depois tente outra vez.",
-  "onlinePayments.loadError": "Não foi possível carregar a lista. Tente novamente."
+  "onlinePayments.loadError": "Não foi possível carregar a lista. Tente novamente.",
+  "payoutCheck.titleBlocking": "Os teus dados de pagamento não estão completos — o banco vai recusar os teus pagamentos",
+  "payoutCheck.titleAdvice": "Verifica os teus dados de pagamento — um pagamento pode ser parado",
+  "payoutCheck.fix": "Corrigir agora",
+  "payoutCheck.pageTitle": "Dados de pagamento",
+  "payoutCheck.pageWhy": "O banco precisa de quem recebe o dinheiro, da sua morada e de uma conta correta. Uma loja com dados incompletos faz o banco recusar todo o ficheiro de pagamentos, e todos os pagamentos nele esperam.",
+  "payoutCheck.addressTitle": "Morada do beneficiário",
+  "payoutCheck.fixOnShop": "Corrigir em shop.lanapays.us",
+  "payoutCheck.code.ACCOUNT_MISSING": "Nenhuma conta bancária (IBAN) inserida",
+  "payoutCheck.code.IBAN_INVALID": "O IBAN não está correto (dígitos errados)",
+  "payoutCheck.code.STREET_MISSING": "Faltam a rua e o número do beneficiário",
+  "payoutCheck.code.TOWN_MISSING": "Falta a localidade do beneficiário",
+  "payoutCheck.code.RECEIVER_NOT_CHOSEN": "O beneficiário não foi escolhido do registo — o banco compara este nome com a conta",
+  "payoutCheck.code.HOLDER_DIFFERS": "O titular da conta não é o beneficiário",
+  "payoutCheck.code.COUNTRY_UNCLEAR": "O país não foi escolhido da lista",
+  "payoutCheck.code.BIC_INVALID": "O código BIC / SWIFT não está correto",
+  "payoutCheck.code.ZIP_MISSING": "Falta o código postal",
+  "payoutCheck.fixOnSimple": "Corrigir em simple.lanapays.us"
 }

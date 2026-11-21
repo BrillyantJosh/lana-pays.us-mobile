@@ -43,6 +43,10 @@ interface BusinessUnit {
   // Server-computed: merchant has entered payout data (IBAN/account). Required for
   // LANA purchases (invoice wires to the merchant's bank); not needed for cash.
   payout_configured?: boolean;
+  /** Server-computed (lib/payoutDataCheck.ts): what the bank would refuse, what will likely stop a payout, and where to fix it. */
+  payout_problems?: string[];
+  payout_advice?: string[];
+  payout_fix_url?: string;
   // Server-computed from the KIND 30901 `online_shop` tag: this unit sells on the
   // LanaRetail portals. Absent (old server / unparseable event) ⇒ treat as true,
   // see ordersVisible.
@@ -1114,6 +1118,33 @@ const Index = () => {
                       <p className="text-base font-medium text-amber-700/90 dark:text-amber-300/90 leading-relaxed">{t('home.lanaPayoutNotConfiguredDetail')}</p>
                     </div>
                   )}
+
+                  {/* Payout details the bank would refuse (red) or that will likely
+                      stop a payout (amber) — Brilly, 21 Nov 2026. The fix is in the
+                      app where the shop was opened. */}
+                  {effectiveUnit && ((effectiveUnit.payout_problems?.length || 0) > 0 || (effectiveUnit.payout_advice?.length || 0) > 0) && !lanaPayoutMissing && (() => {
+                    const problems = effectiveUnit.payout_problems || [];
+                    const advice = effectiveUnit.payout_advice || [];
+                    const red = problems.length > 0;
+                    return (
+                      <div className={`rounded-2xl border-2 p-5 space-y-3 ${red ? 'bg-destructive/10 border-destructive/30' : 'bg-amber-500/10 border-amber-500/30'}`}>
+                        <h3 className={`text-lg font-bold ${red ? 'text-destructive' : 'text-amber-700 dark:text-amber-400'}`}>
+                          {red ? t('payoutCheck.titleBlocking') : t('payoutCheck.titleAdvice')}
+                        </h3>
+                        <ul className="text-sm space-y-1 text-left">
+                          {[...problems, ...advice].map(c => <li key={c}>• {t(`payoutCheck.code.${c}`)}</li>)}
+                        </ul>
+                        <a
+                          href={effectiveUnit.payout_fix_url || 'https://shop.lanapays.us'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`block w-full text-center rounded-xl font-bold py-3 text-white ${red ? 'bg-destructive' : 'bg-amber-600'}`}
+                        >
+                          {(effectiveUnit.payout_fix_url || '').includes('simple') ? t('payoutCheck.fixOnSimple') : t('payoutCheck.fixOnShop')}
+                        </a>
+                      </div>
+                    );
+                  })()}
 
                   {/* Monthly cash limit reached → cash is greyed above; explain why,
                       and point the seller to LANA (which stays unlimited). */}
