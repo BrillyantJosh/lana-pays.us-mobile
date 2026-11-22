@@ -65,6 +65,8 @@ interface OverviewRow {
   paid_at: string | null;
   tx_hash: string | null;
   customer_name: string | null;
+  /** The merchant's own note on the request; null = none. */
+  note?: string | null;
   /** null = the signer is staff on this unit; the investor side is the owner's. */
   investor: { invoice: Leg; reward: RewardLeg | null; checked_at: string | null } | null;
 }
@@ -401,6 +403,11 @@ const OnlinePayments = () => {
                   <div className="text-xs text-muted-foreground truncate">
                     {showUnitName ? `${row.unit_name} · ` : ''}{formatDateTime(row.created_at, lng)}
                   </div>
+                  {row.note && (
+                    <p className="text-sm text-foreground/85 break-words" data-testid="request-note">
+                      <span className="text-xs text-muted-foreground">{t('lanaOnline.noteLabel')}: </span>{row.note}
+                    </p>
+                  )}
 
                   <div className="pt-1 border-t border-border space-y-1.5">
                     <div className="flex items-start gap-2 flex-wrap">

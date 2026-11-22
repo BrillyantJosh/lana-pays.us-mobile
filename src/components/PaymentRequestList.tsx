@@ -30,6 +30,8 @@ export interface PaymentRequestRow {
   tx_hash: string | null;
   paid_lana_lanoshis: number | null;
   customer_name: string | null;
+  /** The merchant's own note (what it is for / who it is for); null = none. */
+  note?: string | null;
 }
 
 export function payUrlFor(row: { token: string }): string {
@@ -106,6 +108,11 @@ export function PaymentRequestList({ rows, onCancelled, merchantHex }: Props) {
             <span className="truncate">{t('cash.invoiceLabel', { number: row.invoice_number })}</span>
             <span className="shrink-0">{localTime(row.status === 'paid' ? row.paid_at : row.created_at)}</span>
           </div>
+          {row.note && (
+            <p className="text-sm text-foreground/85 break-words" data-testid="request-note">
+              <span className="text-xs text-muted-foreground">{t('lanaOnline.noteLabel')}: </span>{row.note}
+            </p>
+          )}
 
           {row.status === 'paid' && (
             <div className="flex items-center justify-between gap-2 pt-1 border-t border-border">

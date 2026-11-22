@@ -45,6 +45,8 @@ interface RequestView {
   invoiceNumber: string;
   receiptUrl: string | null;
   receiptDescription: string | null;
+  /** The seller's own note on the request (what it is for / who it is for). */
+  note?: string | null;
   status: 'pending' | 'paid' | 'cancelled' | 'expired';
   createdAt: string;
   expiresAt: string | null;
@@ -449,6 +451,12 @@ const PublicPay = () => {
         <span className="text-sm text-muted-foreground">{t('cash.invoiceLabel', { number: request.invoiceNumber })}</span>
         <span className="text-2xl font-bold text-foreground">{sym}{request.amountFiat.toFixed(2)}</span>
       </div>
+      {request.note && (
+        <div data-testid="pay-note">
+          <p className="text-xs text-muted-foreground">{t('pay.noteFromSeller')}</p>
+          <p className="text-sm text-foreground break-words">{request.note}</p>
+        </div>
+      )}
       {request.receiptDescription && (
         <div>
           <p className="text-xs text-muted-foreground">{t('pay.whatYouBuy')}</p>
@@ -659,6 +667,11 @@ const PublicPay = () => {
           <CheckCircle2 className="w-14 h-14 text-primary" />
           <h2 className="text-2xl font-bold text-foreground">{t('pay.paidTitle')}</h2>
           <p className="text-lg text-muted-foreground">{t('cash.invoiceLabel', { number: request.invoiceNumber })}</p>
+          {request.note && (
+            <p className="text-sm text-foreground/85 text-center break-words max-w-full" data-testid="paid-note">
+              <span className="text-muted-foreground">{t('pay.noteFromSeller')}: </span>{request.note}
+            </p>
+          )}
         </div>
         <div className="glass-card rounded-2xl p-5 space-y-3 border">
           <div className="flex justify-between items-baseline">

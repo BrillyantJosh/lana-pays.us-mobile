@@ -30,6 +30,8 @@ import { currencySymbol as symbolFor } from '@/lib/format';
 import { PaymentRequestList, payUrlFor, type PaymentRequestRow } from '@/components/PaymentRequestList';
 import { freshReceiptFields, checkDedup, canContinueAfterHit, type DedupHit } from '@/lib/receiptDedup';
 import { DuplicateNumberFix } from '@/components/DuplicateNumberFix';
+import { RequestNoteField } from '@/components/RequestNoteField';
+import { noteToSend } from '@/lib/requestNote';
 import lanaIcon from '@/assets/lana-icon.png';
 
 /** Same own-dedup-screenshot heuristic as LanaTab/CashTab. */
@@ -85,6 +87,8 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
   // Entry step state
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [amount, setAmount] = useState('');
+  /** Optional: what the payment is for / who it is for (shown back, never sent to the brain). */
+  const [note, setNote] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
@@ -128,6 +132,7 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
     const fresh = freshReceiptFields();
     setInvoiceNumber(fresh.invoiceNumber);
     setAmount(fresh.amount);
+    setNote('');
     setReceiptType('receipt');
     setAnalysisDescription(null);
     setCreateError(null);
@@ -222,6 +227,7 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
           receipt_hash: receiptHash || undefined,
           receipt_type: receiptType || 'receipt',
           receipt_description: analysisDescription || undefined,
+          note: noteToSend(note),
         }),
       });
       const json = await res.json();
@@ -254,6 +260,7 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
     setDedupHit(null);
     setInvoiceNumber('');
     setAmount('');
+    setNote('');
     setCreateError(null);
     setCreatedRequest(null);
     setLinkCopied(false);
@@ -315,6 +322,11 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
           <h2 className="font-display text-xl font-bold text-foreground">{t('lanaOnline.requestCreated')}</h2>
           <p className="text-2xl font-bold text-foreground">{sym}{createdRequest.amount_fiat.toFixed(2)}</p>
           <p className="text-sm text-muted-foreground">{t('cash.invoiceLabel', { number: createdRequest.invoice_number })}</p>
+          {createdRequest.note && (
+            <p className="text-sm text-foreground/85 text-center break-words max-w-full" data-testid="created-note">
+              <span className="text-muted-foreground">{t('lanaOnline.noteLabel')}: </span>{createdRequest.note}
+            </p>
+          )}
         </div>
 
         <div className="glass-card rounded-2xl border p-5 space-y-4">
@@ -398,6 +410,7 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
               className="h-12 rounded-xl bg-background border-input"
             />
           </div>
+          <RequestNoteField value={note} onChange={setNote} />
         </div>
 
         {createError && (

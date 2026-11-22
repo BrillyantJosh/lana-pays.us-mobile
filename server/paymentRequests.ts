@@ -27,6 +27,7 @@ import { gate, gateNames, excludedMerchant, merchantRefusal } from './lib/exclus
 import { requireSignedMerchant } from './lib/nip98.js';
 import { brainPayoutReader, type InvestorStatus } from './lib/brainPayouts.js';
 import { isBrainDuplicate, verifyBrainDuplicate, duplicateMismatchMessage } from './lib/brainDuplicate.js';
+import { cleanRequestNote } from './lib/requestNote.js';
 import rateLimit from 'express-rate-limit';
 import type Database from 'better-sqlite3';
 import type { Express } from 'express';
@@ -83,6 +84,7 @@ const merchantRequestView = (r: any) => ({
   currency: r.currency,
   invoice_number: r.invoice_number,
   receipt_url: r.receipt_url,
+  note: r.note ?? null,
   created_at: r.created_at,
   expires_at: r.expires_at,
   paid_at: r.paid_at,
@@ -142,6 +144,7 @@ const overviewView = (r: any, investor: InvestorStatus | null) => ({
   paid_at: r.customer_status === 'paid' || r.customer_status === 'paid_unconfirmed' ? r.paid_at : null,
   tx_hash: r.customer_status === 'paid' ? r.tx_hash : null,
   customer_name: r.customer_name,
+  note: r.note ?? null,
   /** null = the signer is staff on this unit, not its owner (see the route). */
   investor,
 });
@@ -172,6 +175,9 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
   })), (req, res) => {
     const { unit_id, merchant_hex, amount, currency, invoice_number,
       receipt_url, receipt_hash, receipt_type, receipt_description } = req.body || {};
+    // The merchant's own words on what this is for / who it is for. Stored and
+    // shown back only — it is NOT sent to the brain (lib/requestNote.ts).
+    const note = cleanRequestNote(req.body?.note);
 
     const unit = unitForMerchant(db, String(merchant_hex || ''), String(unit_id || ''));
     if (!unit) return res.status(403).json({ success: false, error: 'NOT_AUTHORIZED' });
@@ -220,13 +226,14 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
     db.prepare(`
       INSERT INTO payment_requests (
         id, token, unit_id, merchant_hex, unit_name, amount_fiat, currency, invoice_number,
-        receipt_url, receipt_hash, receipt_type, receipt_description, status, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending',
+        receipt_url, receipt_hash, receipt_type, receipt_description, note, status, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending',
         CASE WHEN ? > 0 THEN datetime('now', '+' || ? || ' hours') ELSE NULL END)
     `).run(
       id, token, unit.unit_id, merchant_hex, unit.name || unit.unit_id, amt, cur, invoice,
       receipt_url || null, receipt_hash || null, receipt_type || null,
       receipt_description ? String(receipt_description).slice(0, 500) : null,
+      note,
       expiryHours, expiryHours
     );
 
@@ -352,7 +359,7 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
       const total = (db.prepare(`SELECT COUNT(*) AS c FROM payment_requests WHERE unit_id IN (${ph})`).get(...unitIds) as any).c;
       const rows = db.prepare(`
         SELECT id, unit_id, unit_name, created_at, invoice_number, amount_fiat, currency,
-               paid_at, tx_hash, customer_name, brain_transaction_id, ${CUSTOMER_STATUS_SQL} AS customer_status
+               paid_at, tx_hash, customer_name, note, brain_transaction_id, ${CUSTOMER_STATUS_SQL} AS customer_status
         FROM payment_requests WHERE unit_id IN (${ph})
         ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?
       `).all(...unitIds, limit, offset) as any[];
@@ -407,6 +414,7 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
         invoiceNumber: row.invoice_number,
         receiptUrl: row.receipt_url,
         receiptDescription: row.receipt_description,
+        note: row.note ?? null,
         status: row.status === 'paying' ? 'pending' : row.status,
         createdAt: row.created_at,
         expiresAt: row.expires_at,

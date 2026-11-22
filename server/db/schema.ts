@@ -320,6 +320,7 @@ export function initializeSchema(db: Database.Database): void {
       receipt_hash TEXT,
       receipt_type TEXT,
       receipt_description TEXT,
+      note TEXT,
       status TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending','paying','paid','cancelled','expired')),
       created_at TEXT DEFAULT (datetime('now')),
@@ -343,6 +344,9 @@ export function initializeSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_payreq_unit_created ON payment_requests(unit_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_payreq_status ON payment_requests(status);
   `);
+  // The merchant's optional note on a request (what it is for / who it is for,
+  // 22 Nov 2026). Descriptive only — never sent to the brain (lib/requestNote.ts).
+  try { db.exec(`ALTER TABLE payment_requests ADD COLUMN note TEXT`); } catch { /* column exists */ }
   // Default validity of a payment request link: 168h = 7 days (0 = never expires).
   db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('payment_request_expiry_hours', '168')").run();
 
