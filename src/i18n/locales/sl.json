@@ -694,6 +694,7 @@
   "payoutCheck.fixOnShop": "Popravi na shop.lanapays.us",
   "payoutCheck.code.ACCOUNT_MISSING": "Ni vpisanega bančnega računa (IBAN)",
   "payoutCheck.code.IBAN_HAS_WORD": "Pred številko je vpisana beseda »IBAN« — prosimo, izbrišite jo in pustite samo številko (SI56 …)",
+  "payoutCheck.code.IBAN_IS_CARD": "Namesto IBAN-a je vpisana številka plačilne kartice — vpišite IBAN bančnega računa (SI56 …); banka na kartico izplačila ne sprejme",
   "payoutCheck.code.IBAN_INVALID": "IBAN ni pravilen (napačne številke)",
   "payoutCheck.code.STREET_MISSING": "Manjka ulica in hišna številka prejemnika",
   "payoutCheck.code.TOWN_MISSING": "Manjka kraj prejemnika",

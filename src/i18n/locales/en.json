@@ -694,6 +694,7 @@
   "payoutCheck.fixOnShop": "Fix on shop.lanapays.us",
   "payoutCheck.code.ACCOUNT_MISSING": "No bank account (IBAN) entered",
   "payoutCheck.code.IBAN_HAS_WORD": "The word \"IBAN\" is typed in front of the number — please delete it and leave only the number (SI56 …)",
+  "payoutCheck.code.IBAN_IS_CARD": "A payment card number is entered instead of the IBAN — enter the bank account's IBAN (SI56 …); the bank cannot pay out to a card",
   "payoutCheck.code.IBAN_INVALID": "The IBAN is not correct (wrong digits)",
   "payoutCheck.code.STREET_MISSING": "The receiver's street and house number are missing",
   "payoutCheck.code.TOWN_MISSING": "The receiver's town is missing",

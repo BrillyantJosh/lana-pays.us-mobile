@@ -11,6 +11,10 @@
  *   and the Lana.Discount part of the batch with it (Brilly, 21 Nov 2026):
  *     ACCOUNT_MISSING  no IBAN (or, outside SEPA, no account) — also only
  *                      the country part typed ("SI56")
+ *     IBAN_IS_CARD     a payment card's number typed where the IBAN goes
+ *                      (13–19 digits that pass the card check, 22 Nov: three
+ *                      shops had one — and their LANA payouts made it look
+ *                      fine, since no payment to a bank had needed it yet)
  *     IBAN_INVALID     an IBAN whose check digits fail, or not a SEPA country
  *     STREET_MISSING   no street in the receiver's address
  *     TOWN_MISSING     no town in the receiver's address
@@ -31,7 +35,7 @@
  *     ZIP_MISSING          no post code
  */
 
-export type PayoutProblem = 'ACCOUNT_MISSING' | 'IBAN_INVALID' | 'STREET_MISSING' | 'TOWN_MISSING';
+export type PayoutProblem = 'ACCOUNT_MISSING' | 'IBAN_IS_CARD' | 'IBAN_INVALID' | 'STREET_MISSING' | 'TOWN_MISSING';
 export type PayoutAdvice = 'RECEIVER_NOT_CHOSEN' | 'HOLDER_DIFFERS' | 'COUNTRY_UNCLEAR' | 'BIC_INVALID' | 'IBAN_HAS_WORD' | 'ZIP_MISSING';
 
 export interface PayoutCheck {
@@ -73,6 +77,19 @@ export function validBic(raw: unknown): boolean {
   return /^[A-Z]{6}[A-Z2-9][A-NP-Z0-9]([A-Z0-9]{3})?$/.test(String(raw ?? '').trim().toUpperCase());
 }
 
+/** 13–19 digits that pass the Luhn check every payment card number passes. */
+export function looksLikeCardNumber(raw: unknown): boolean {
+  const n = compactIban(raw);
+  if (!/^\d{13,19}$/.test(n)) return false;
+  let sum = 0;
+  for (let i = 0; i < n.length; i++) {
+    let d = Number(n[n.length - 1 - i]);
+    if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; }
+    sum += d;
+  }
+  return sum % 10 === 0;
+}
+
 const letters = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 export function checkPayoutData(tags: unknown): PayoutCheck {
@@ -95,7 +112,7 @@ export function checkPayoutData(tags: unknown): PayoutCheck {
     if (compact.length <= 4) problems.push('ACCOUNT_MISSING');
     else if (!validSepaIban(iban)) {
       if (compact.startsWith('IBAN') && validSepaIban(compact.slice(4).replace(/^:/, ''))) advice.push('IBAN_HAS_WORD');
-      else problems.push('IBAN_INVALID');
+      else problems.push(looksLikeCardNumber(compact) ? 'IBAN_IS_CARD' : 'IBAN_INVALID');
     }
     const bic = field('bic') || tag('bank_swift');
     if (bic && !validBic(bic)) advice.push('BIC_INVALID');

@@ -475,6 +475,7 @@
   "payoutCheck.fixOnShop": "Popraw na shop.lanapays.us",
   "payoutCheck.code.ACCOUNT_MISSING": "Nie wpisano rachunku bankowego (IBAN)",
   "payoutCheck.code.IBAN_HAS_WORD": "Przed numerem wpisano słowo „IBAN” — prosimy usunąć je i zostawić sam numer (SI56 …)",
+  "payoutCheck.code.IBAN_IS_CARD": "Zamiast IBAN wpisano numer karty płatniczej — wpisz IBAN rachunku bankowego (SI56 …); bank nie może wypłacić na kartę",
   "payoutCheck.code.IBAN_INVALID": "IBAN jest niepoprawny (błędne cyfry)",
   "payoutCheck.code.STREET_MISSING": "Brak ulicy i numeru domu odbiorcy",
   "payoutCheck.code.TOWN_MISSING": "Brak miejscowości odbiorcy",
