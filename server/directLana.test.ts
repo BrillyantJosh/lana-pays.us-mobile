@@ -15,11 +15,11 @@ import { finalizeEvent } from 'nostr-tools/pure';
 import { initializeSchema } from './db/schema.js';
 import { ensureExclusionTables } from './lib/personExclusion.js';
 import { keepRawBody, forgetSpentTokens } from './lib/nip98.js';
-import { registerDirectLanaRoutes, runDirectLanaWorker, type DirectLanaDeps } from './directLana.js';
+import { registerDirectLanaRoutes, runDirectLanaWorker, RESEND_WINDOW_SECONDS, type DirectLanaDeps } from './directLana.js';
 import { ChainUnavailable, type WithChain, type ChainRead, type Utxo, type BroadcastAnswer } from './lib/directLanaChain.js';
 import { RegistrarUnavailable, type RegistrarAnswer } from './lib/directLanaRegistrar.js';
 import { parseLanaTx, txidOfRaw } from './lib/directLanaTx.js';
-import { move, getAttempt } from './lib/directLanaStore.js';
+import { move, getAttempt, beginValidating, refuseBeforeSending } from './lib/directLanaStore.js';
 import { directLanaView, unitRow } from './lib/directLanaUnit.js';
 import { addressScript, bytesToHex, type DirectLanaPlan } from './lib/directLanaCore.js';
 import { readCardKey, signDirectSale } from '../src/lib/directLanaSign.js';
@@ -534,7 +534,7 @@ describe('at submit, everything is asked again', () => {
     const q = await quote();
     const other = addressOfKey(keyOf(13));
     db.prepare('UPDATE business_units SET raw_event = ? WHERE unit_id = ?').run(
-      unitEvent(UNIT, OWNER_HEX, [['payout_account', 'none'], ['margin_percent', '10'], ['lanapays_payout_wallet', other]]), UNIT);
+      unitEvent(UNIT, OWNER_HEX, [['payout_account', 'none'], ['margin_percent', '10'], ['lanapays_payout_method', 'lana'], ['lanapays_payout_wallet', other]]), UNIT);
     const r = await submit(q.data.plan, sign(q.data.plan));
     expect(r.data.code).toBe('WALLET_CHANGED');
     expect(chain.broadcasts).toEqual([]);
@@ -792,5 +792,407 @@ describe('review fixes (23 Nov 2026)', () => {
     chain.height = coinHeight + 5; // 6 deep
     await runDirectLanaWorker(db, deps as DirectLanaDeps);
     expect(row(plan.attempt_id).status).toBe('failed');
+  });
+});
+
+// ── Review fixes, second round (23 Nov 2026) ────────────────────────────────
+
+const exclude = (hex: string) => db.prepare(`INSERT INTO person_exclusions (d_tag, person_hex, active, ground, since, event_id, event_created_at) VALUES (?, ?, 1, 'g', 1, 'ev', 1)`).run(`d-${hex}`, hex);
+const resend = (id: string, key: Uint8Array = OWNER) => post(`/api/direct-lana/sales/${id}/resend`, { attempt_id: id }, key);
+const setUnitEvent = (tags: string[][]) => db.prepare('UPDATE business_units SET raw_event = ? WHERE unit_id = ?').run(unitEvent(UNIT, OWNER_HEX, tags), UNIT);
+/** The tags shop.lanapays.us option (c) signs, as the seed has them. */
+const OPTION_C = [['payout_account', 'none'], ['margin_percent', '10'], ['lanapays_payout_method', 'lana'], ['lanapays_payout_wallet', SHOP_WALLET]];
+const journalSize = () => (db.prepare('SELECT COUNT(*) AS n FROM direct_lana_sales').get() as { n: number }).n;
+const asStaff = (extra: Record<string, unknown> = {}) =>
+  post('/api/direct-lana/quote', { unit_id: UNIT, amount: '10.00', currency: 'EUR', public_key: readCardKey(wifOf(CARD)).publicKey, ...extra }, STAFF);
+
+/** A payment every server refused after it was handed over: refused, sent = 1. */
+async function refusedAfterSending(card = CARD) {
+  chain.mode = 'refuse';
+  const paid = await paySent({}, card);
+  expect(paid.r.data).toMatchObject({ status: 'refused', sent: true });
+  chain.mode = 'accept';
+  return paid;
+}
+/** A payment without a clear answer: unknown. */
+async function hangingPayment(card = CARD) {
+  chain.mode = 'odd';
+  const paid = await paySent({}, card);
+  expect(paid.r.data.status).toBe('unknown');
+  chain.mode = 'accept';
+  return paid;
+}
+
+describe('a re-send is held to every check of a submit (review: it moved money past the switch, the shop and the price)', () => {
+  const cases: Array<[string, () => void, string]> = [
+    ['the switch turned off', () => setSwitch(''), 'DIRECT_LANA_OFF'],
+    ['the shop suspended (KIND 30903)', () => db.prepare("UPDATE business_units SET suspension_status = 'suspended' WHERE unit_id = ?").run(UNIT), 'UNIT_BLOCKED'],
+    ['the shop pending again', () => db.prepare("UPDATE business_units SET suspension_status = 'pending' WHERE unit_id = ?").run(UNIT), 'UNIT_BLOCKED'],
+    ['the shop re-signed as a company unit', () => setUnitEvent([['receiver_type', 'company'], ['lanapays_payout_wallet', SHOP_WALLET]]), 'UNIT_NOT_DIRECT'],
+    ['the shop no longer active', () => db.prepare("UPDATE business_units SET status = 'inactive' WHERE unit_id = ?").run(UNIT), 'UNKNOWN_UNIT'],
+    ['the shop now paying into another wallet', () => setUnitEvent([...OPTION_C.filter(t => t[0] !== 'lanapays_payout_wallet'), ['lanapays_payout_wallet', addressOfKey(keyOf(13))]]), 'WALLET_CHANGED'],
+    ['the LANA price moved from 0.256 to 0.5', () => { db.prepare('DELETE FROM kind_38888').run(); store38888('0.5'); }, 'RATE_CHANGED'],
+    ['no LANA price any more', () => db.prepare('DELETE FROM kind_38888').run(), 'RATE_UNAVAILABLE'],
+  ];
+  for (const [label, change, code] of cases) {
+    it(`${label}: ${code}, the bytes do not go out again (refused after sending, and unknown)`, async () => {
+      const refused = await refusedAfterSending(CARD);
+      const hanging = await hangingPayment(CARD2);
+      const before = chain.broadcasts.length;
+      change();
+      for (const p of [refused, hanging]) {
+        const r = await resend(p.plan.attempt_id);
+        expect(r.data.code, `${label}: ${JSON.stringify(r.data)}`).toBe(code);
+        expect(r.data.success).toBe(false);
+        // The whole attempt, as it is: a refused re-send resolves nothing.
+        expect(r.data).toMatchObject({ attempt_id: p.plan.attempt_id, pay_cents: '1100' });
+      }
+      expect(chain.broadcasts.length).toBe(before);
+      expect(row(refused.plan.attempt_id)).toMatchObject({ status: 'refused', sent: 1 });
+      expect(row(hanging.plan.attempt_id).status).toBe('unknown');
+    });
+  }
+
+  it('the card frozen now, the register silent, the shop\'s wallet frozen: refused, nothing goes out', async () => {
+    const { plan } = await refusedAfterSending();
+    registrar.set(CARD_ADDRESS, wallet('Main Wallet', CUSTOMER_HEX, true));
+    expect((await resend(plan.attempt_id)).data.code).toBe('PAYER_FROZEN');
+    registrar.set(CARD_ADDRESS, 'down');
+    const down = await resend(plan.attempt_id);
+    expect(down.status).toBe(503);
+    expect(down.data.code).toBe('REGISTRAR_UNAVAILABLE');
+    registrar.set(CARD_ADDRESS, wallet('Main Wallet', CUSTOMER_HEX));
+    registrar.set(SHOP_WALLET, wallet('Main Wallet', OWNER_HEX, true));
+    expect((await resend(plan.attempt_id)).data.code).toBe('PAYEE_FROZEN');
+    expect(chain.broadcasts.length).toBe(1);
+  });
+
+  it('the card\'s owner as the register names it NOW: its KIND 87058 decision, and the shop\'s own owner', async () => {
+    const { plan } = await refusedAfterSending();
+    const newOwner = hexOfKey(keyOf(14));
+    registrar.set(CARD_ADDRESS, wallet('Main Wallet', newOwner));
+    exclude(newOwner);
+    const r = await resend(plan.attempt_id);
+    expect(r.status).toBe(403);
+    expect(r.data.code).toBe('PERSON_EXCLUDED');
+    db.prepare('DELETE FROM person_exclusions').run();
+    registrar.set(CARD_ADDRESS, wallet('Main Wallet', OWNER_HEX));
+    expect((await resend(plan.attempt_id)).data.code).toBe('SELF_PAYMENT');
+    expect(chain.broadcasts.length).toBe(1);
+  });
+
+  it('a KIND 87058 decision against the card or the owner it had at the quote: refused', async () => {
+    const { plan } = await refusedAfterSending();
+    exclude(CUSTOMER_HEX);
+    expect((await resend(plan.attempt_id)).status).toBe(403);
+    db.prepare('DELETE FROM person_exclusions').run();
+    exclude(hexOfKey(CARD));
+    expect((await resend(plan.attempt_id)).status).toBe(403);
+    expect(chain.broadcasts.length).toBe(1);
+  });
+
+  it('only within 30 minutes of the card\'s signature; later the seller pays again with the same card', async () => {
+    const { plan } = await refusedAfterSending();
+    nowMs += (RESEND_WINDOW_SECONDS + 1) * 1000;
+    const late = await resend(plan.attempt_id);
+    expect(late.status).toBe(409);
+    expect(late.data.code).toBe('RESEND_TOO_LATE');
+    expect(chain.broadcasts.length).toBe(1);
+    // Paying again (the card scanned again, every check afresh, one of the same coins) still can.
+    const again = await quote({ sale_id: plan.sale_id });
+    expect(again.status, JSON.stringify(again.data)).toBe(200);
+    expect(again.data.replaces).toEqual([plan.attempt_id]);
+  });
+
+  it('as at a submit: a spend of the card waiting for a block, a block arriving mid-read, a coin gone', async () => {
+    const { plan } = await refusedAfterSending();
+    addr(CARD_ADDRESS).pending = -1_000n;
+    expect((await resend(plan.attempt_id)).data.code).toBe('CHAIN_PENDING');
+    addr(CARD_ADDRESS).pending = 0n;
+    chain.tipMoves = true;
+    expect((await resend(plan.attempt_id)).data.code).toBe('WALLET_STATE_CHANGED');
+    chain.tipMoves = false;
+    const a = addr(CARD_ADDRESS);
+    const coin = a.utxos.find(u => u.txid === plan.inputs[0].txid)!;
+    a.utxos = a.utxos.filter(u => u !== coin);
+    a.confirmed -= BigInt(coin.value);
+    expect((await resend(plan.attempt_id)).data.code).toBe('WALLET_STATE_CHANGED');
+    expect(chain.broadcasts.length).toBe(1);
+    expect(row(plan.attempt_id)).toMatchObject({ status: 'refused', sent: 1 });
+  });
+
+  it('with everything as it was, the same bytes go out again: sent', async () => {
+    const { plan, s } = await refusedAfterSending();
+    const r = await resend(plan.attempt_id);
+    expect(r.data).toMatchObject({ success: true, resend: 'accepted', status: 'sent' });
+    expect(chain.broadcasts).toEqual([s.raw, s.raw]);
+  });
+});
+
+describe('a replacement refused before it was sent replaces nothing (review: the hanging payment stayed "superseded")', () => {
+  it('RATE_CHANGED at its submit: the hanging payment is unknown again, holds the card, may be sent again, and the till is pointed to it', async () => {
+    const hanging = await hangingPayment();
+    const replacement = await quote({ sale_id: hanging.plan.sale_id });
+    expect(replacement.data.replaces).toEqual([hanging.plan.attempt_id]);
+    db.prepare('DELETE FROM kind_38888').run();
+    store38888('0.3');
+    const r = await submit(replacement.data.plan, sign(replacement.data.plan));
+    expect(r.status).toBe(409);
+    expect(r.data).toMatchObject({ code: 'RATE_CHANGED', status: 'refused', sent: false, pending_attempt_id: hanging.plan.attempt_id });
+    expect(row(hanging.plan.attempt_id)).toMatchObject({ status: 'unknown', sent: 1, reason: 'NO_CLEAR_ANSWER', superseded_from: null });
+    expect(row(replacement.data.attempt_id)).toMatchObject({ status: 'refused', sent: 0, reason: 'RATE_CHANGED' });
+    expect((await quote({ amount: '3.00' })).data.code).toBe('CARD_PAYMENT_PENDING');
+    db.prepare('DELETE FROM kind_38888').run();
+    store38888('0.256');
+    expect((await resend(hanging.plan.attempt_id)).data).toMatchObject({ resend: 'accepted', status: 'sent' });
+    expect(chain.broadcasts).toEqual([hanging.s.raw, hanging.s.raw]);
+  });
+
+  it('a payment every server refused after sending is put back as refused, sent = 1, with its reason', async () => {
+    const refused = await refusedAfterSending();
+    const replacement = await quote({ sale_id: refused.plan.sale_id });
+    registrar.set(SHOP_WALLET, 'down');
+    const r = await submit(replacement.data.plan, sign(replacement.data.plan));
+    expect(r.data).toMatchObject({ code: 'REGISTRAR_UNAVAILABLE', status: 'refused', sent: false, pending_attempt_id: refused.plan.attempt_id });
+    expect(row(refused.plan.attempt_id)).toMatchObject({ status: 'refused', sent: 1, reason: 'BROADCAST_REFUSED' });
+  });
+
+  it('a replacement cut off by a crash while it was checked: the sweep refuses it and puts back what it replaced', async () => {
+    const hanging = await hangingPayment();
+    const replacement = await quote({ sale_id: hanging.plan.sale_id });
+    const s = sign(replacement.data.plan);
+    const began = beginValidating(db, row(replacement.data.attempt_id), { txid: s.txid, raw: s.raw, record: s.record, record_id: s.record.id }, Math.floor(nowMs / 1000));
+    expect(began.ok).toBe(true);
+    expect(row(hanging.plan.attempt_id).status).toBe('superseded');
+    nowMs += 301_000;
+    await runDirectLanaWorker(db, deps as DirectLanaDeps);
+    expect(row(replacement.data.attempt_id)).toMatchObject({ status: 'refused', sent: 0, reason: 'INTERRUPTED_BEFORE_SENDING' });
+    expect(row(hanging.plan.attempt_id)).toMatchObject({ status: 'unknown', sent: 1, reason: 'NO_CLEAR_ANSWER' });
+    expect(chain.broadcasts.length).toBe(1);
+  });
+
+  it('one the chain has meanwhile put in a block stays paid', async () => {
+    const hanging = await hangingPayment();
+    const replacement = await quote({ sale_id: hanging.plan.sale_id });
+    const s = sign(replacement.data.plan);
+    beginValidating(db, row(replacement.data.attempt_id), { txid: s.txid, raw: s.raw, record: s.record, record_id: s.record.id }, Math.floor(nowMs / 1000));
+    mine(hanging.s.raw, 301);
+    chain.height = 301;
+    await runDirectLanaWorker(db, deps as DirectLanaDeps);
+    expect(row(hanging.plan.attempt_id).status).toBe('paid');
+    expect(refuseBeforeSending(db, replacement.data.attempt_id, 'RATE_CHANGED', Math.floor(nowMs / 1000))).toEqual({ refused: true, restored: [] });
+    expect(row(hanging.plan.attempt_id).status).toBe('paid');
+  });
+});
+
+describe('an answer about an attempt is the whole attempt; a quote past its time is final (review)', () => {
+  it('a quote that ran out at its submit: the whole attempt, expired, nothing sent', async () => {
+    const q = await quote();
+    nowMs += 121_000;
+    const r = await submit(q.data.plan, sign(q.data.plan));
+    expect(r.status).toBe(409);
+    expect(r.data).toMatchObject({
+      code: 'QUOTE_EXPIRED', attempt_id: q.data.attempt_id, status: 'expired', sent: false,
+      currency: 'EUR', invoice_cents: '1000', margin_percent: 10, pay_cents: '1100', amount_lanoshi: '4296875000',
+    });
+    expect(typeof r.data.fee_lanoshi).toBe('string');
+    expect(chain.broadcasts).toEqual([]);
+  });
+
+  it('a quote asked about after its time is expired at once: the till learns that nothing was sent', async () => {
+    const q = await quote();
+    const s = sign(q.data.plan);
+    expect((await get(`/api/direct-lana/sales/${q.data.attempt_id}`)).data.status).toBe('quoted');
+    nowMs += 121_000;
+    const asked = await get(`/api/direct-lana/sales/${q.data.attempt_id}`);
+    expect(asked.data).toMatchObject({ status: 'expired', reason: 'QUOTE_EXPIRED', sent: false });
+    expect(row(q.data.attempt_id).status).toBe('expired');
+    // A submit arriving later is refused.
+    expect((await submit(q.data.plan, s)).status).toBe(409);
+    expect(chain.broadcasts).toEqual([]);
+  });
+});
+
+describe('only exactly a unit without a company takes LANA directly (review: one "none" among other tags opened the path)', () => {
+  const cases: Array<[string, string[][]]> = [
+    ['two payout_account tags, "bank" and "none"', [['payout_account', 'bank'], ...OPTION_C]],
+    ['a company unit that also signs payout_account none', [...OPTION_C.filter(t => t[0] !== 'lanapays_payout_method'),
+      ['receiver_type', 'company'], ['receiver_name', 'Podjetje d.o.o.'], ['payment_scheme', 'iban'],
+      ['payment_scheme_fields', '{"iban":"SI56191000000123438"}'], ['lanapays_payout_method', 'fiat'], ['online_shop', 'true']]],
+    ['its reward method fiat', [...OPTION_C.filter(t => t[0] !== 'lanapays_payout_method'), ['lanapays_payout_method', 'fiat']]],
+    ['no reward method at all', OPTION_C.filter(t => t[0] !== 'lanapays_payout_method')],
+    ['a bank account beside it', [...OPTION_C, ['bank_account', 'SI56191000000123438']]],
+    ['a receiver named beside it', [...OPTION_C, ['receiver_name', 'Janez Novak s.p.']]],
+    ['an online shop', [...OPTION_C, ['online_shop', 'true']]],
+  ];
+  for (const [label, tags] of cases) {
+    it(`${label}: UNIT_NOT_DIRECT, nothing asked of the register or the chain`, async () => {
+      setUnitEvent(tags);
+      expect((await get(`/api/direct-lana/price?unit_id=${UNIT}&amount=10.00`)).data.code).toBe('UNIT_NOT_DIRECT');
+      const q = await quote();
+      expect(q.status).toBe(409);
+      expect(q.data.code).toBe('UNIT_NOT_DIRECT');
+      expect(registrarAsked).toEqual([]);
+      expect(chain.reads).toBe(0);
+      expect(directLanaView(db, unitRow(db, UNIT), { pubkey: hexOfKey(PARAMS) })).toEqual({ enabled: false, reason: 'UNIT_NOT_DIRECT' });
+    });
+  }
+
+  it('the shop\'s own form, with the place of sale and online_shop "false": takes LANA directly', async () => {
+    setUnitEvent([...OPTION_C, ['receiver_address', 'Glavna 1'], ['receiver_zip', '1000'], ['receiver_city', 'Ljubljana'],
+      ['receiver_country', 'SI'], ['online_shop', 'false'], ['online_shop_shipping_fee', '0.00'], ['online_shop_pickup', 'false']]);
+    expect((await quote()).status).toBe(200);
+  });
+});
+
+describe('KIND 87058 at the quote and between the quote and the submit (review: nothing pinned these)', () => {
+  it('at the quote: the owner (the shop stops) and the staff member selling; nothing kept', async () => {
+    exclude(OWNER_HEX);
+    const owner = await quote();
+    expect(owner.status).toBe(403);
+    expect(owner.data.code).toBe('MERCHANT_UNAVAILABLE');
+    db.prepare('DELETE FROM person_exclusions').run();
+    exclude(hexOfKey(STAFF));
+    const staff = await asStaff();
+    expect(staff.status).toBe(403);
+    expect(staff.data.code).toBe('PERSON_EXCLUDED');
+    expect(journalSize()).toBe(0);
+    expect(chain.broadcasts).toEqual([]);
+  });
+
+  const between: Array<[string, () => string, string, string]> = [
+    ['the owner', () => OWNER_HEX, 'MERCHANT_UNAVAILABLE', 'quoted'],
+    ['the card', () => hexOfKey(CARD), 'PERSON_EXCLUDED', 'quoted'],
+    ['the card\'s registrar owner', () => CUSTOMER_HEX, 'PERSON_EXCLUDED', 'refused'],
+  ];
+  for (const [label, who, code, kept] of between) {
+    it(`decided against ${label} between the quote and the submit: 403, nothing sent`, async () => {
+      const q = await quote();
+      exclude(who());
+      const r = await submit(q.data.plan, sign(q.data.plan));
+      expect(r.status).toBe(403);
+      expect(r.data.code).toBe(code);
+      expect(chain.broadcasts).toEqual([]);
+      expect(row(q.data.attempt_id)).toMatchObject({ status: kept, sent: 0 });
+    });
+  }
+
+  it('decided against the staff member selling between the quote and the submit: 403, nothing sent', async () => {
+    const q = await asStaff();
+    expect(q.status, JSON.stringify(q.data)).toBe(200);
+    exclude(hexOfKey(STAFF));
+    const s = sign(q.data.plan);
+    const r = await post('/api/direct-lana/submit', { attempt_id: q.data.attempt_id, raw: s.raw, record: s.record }, STAFF);
+    expect(r.status).toBe(403);
+    expect(r.data.code).toBe('PERSON_EXCLUDED');
+    expect(chain.broadcasts).toEqual([]);
+  });
+});
+
+describe('the shop and the card between the quote and the submit (review: nothing pinned these)', () => {
+  const cases: Array<[string, () => void, string]> = [
+    ['the switch turned off', () => setSwitch(''), 'DIRECT_LANA_OFF'],
+    ['the shop re-signed as a company unit', () => setUnitEvent([['receiver_type', 'company'], ['lanapays_payout_wallet', SHOP_WALLET]]), 'UNIT_NOT_DIRECT'],
+    ['the shop suspended', () => db.prepare("UPDATE business_units SET suspension_status = 'suspended' WHERE unit_id = ?").run(UNIT), 'UNIT_BLOCKED'],
+    ['the shop\'s margin made unreadable', () => setUnitEvent([...OPTION_C.filter(t => t[0] !== 'margin_percent'), ['margin_percent', '25']]), 'MARGIN_INVALID'],
+  ];
+  for (const [label, change, code] of cases) {
+    it(`${label}: refused with ${code}, sent = 0, nothing sent`, async () => {
+      const q = await quote();
+      change();
+      const r = await submit(q.data.plan, sign(q.data.plan));
+      expect(r.data).toMatchObject({ code, status: 'refused', sent: false });
+      expect(chain.broadcasts).toEqual([]);
+    });
+  }
+
+  it('the register now names the shop\'s owner as the card\'s owner: SELF_PAYMENT, nothing sent', async () => {
+    const q = await quote();
+    registrar.set(CARD_ADDRESS, wallet('Main Wallet', OWNER_HEX));
+    const r = await submit(q.data.plan, sign(q.data.plan));
+    expect(r.data).toMatchObject({ code: 'SELF_PAYMENT', status: 'refused', sent: false });
+    expect(chain.broadcasts).toEqual([]);
+  });
+
+  it('a card whose key is the owner\'s (another address, the register naming someone else): SELF_PAYMENT at the quote', async () => {
+    const ownerCard = wifOf(OWNER, false);
+    const address = addressOfKey(OWNER, false);
+    expect(address).not.toBe(SHOP_WALLET);
+    fund(address, [10_000_000_000n]);
+    registrar.set(address, wallet('Wallet', CUSTOMER_HEX));
+    const q = await post('/api/direct-lana/quote', { unit_id: UNIT, amount: '10.00', currency: 'EUR', public_key: readCardKey(ownerCard).publicKey });
+    expect(q.data.code).toBe('SELF_PAYMENT');
+    expect(chain.reads).toBe(0);
+    expect(journalSize()).toBe(0);
+  });
+
+  it('a spend of the card waiting for a block, at the quote: CHAIN_PENDING, nothing kept', async () => {
+    addr(CARD_ADDRESS).pending = -1_000n;
+    expect((await quote()).data.code).toBe('CHAIN_PENDING');
+    expect(journalSize()).toBe(0);
+  });
+
+  it('a spend of the card waiting for a block, between the quote and the submit: CHAIN_PENDING, nothing sent', async () => {
+    const q = await quote();
+    addr(CARD_ADDRESS).pending = -1_000n;
+    const r = await submit(q.data.plan, sign(q.data.plan));
+    expect(r.data).toMatchObject({ code: 'CHAIN_PENDING', status: 'refused', sent: false });
+    expect(chain.broadcasts).toEqual([]);
+  });
+
+  it('a block arriving between the submit\'s last read and its broadcast: WALLET_STATE_CHANGED, nothing sent', async () => {
+    const q = await quote();
+    chain.tipMoves = true;
+    const r = await submit(q.data.plan, sign(q.data.plan));
+    expect(r.data).toMatchObject({ code: 'WALLET_STATE_CHANGED', status: 'refused', sent: false });
+    expect(chain.broadcasts).toEqual([]);
+  });
+});
+
+describe('a crash in the middle of a submit is put right by the sweep, never by guessing (review: nothing pinned this)', () => {
+  async function stuck(status: 'validating' | 'broadcasting') {
+    const q = await quote();
+    const s = sign(q.data.plan);
+    const now = Math.floor(nowMs / 1000);
+    expect(beginValidating(db, row(q.data.attempt_id), { txid: s.txid, raw: s.raw, record: s.record, record_id: s.record.id }, now).ok).toBe(true);
+    if (status === 'broadcasting') expect(move(db, q.data.attempt_id, ['validating'], 'broadcasting', now, { sent: 1 })).toBe(true);
+    return q.data.attempt_id as string;
+  }
+
+  it('left "broadcasting" over 300 s: unknown, sent = 1, and the card still held (the bytes may have reached a server)', async () => {
+    const id = await stuck('broadcasting');
+    nowMs += 299_000;
+    await runDirectLanaWorker(db, deps as DirectLanaDeps);
+    expect(row(id).status).toBe('broadcasting');
+    nowMs += 2_000;
+    await runDirectLanaWorker(db, deps as DirectLanaDeps);
+    expect(row(id)).toMatchObject({ status: 'unknown', sent: 1, reason: 'INTERRUPTED_WHILE_SENDING' });
+    expect((await quote({ amount: '3.00' })).data.code).toBe('CARD_PAYMENT_PENDING');
+  });
+
+  it('left "validating" over 300 s: refused, sent = 0, and the card free again (nothing reached a server)', async () => {
+    const id = await stuck('validating');
+    nowMs += 301_000;
+    await runDirectLanaWorker(db, deps as DirectLanaDeps);
+    expect(row(id)).toMatchObject({ status: 'refused', sent: 0, reason: 'INTERRUPTED_BEFORE_SENDING' });
+    expect((await quote({ amount: '3.00' })).status).toBe(200);
+  });
+
+  it('a "sent" payment both servers dropped, with a coin spent by another payment not yet 6 deep: still sent, however long', async () => {
+    const { plan, s } = await paySent();
+    expect(row(plan.attempt_id).status).toBe('sent');
+    // Both servers dropped it: its coin is unspent again for them, it waits for nothing.
+    chain.mempool.delete(s.txid);
+    const a = addr(CARD_ADDRESS);
+    a.history = a.history.filter(h => h.txid !== s.txid);
+    a.utxos.push(...plan.inputs.map(i => ({ txid: i.txid, vout: i.vout, value: i.value, height: i.height })));
+    a.pending = 0n;
+    // The customer spent the same coin elsewhere, in block 301; the tip is 302 (2 deep).
+    const other = signDirectSale(readCardKey(wifOf(CARD)), { ...plan, recipient: CARD2_ADDRESS, attempt_id: `dla_${'7'.repeat(32)}` });
+    mine(other.raw, 301);
+    chain.height = 302;
+    nowMs += 3_600_000;
+    await runDirectLanaWorker(db, deps as DirectLanaDeps);
+    expect(row(plan.attempt_id).status).toBe('sent');
   });
 });

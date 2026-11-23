@@ -12,7 +12,10 @@
  *   sent         → paid | failed | unknown (lost from both servers, coins unspent)
  *   unknown      → sent | paid | failed | superseded
  *   refused      → sent | paid | failed | superseded   (only when sent = 1)
- *   superseded   → paid | failed
+ *   superseded   → paid | failed, or back to what it was (unknown, or refused
+ *                  with sent = 1) when its replacement is refused before it was
+ *                  sent (refuseBeforeSending): a payment that never left
+ *                  replaces nothing
  *   paid, failed, expired, refused with sent = 0: final
  */
 import type Database from 'better-sqlite3';
@@ -48,6 +51,8 @@ export interface DirectRow {
   description: string;
   plan_json: string;
   replaces_json: string;
+  /** What a superseded attempt was before (JSON {status, reason}); null otherwise. */
+  superseded_from: string | null;
   txid: string | null;
   raw_tx: string | null;
   record_json: string | null;
@@ -145,6 +150,9 @@ export function insertQuote(db: Database.Database, a: NewAttempt, nowSec: number
   })();
 }
 
+/** The attempt was no longer 'quoted' when it was to move: the whole move is undone. */
+class NotQuoted extends Error {}
+
 /** Why a move into 'validating' could not be made. */
 export type ValidatingRefusal =
   | 'NOT_QUOTED' | 'CARD_PAYMENT_PENDING' | 'SALE_PAYMENT_PENDING' | 'SALE_ALREADY_PAID' | 'INVOICE_USED' | 'TXID_CONFLICT';
@@ -170,7 +178,10 @@ export function replacesOf(row: Pick<DirectRow, 'replaces_json'>): string[] {
  * attempt it lists in `replaces`. Here, every OTHER attempt from the same card
  * or of the same sale that may still be mined must be in that list, or nothing
  * moves; one that is 'sent' (or on its way) is never replaced: the card waits
- * for its block. The replaced ones become 'superseded' in the same transaction.
+ * for its block. The replaced ones become 'superseded' in the same transaction,
+ * and keep what they were (superseded_from): the checks that follow may still
+ * refuse the replacement before anything is sent, and then they are put back
+ * (refuseBeforeSending), because they may still be mined.
  * The unique indexes refuse a second unresolved payment of the card or of the
  * sale, and a txid stored twice, even if two requests race here.
  */
@@ -202,24 +213,79 @@ export function beginValidating(
         }
       }
       for (const id of replaces) {
-        db.prepare(`UPDATE direct_lana_sales SET status = 'superseded', reason = ?, status_at = ?, updated_at = datetime('now')
-          WHERE id = ? AND (status = 'unknown' OR (status = 'refused' AND sent = 1))`).run(`SUPERSEDED_BY ${row.id}`, nowSec, id);
+        // superseded_from is written from the row as it was (SQLite reads the
+        // old values for every expression of one UPDATE).
+        db.prepare(`UPDATE direct_lana_sales SET superseded_from = json_object('status', status, 'reason', reason),
+            status = 'superseded', reason = ?, status_at = ?, updated_at = datetime('now')
+          WHERE id = ? AND (status = 'unknown' OR (status = 'refused' AND sent = 1))`).run(supersededBy(row.id), nowSec, id);
       }
       const moved = db.prepare(`
         UPDATE direct_lana_sales SET status = 'validating', txid = ?, raw_tx = ?, record_json = ?, record_id = ?,
           status_at = ?, updated_at = datetime('now')
         WHERE id = ? AND status = 'quoted'
       `).run(signed.txid, signed.raw, JSON.stringify(signed.record), signed.record_id, nowSec, row.id);
-      if (moved.changes !== 1) return { ok: false, why: 'NOT_QUOTED' };
+      // Thrown, not returned: the attempts superseded above must not stay so.
+      if (moved.changes !== 1) throw new NotQuoted();
       return { ok: true };
     })();
   } catch (e: any) {
+    if (e instanceof NotQuoted) return { ok: false, why: 'NOT_QUOTED' };
     const text = String(e?.message || e);
     if (!/UNIQUE/i.test(text)) throw e;
     if (/txid/i.test(text)) return { ok: false, why: 'TXID_CONFLICT' };
     if (/payer_address/i.test(text)) return { ok: false, why: 'CARD_PAYMENT_PENDING' };
     return { ok: false, why: 'SALE_PAYMENT_PENDING' };
   }
+}
+
+/** The reason a replaced attempt carries: the till reads the id of its replacement from it. */
+export const supersededBy = (replacementId: string) => `SUPERSEDED_BY ${replacementId}`;
+
+/**
+ * An attempt that never left is refused (validating → refused, sent = 0), and
+ * every attempt it was to replace is put back as it was (unknown, or refused
+ * with sent = 1), in ONE transaction. A payment that was never sent replaces
+ * nothing: the one it would have replaced may still be mined, so its journal
+ * row must say so again (and it may be sent again). Only rows still superseded
+ * by exactly this attempt are touched; one the sweep has meanwhile found in a
+ * block (paid) or spent for good (failed) stays as it is.
+ *
+ * `restored`: the attempts put back.
+ */
+export function refuseBeforeSending(
+  db: Database.Database,
+  id: string,
+  code: string,
+  nowSec: number,
+): { refused: boolean; restored: string[] } {
+  return db.transaction(() => {
+    if (!move(db, id, ['validating'], 'refused', nowSec, { reason: code, sent: 0 })) return { refused: false, restored: [] };
+    const row = db.prepare('SELECT replaces_json FROM direct_lana_sales WHERE id = ?').get(id) as Pick<DirectRow, 'replaces_json'> | undefined;
+    const restored: string[] = [];
+    for (const old of row ? replacesOf(row) : []) {
+      const was = db.prepare(`SELECT superseded_from FROM direct_lana_sales WHERE id = ? AND status = 'superseded' AND reason = ?`)
+        .get(old, supersededBy(id)) as { superseded_from: string | null } | undefined;
+      if (!was) continue;
+      let prev: any = null;
+      try { prev = JSON.parse(was.superseded_from || 'null'); } catch { prev = null; }
+      // Only ever back to a status in which it may still be mined (it was one).
+      const status: DirectStatus = prev?.status === 'refused' ? 'refused' : 'unknown';
+      const reason = typeof prev?.reason === 'string' ? prev.reason : 'NO_CLEAR_ANSWER';
+      try {
+        // Its own savepoint: if putting one back fails, it stays superseded
+        // (still holding the card, still settled by the chain) and the
+        // refusal of the replacement stands.
+        const put = db.transaction(() => db.prepare(`
+          UPDATE direct_lana_sales SET status = ?, reason = ?, superseded_from = NULL, status_at = ?, updated_at = datetime('now')
+          WHERE id = ? AND status = 'superseded' AND reason = ? AND sent = 1
+        `).run(status, reason, nowSec, old, supersededBy(id)).changes)();
+        if (put === 1) restored.push(old);
+      } catch (e: any) {
+        console.error(`[direct-lana] ALERT attempt ${old} stays superseded by ${id}, which was never sent (${e?.message || e}): it may still be mined`);
+      }
+    }
+    return { refused: true, restored };
+  })();
 }
 
 /** One guarded move. True when this call made it. */

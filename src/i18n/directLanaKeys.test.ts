@@ -49,7 +49,8 @@ function everyCode(): string[] {
   const block = server.slice(server.indexOf('const WORDS'), server.indexOf('};', server.indexOf('const WORDS')));
   const fromServer = [...block.matchAll(/^\s+([A-Z_]+):/gm)].map(m => m[1]);
   const fromTill = ['CARD_ADDRESS_NOT_KEY', 'CARD_NOSTR_KEY', 'CARD_KEY_INVALID', 'CARD_MISMATCH', 'PLAN_RECIPIENT_CHANGED',
-    'PLAN_AMOUNTS_CHANGED', 'PLAN_INPUT_MISMATCH', 'DEVICE_CLOCK', 'SIGNATURE_FAILED', 'NETWORK', 'GENERIC', 'SELLER_CHECK_FAILED'];
+    'PLAN_AMOUNTS_CHANGED', 'PLAN_INPUT_MISMATCH', 'DEVICE_CLOCK', 'SIGNATURE_FAILED', 'NETWORK', 'GENERIC', 'SELLER_CHECK_FAILED',
+    'NOT_RECEIVED', 'RESEND_REFUSED_BY_NETWORK', 'PREVIOUS_PAYMENT_PENDING'];
   return [...new Set([...fromServer, ...fromTill])];
 }
 
@@ -80,7 +81,7 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
   const keys = Object.keys(EN).filter(k => k.startsWith('directLana.'));
 
   it('has every key, translated, with the placeholders of English', () => {
-    expect(keys.length).toBe(85);
+    expect(keys.length).toBe(95);
     for (const key of keys) {
       expect(typeof strings[key], `${name} is missing ${key}`).toBe('string');
       expect(strings[key].trim().length, `${name}:${key} is empty`).toBeGreaterThan(0);
@@ -119,5 +120,40 @@ describe('Slovenian, as Brilly wrote it (SPEC §4)', () => {
     expect(SL['directLana.recordLater']).toBe('Javni zapis bo objavljen po potrditvi');
     expect(SL['directLana.unknownText']).toBe('Plačilo se preverja (običajno nekaj minut). Ne vzemi drugega plačila.');
     expect(SL['directLana.refused']).toBe('LANA niso bile poslane: {{reason}}');
+  });
+});
+
+describe('review fixes (23 Nov 2026): the words agree with what the till offers, in plain words', () => {
+  const DIRECT = (strings: Record<string, string>) => Object.keys(strings).filter(k => k.startsWith('directLana.'));
+
+  it('a changed shop wallet is its own reason: try again, nothing to fix', () => {
+    expect(directReasonKey('WALLET_CHANGED')).toEqual({ key: 'directLana.reason.WALLET_CHANGED', sentence: false });
+    expect(SL['directLana.reason.WALLET_CHANGED']).toBe('denarnica trgovine se je vmes spremenila. Poskusi znova.');
+    expect(EN['directLana.reason.WALLET_CHANGED']).not.toContain('shop.lanapays.us');
+  });
+
+  it('"pay again with the same card" is said not to be a second payment', () => {
+    expect(SL['directLana.payAgainHint']).toBe('To ni drugo plačilo: porabi isti denar s kartice kot prejšnje, zato se lahko izvede samo eno od obeh.');
+    expect(SL['directLana.unknownNoSecond']).toBe('Ne vzemi gotovine in ne skeniraj druge kartice.');
+  });
+
+  it('a payment refused AFTER it was sent, a re-send refused, a previous payment still checked: never "LANA were not sent"', () => {
+    for (const k of ['directLana.refusedSentText', 'directLana.resendRefused', 'directLana.resendRefusedByNetwork', 'directLana.previousStillChecked']) {
+      expect(SL[k], k).not.toMatch(/niso bile poslane/);
+      expect(EN[k], k).not.toMatch(/were not sent/);
+    }
+    expect(directReasonKey('RESEND_REFUSED_BY_NETWORK').sentence).toBe(true);
+    expect(directReasonKey('PREVIOUS_PAYMENT_PENDING').sentence).toBe(true);
+  });
+
+  it.each(Object.keys(LOCALES))('%s: no "coins" and no "merge" in the till\'s direct-LANA words', (name) => {
+    const strings = LOCALES[name];
+    const words = DIRECT(strings).map(k => strings[k]).join(' | ');
+    const forbidden: Record<string, RegExp> = {
+      en: /\bcoins?\b|\bmerge/i, sl: /kovanc|združi/i, de: /\bCoins?\b|zusammen/i, es: /monedas|combín/i, hr: /kovanic|spojite/i,
+      hu: /érm|vonja össze/i, it: /monete|unisci/i, pl: /monet|je połącz/i, pt: /moedas|junte-as/i, ru: /монет|объедин/i,
+      sr: /novčić|spojite/i, zh: /的币|合并/,
+    };
+    expect(words).not.toMatch(forbidden[name]);
   });
 });

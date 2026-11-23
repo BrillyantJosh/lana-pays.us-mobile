@@ -48,6 +48,11 @@ const UNIT = '8d20dd51c92f4f0ba003d33e66e23d3f';
 
 /** What the stub brain answers instead of a sale, once; null = a sale like the brain makes it. */
 let refusal: { status: number; body: any } | null;
+/** The next sale is recorded by the stub brain, but its answer is lost (502). */
+let recordThenLose = false;
+/** What POST /api/cash-sale-recorded answers: the stub brain's own book, or "cannot tell". */
+let recordedCheck: 'brain' | 'down' = 'brain';
+let recordedCalls: any[] = [];
 let purchaseCalls: any[] = [];
 let saleNumberCalls: Array<{ body: any; headers: Record<string, string> }> = [];
 let dedupCalls: any[] = [];
@@ -65,6 +70,11 @@ beforeEach(async () => {
   saleNumberCalls = [];
   dedupCalls = [];
   refusal = null;
+  recordThenLose = false;
+  recordedCheck = 'brain';
+  recordedCalls = [];
+  // A sale kept by an earlier test must not come back in this one.
+  try { localStorage.clear(); } catch { /* no storage */ }
   saleNumberAnswer = null;
   nextSaleNumber = 1;
   usedInvoices = new Set();
@@ -88,6 +98,12 @@ beforeEach(async () => {
       dedupCalls.push(JSON.parse(init.body));
       return json(200, { duplicate: false });
     }
+    if (url.startsWith('/api/cash-sale-recorded')) {
+      const body = JSON.parse(init.body);
+      recordedCalls.push(body);
+      if (recordedCheck === 'down') return json(503, { success: false, code: 'BRAIN_UNAVAILABLE' });
+      return json(200, { success: true, recorded: usedInvoices.has(body.invoice_number) });
+    }
     if (url.startsWith('/api/brain/purchase')) {
       const body = JSON.parse(init.body);
       purchaseCalls.push(body);
@@ -96,6 +112,10 @@ beforeEach(async () => {
         return json(409, { success: false, error: 'DUPLICATE_INVOICE', original_created_at: '2026-11-23 08:00:00' });
       }
       usedInvoices.add(body.invoice_number);
+      if (recordThenLose) {
+        recordThenLose = false;
+        return json(502, { success: false, error: 'Failed to reach Brain service' });
+      }
       return json(200, { success: true, data: { transaction_id: `t${purchaseCalls.length}` } });
     }
     if (url.startsWith('/api/check-wallet')) {
@@ -206,21 +226,25 @@ describe('the sale of a shop without a company', () => {
     expect(purchaseCalls[1].invoice_number).toBe('jajca (#1, 23.11.2026)');
   });
 
-  it('a refused text goes back to the description, keeps its number, and waits until the description changes', async () => {
+  it('the brain says its text is already used: THIS sale is already recorded; it is never sent again under other words', async () => {
+    // (Review, 23 Nov 2026: the till used to ask for other words with the same
+    // number, and so recorded one cash sale twice.)
     await toSaleStep();
     fill('jajca');
     refusal = { status: 409, body: { success: false, error: 'DUPLICATE_INVOICE', original_created_at: '2026-11-23 08:00:00' } };
     await scanAndPay(1);
 
-    await screen.findByText(i18n.t('cash.noCompanyInvoiceTitle'));
-    expect(screen.getByRole('button', { name: i18n.t('cash.scanCustomerWallet') })).toBeDisabled();
+    const box = await screen.findByTestId('cash-sale-recorded');
+    expect(box).toHaveTextContent(i18n.t('cash.saleAlreadyRecorded', { number: 1, description: 'jajca' }));
+    expect(screen.queryByText(i18n.t('cash.scanCustomerWallet'))).not.toBeInTheDocument();
 
-    fill('jajca, 6 kosov');
-    expect(screen.getByRole('button', { name: i18n.t('cash.scanCustomerWallet') })).toBeEnabled();
+    // Done with: the next sale is a new one, with a new number.
+    fireEvent.click(screen.getByText(i18n.t('common.newPayment')));
+    fireEvent.click(await screen.findByText(i18n.t('cash.noCompanySkipPhoto')));
+    await screen.findByText(i18n.t('cash.scanCustomerWallet'));
+    fill('kruh');
     await scanAndPay(2);
-
-    expect(saleNumberCalls).toHaveLength(1);
-    expect(purchaseCalls[1].invoice_number).toBe('jajca, 6 kosov (#1, 23.11.2026)');
+    expect(purchaseCalls[1].invoice_number).toBe('kruh (#2, 23.11.2026)');
   });
 
   it('two quick taps on "Scan" ask for ONE number: one sale never holds two', async () => {
@@ -341,5 +365,123 @@ describe('every other shop: the cash sale is exactly as before', () => {
     await scanAndPay(1);
     expect(purchaseCalls[0].invoice_number).toBe('INV-1');
     expect(saleNumberCalls).toEqual([]);
+  });
+});
+
+describe('a sale whose answer was lost is never recorded twice (review, 23 Nov 2026)', () => {
+  /** The first try: the brain records "jajca (#1, …)", the answer is lost; then the tab closes. */
+  async function lostAnswerThenLeave() {
+    await toSaleStep();
+    fill('jajca', '9,10');
+    recordThenLose = true;
+    await scanAndPay(1);
+    await screen.findByText(i18n.t('common.scanAgain'));
+    expect(usedInvoices).toEqual(new Set(['jajca (#1, 23.11.2026)']));
+    cleanup(); // home screen, a reload, or a phone that dropped the tab
+  }
+
+  it('back on the till, the brain is asked first: it has the sale, so the till says so and sends nothing', async () => {
+    await lostAnswerThenLeave();
+    render(<CashTab unitCurrency="EUR" unitId={UNIT} noCompany />);
+    const box = await screen.findByTestId('cash-sale-recorded');
+    expect(box).toHaveTextContent(i18n.t('cash.saleAlreadyRecorded', { number: 1, description: 'jajca' }));
+    expect(recordedCalls).toEqual([{ unit_id: UNIT, staff_hex: SELLER, invoice_number: 'jajca (#1, 23.11.2026)' }]);
+    expect(purchaseCalls).toHaveLength(1);
+    expect(saleNumberCalls).toHaveLength(1);
+    // Forgotten once settled: the next visit starts a new sale.
+    cleanup();
+    render(<CashTab unitCurrency="EUR" unitId={UNIT} noCompany />);
+    expect(await screen.findByText(i18n.t('cash.noCompanySkipPhoto'))).toBeInTheDocument();
+    expect(recordedCalls).toHaveLength(1);
+  });
+
+  it('the brain cannot be asked: the SAME sale comes back, its words fixed; the brain refuses it as already recorded', async () => {
+    await lostAnswerThenLeave();
+    recordedCheck = 'down';
+    render(<CashTab unitCurrency="EUR" unitId={UNIT} noCompany />);
+    expect(await screen.findByTestId('cash-sale-pending')).toHaveTextContent(i18n.t('cash.salePendingUnknown', { number: 1, description: 'jajca' }));
+    const field = screen.getByLabelText(/What did you sell\?/) as HTMLInputElement;
+    expect(field.value).toBe('jajca');
+    expect(field.readOnly).toBe(true);
+    // Typing other words changes nothing: it is the sale that was sent.
+    fireEvent.change(field, { target: { value: 'Jajca, 10 kosov' } });
+    expect((screen.getByLabelText(/What did you sell\?/) as HTMLInputElement).value).toBe('jajca');
+    await scanAndPay(2);
+    expect(purchaseCalls[1].invoice_number).toBe('jajca (#1, 23.11.2026)');
+    expect(await screen.findByTestId('cash-sale-recorded')).toBeInTheDocument();
+    // One sale, one record: the second try was refused, and no new number was asked.
+    expect(usedInvoices.size).toBe(1);
+    expect(saleNumberCalls).toHaveLength(1);
+  });
+
+  it('the brain does not have it: the same number goes on, and its words may change', async () => {
+    await toSaleStep();
+    fill('jajca', '9,10');
+    refusal = { status: 502, body: { success: false, error: 'Failed to reach Brain service' } };
+    await scanAndPay(1);
+    await screen.findByText(i18n.t('common.scanAgain'));
+    cleanup();
+
+    render(<CashTab unitCurrency="EUR" unitId={UNIT} noCompany />);
+    expect(await screen.findByTestId('cash-sale-pending')).toHaveTextContent(i18n.t('cash.salePendingNotRecorded', { number: 1, description: 'jajca' }));
+    const field = screen.getByLabelText(/What did you sell\?/) as HTMLInputElement;
+    expect(field.readOnly).toBe(false);
+    fill('jajca, 6 kosov', '5,40');
+    await scanAndPay(2);
+    expect(purchaseCalls[1]).toMatchObject({ invoice_number: 'jajca, 6 kosov (#1, 23.11.2026)', amount: 5.4 });
+    await screen.findByText(i18n.t('cash.confirmedTitle'));
+    expect(saleNumberCalls).toHaveLength(1);
+  });
+
+  it('dropping a kept sale asks the brain first: a sale it has can never be dropped and sold again', async () => {
+    await lostAnswerThenLeave();
+    recordedCheck = 'down';
+    render(<CashTab unitCurrency="EUR" unitId={UNIT} noCompany />);
+    await screen.findByTestId('cash-sale-pending');
+    // Cannot tell: it stays, and the seller is told why.
+    fireEvent.click(screen.getByTestId('cash-sale-discard'));
+    expect(await screen.findByText(i18n.t('cash.saleDiscardUnknown'))).toBeInTheDocument();
+    expect((screen.getByLabelText(/What did you sell\?/) as HTMLInputElement).readOnly).toBe(true);
+    // The brain answers: it has it.
+    recordedCheck = 'brain';
+    fireEvent.click(screen.getByTestId('cash-sale-discard'));
+    expect(await screen.findByTestId('cash-sale-recorded')).toBeInTheDocument();
+    expect(purchaseCalls).toHaveLength(1);
+  });
+
+  it('a kept sale the brain does not have may be dropped: the next sale gets a new number', async () => {
+    await toSaleStep();
+    fill('jajca');
+    refusal = { status: 403, body: { success: false, error: 'SPLIT_HAPPENING' } };
+    await scanAndPay(1);
+    cleanup();
+    recordedCheck = 'down';
+    render(<CashTab unitCurrency="EUR" unitId={UNIT} noCompany />);
+    await screen.findByTestId('cash-sale-pending');
+    recordedCheck = 'brain';
+    fireEvent.click(screen.getByTestId('cash-sale-discard'));
+    await waitFor(() => expect(screen.queryByTestId('cash-sale-discard')).not.toBeInTheDocument());
+    fill('kruh');
+    await scanAndPay(2);
+    expect(purchaseCalls[1].invoice_number).toBe('kruh (#2, 23.11.2026)');
+  });
+
+  it('every other shop keeps nothing and asks nothing', async () => {
+    await toSaleStep({ noCompany: false });
+    fill('2026-001234');
+    refusal = { status: 502, body: { success: false, error: 'Failed to reach Brain service' } };
+    await scanAndPay(1);
+    cleanup();
+    render(<CashTab unitCurrency="EUR" unitId={UNIT} />);
+    await screen.findByText(i18n.t('cash.skipNoReceipt'));
+    expect(recordedCalls).toEqual([]);
+    const kept: string[] = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('lanapays.cashSale')) kept.push(k);
+      }
+    } catch { /* no storage */ }
+    expect(kept).toEqual([]);
   });
 });

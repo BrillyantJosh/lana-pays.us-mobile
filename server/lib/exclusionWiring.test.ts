@@ -104,6 +104,7 @@ describe('every route that acts in a person\'s name asks the gate', () => {
     ['paymentRequests.ts', paymentsTs, "app.post('/api/pay/:token/preview'"],
     ['paymentRequests.ts', paymentsTs, "app.post('/api/pay/:token/submit'"],
     ['saleNumbers.ts', saleNumbersTs, "app.post('/api/cash-sale-number'"],
+    ['saleNumbers.ts', saleNumbersTs, "app.post('/api/cash-sale-recorded'"],
     ['directLana.ts', directLanaTs, "app.get('/api/direct-lana/price'"],
     ['directLana.ts', directLanaTs, "app.post('/api/direct-lana/quote'"],
     ['directLana.ts', directLanaTs, "app.post('/api/direct-lana/submit'"],

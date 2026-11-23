@@ -62,7 +62,7 @@ import { readDirectParams, type DirectParams } from './lib/directLanaParams.js';
 import { directUnitState, unitRow, type DirectUnit } from './lib/directLanaUnit.js';
 import {
   type DirectRow, getAttempt, attemptsOfSale, heldByCard, invoiceNumberTaken, insertQuote, beginValidating,
-  move, attemptView, planOf, mayStillBeMined,
+  move, attemptView, planOf, mayStillBeMined, refuseBeforeSending, replacesOf,
 } from './lib/directLanaStore.js';
 
 /** Relays that answered OK for this event. */
@@ -86,6 +86,13 @@ const SETTLED_DEPTH = 6;
 const STALE_SECONDS = 300;
 /** A 'sent' payment neither server holds any more, with every coin unspent, after this long: unknown. */
 const LOST_AFTER_SECONDS = 600;
+/**
+ * The identical bytes are sent again only this long after the card signed
+ * them: a re-send is for the customer still at the till. Later the seller pays
+ * again with the same card (a replacement: the card is scanned again, every
+ * check is made afresh, and it spends one of the same coins).
+ */
+export const RESEND_WINDOW_SECONDS = 30 * 60;
 const RELAYS_NEEDED = 3;
 
 /** The seller's words, in English, for a client that prints `error` as it is. A till reads `code`. */
@@ -135,6 +142,7 @@ const WORDS: Record<string, string> = {
   RECORD_INVALID: 'The payment record does not match the payment.',
   BROADCAST_REFUSED: 'The network refused the payment.',
   RESEND_NOT_ALLOWED: 'This payment cannot be sent again.',
+  RESEND_TOO_LATE: 'This payment is too old to send again. Pay again with the same card while the customer is here.',
   PLAN_INVALID: 'The payment could not be prepared.',
   SIGNATURE_REQUIRED: 'This till could not confirm who is selling. Reload the page and try again. If that does not help, sign in again.',
   NOT_ENTITLED: 'This sign-in is not listed as the owner or staff of this shop.',
@@ -525,9 +533,13 @@ export async function runDirectLanaWorker(db: Database.Database, deps: DirectLan
     const nowSec = Math.floor(deps.nowMs() / 1000);
     report.expired = db.prepare(`UPDATE direct_lana_sales SET status = 'expired', reason = 'QUOTE_EXPIRED', status_at = ?, updated_at = datetime('now')
       WHERE status = 'quoted' AND expires_at < ?`).run(nowSec, nowSec).changes;
-    // Validating never reached a server: nothing was sent. Broadcasting may have.
-    report.recovered += db.prepare(`UPDATE direct_lana_sales SET status = 'refused', reason = 'INTERRUPTED_BEFORE_SENDING', status_at = ?, updated_at = datetime('now')
-      WHERE status = 'validating' AND status_at < ?`).run(nowSec, nowSec - STALE_SECONDS).changes;
+    // Validating never reached a server: nothing was sent, and what it was to
+    // replace is put back (lib/directLanaStore.ts refuseBeforeSending).
+    // Broadcasting may have reached one: unknown, the card stays held.
+    const stale = db.prepare(`SELECT id FROM direct_lana_sales WHERE status = 'validating' AND status_at < ?`).all(nowSec - STALE_SECONDS) as Array<{ id: string }>;
+    for (const s of stale) {
+      if (refuseBeforeSending(db, s.id, 'INTERRUPTED_BEFORE_SENDING', nowSec).refused) report.recovered++;
+    }
     report.recovered += db.prepare(`UPDATE direct_lana_sales SET status = 'unknown', sent = 1, reason = 'INTERRUPTED_WHILE_SENDING', status_at = ?, updated_at = datetime('now')
       WHERE status = 'broadcasting' AND status_at < ?`).run(nowSec, nowSec - STALE_SECONDS).changes;
 
@@ -826,7 +838,8 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     }
     if (nowSec() > row.expires_at) {
       move(db, row.id, ['quoted'], 'expired', nowSec(), { reason: 'QUOTE_EXPIRED' });
-      return res.status(409).json(refusal('QUOTE_EXPIRED', { status: 'expired', sent: false, attempt_id: row.id }));
+      // The whole attempt, as every other answer about it: the till shows it.
+      return res.status(409).json(refusal('QUOTE_EXPIRED', attemptView(getAttempt(db, row.id)!)));
     }
     const plan = planOf(row);
     let txid: string;
@@ -847,8 +860,10 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     }
 
     let attempted = false;
+    // Refused before anything was sent: what this attempt was to replace is
+    // put back, since it may still be mined (lib/directLanaStore.ts).
     const refuseNow = (code: string) => {
-      move(db, row.id, ['validating'], 'refused', nowSec(), { reason: code, sent: 0 });
+      refuseBeforeSending(db, row.id, code, nowSec());
       return { code };
     };
     let outcome: { code?: string };
@@ -913,7 +928,11 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     const after = getAttempt(db, row.id)!;
     if (after.status === 'refused') {
       const code = outcome?.code || after.reason || 'BROADCAST_REFUSED';
-      return res.status(statusFor(code)).json(refusal(code, attemptView(after)));
+      // A replacement refused before it left: the payment it was to replace
+      // may still be mined, and the till says so (and shows it).
+      const pending = after.sent === 1 ? undefined
+        : replacesOf(after).map(id => getAttempt(db, id)).find(a => a && mayStillBeMined(a));
+      return res.status(statusFor(code)).json(refusal(code, { ...attemptView(after), ...(pending ? { pending_attempt_id: pending.id } : {}) }));
     }
     res.json({ success: true, ...attemptView(after) });
   });
@@ -931,11 +950,18 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
 
   /** GET /api/direct-lana/sales/:id : one attempt, for the till to poll. */
   app.get('/api/direct-lana/sales/:id', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [unitOfAttempt(db, req.params?.id)] })), (req: Request, res: Response) => {
-    const row = getAttempt(db, req.params.id);
+    let row = getAttempt(db, req.params.id);
     if (!row) return res.status(404).json(refusal('UNKNOWN_SALE'));
     const unit = db.prepare('SELECT owner_hex, authorized_hex FROM business_units WHERE unit_id = ?').get(row.unit_id) || {};
     const who = signedSeller(db, req, unit, nowSec());
     if (!who.ok) return res.status(who.status).json(who.body);
+    // A quote past its time can never be sent any more (the submit refuses it):
+    // made final now rather than at the next sweep, so a till whose submit
+    // never arrived learns for certain that nothing was sent.
+    if (row.status === 'quoted' && nowSec() > row.expires_at) {
+      move(db, row.id, ['quoted'], 'expired', nowSec(), { reason: 'QUOTE_EXPIRED' });
+      row = getAttempt(db, row.id)!;
+    }
     settleSoon(row);
     res.set('Cache-Control', 'no-store');
     res.json({ success: true, ...attemptView(row) });
@@ -944,8 +970,16 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   /**
    * POST /api/direct-lana/sales/:id/resend { attempt_id }
    * The identical signed bytes, again: only when the seller asks for it with the
-   * customer present, never by itself, never a new signature. The card and the
-   * shop's wallet are asked again first.
+   * customer present, never by itself, never a new signature, and only within
+   * RESEND_WINDOW_SECONDS of the card's signature. A payment every server
+   * refused has in effect never been sent, so a re-send is its first: it is
+   * held to every check of a submit, made afresh, in the same order (the shop
+   * and the switch, its wallet and owner, the register for the card and the
+   * shop's wallet, KIND 87058 for the card and its owner as the register names
+   * them NOW, the card's owner not the shop's, the same LANA price, nothing of
+   * the card's waiting for a block, every coin still there). Any doubt refuses
+   * before the bytes go out; the till then offers to pay again with the same
+   * card, which spends one of the same coins.
    */
   app.post('/api/direct-lana/sales/:id/resend', directLimiter, gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [unitOfAttempt(db, req.params?.id)] })), async (req: Request, res: Response) => {
     const row = getAttempt(db, req.params.id);
@@ -956,19 +990,34 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     const resendable = row.raw_tx && row.txid && (row.status === 'sent' || row.status === 'unknown' || (row.status === 'refused' && row.sent === 1));
     if (!resendable) return res.status(409).json(refusal('RESEND_NOT_ALLOWED', attemptView(row)));
     const plan = planOf(row);
+    /** Refused before the bytes go out again; the attempt stays as the chain says. */
+    const no = (code: string) => res.status(statusFor(code)).json(refusal(code, attemptView(getAttempt(db, row.id)!)));
+    if (nowSec() - plan.created_at > RESEND_WINDOW_SECONDS) return no('RESEND_TOO_LATE');
+
+    // The shop as it is now: an active unit of this app, exactly without a
+    // company, the switch on, not pending/suspended/rejected, signed by its
+    // owner, and still paying into the wallet and the owner this plan names.
+    const state = directUnitState(db, unitRow(db, row.unit_id));
+    if (!state.ok) return no(state.code);
+    if (state.unit.wallet !== plan.recipient || state.unit.owner_hex !== plan.recipient_hex) return no('WALLET_CHANGED');
+    let payer: { owner: string; type: string };
     try {
-      checkPayer(await deps.registrar(plan.sender));
+      payer = checkPayer(await deps.registrar(plan.sender));
       const payee = await deps.registrar(plan.recipient);
       notePayee(db, row.unit_id, plan.recipient, payee, nowSec());
       checkPayee(payee, plan.recipient_hex);
     } catch (e) {
-      const code = codeOf(e);
-      return res.status(statusFor(code)).json(refusal(code, attemptView(row)));
+      return no(codeOf(e));
     }
-    const excluded = exclusionAgainst(db, [row.card_hex, row.payer_owner_hex], row.unit_id);
+    // The card, its owner as the register names them now, and the one stored
+    // at the quote (if the register moved the card, both are asked).
+    const excluded = exclusionAgainst(db, [...new Set([row.card_hex, payer.owner, row.payer_owner_hex])], row.unit_id);
     if (excluded) return res.status(excluded.status).json(excluded.body);
-    const p = params(null);
-    if (!p || p.electrum.length < 2) return res.status(503).json(refusal('CHAIN_UNAVAILABLE', attemptView(row)));
+    if (payer.owner === plan.recipient_hex || plan.card_hex === plan.recipient_hex || plan.sender === plan.recipient) return no('SELF_PAYMENT');
+    const p = params(plan.currency);
+    if (!p?.rate) return no('RATE_UNAVAILABLE');
+    if (p.rate !== plan.rate) return no('RATE_CHANGED');
+    if (p.electrum.length < 2) return no('CHAIN_UNAVAILABLE');
     // What this resend found: in a block, waiting for one, taken by a server
     // now, refused by every server again, or no clear answer. The attempt's
     // status says what the chain says; `resend` says what this tap did.
@@ -978,6 +1027,14 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
         const seen = c.snapshot.history.find(h => h.txid === row.txid);
         if (seen && seen.height > 0) { markPaid(db, row, seen.height, nowSec()); return 'in_block' as const; }
         if (seen) { move(db, row.id, ['unknown', 'refused'], 'sent', nowSec(), { reason: null, fromSent: 1 }); return 'waiting' as const; }
+        // As at a submit: nothing else of the card's waiting for a block, and
+        // every coin this payment spends still a confirmed coin, unchanged.
+        if (spendingPending(c.snapshot)) throw new DirectLanaError('CHAIN_PENDING');
+        for (const coin of plan.inputs) {
+          const still = c.snapshot.utxos.some(u => u.txid === coin.txid && u.vout === coin.vout && u.value === coin.value && u.height > 0);
+          if (!still || (await c.raw(coin.txid)) !== coin.raw) throw new DirectLanaError('WALLET_STATE_CHANGED');
+        }
+        if (!(await c.tipUnchanged())) throw new DirectLanaError('WALLET_STATE_CHANGED');
         const answers = await c.broadcast(row.raw_tx!);
         const refusedByAll = answers.length > 0 && answers.every(a => a === 'refused');
         // Refused, yet a server holds exactly these bytes: it had them already.

@@ -123,6 +123,20 @@ describe('a shop without a company whose direct button is on', () => {
     expect(screen.queryByText('LANA-TAB')).not.toBeInTheDocument();
   });
 
+  it('the calm note says the shop also takes LANA directly, only now (Slovenian: the SPEC sentence)', async () => {
+    await i18n.changeLanguage('sl');
+    await open();
+    expect(await screen.findByTestId('no-company-note')).toHaveTextContent('Ta trgovina prodaja za gotovino in sprejema LANE neposredno.');
+  });
+
+  it('a reason the seller can act on: the note says cash only, beside the notice', async () => {
+    units = [noCompany({ enabled: false, reason: 'WALLET_INVALID' })];
+    await i18n.changeLanguage('sl');
+    await open();
+    expect(await screen.findByTestId('no-company-note')).toHaveTextContent('Ta trgovina prodaja za gotovino.');
+    expect(screen.getByTestId('no-company-note')).not.toHaveTextContent('LANE');
+  });
+
   it('in Slovenian: "LANA neposredno"', async () => {
     await i18n.changeLanguage('sl');
     await open();
@@ -142,10 +156,12 @@ describe('a shop without a company whose direct button is on', () => {
 });
 
 describe('off: a reason the seller can act on is said, a switch that is off says nothing', () => {
-  it('the switch is off: no tile and no notice, only the calm note', async () => {
+  it('the switch is off: no tile and no notice, only the calm note, which says cash only', async () => {
     units = [noCompany({ enabled: false, reason: 'DIRECT_LANA_OFF' })];
     await open();
-    expect(await screen.findByTestId('no-company-note')).toBeInTheDocument();
+    // (Review: it used to say "… and accepts LANA directly" with no button to do so.)
+    expect(await screen.findByTestId('no-company-note')).toHaveTextContent(i18n.t('home.noCompanyNoteCashOnly'));
+    expect(screen.getByTestId('no-company-note')).not.toHaveTextContent(i18n.t('home.noCompanyNote'));
     expect(directTile()).not.toBeInTheDocument();
     expect(directNotice()).not.toBeInTheDocument();
     expect(brainLanaTile()).not.toBeInTheDocument();

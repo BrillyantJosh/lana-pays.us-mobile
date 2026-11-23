@@ -318,11 +318,12 @@ const Index = () => {
   // fresh row so suspension_status / quota fields stay current. This drives
   // the auto-deselect-when-blocked UX without a separate effect.
   //
-  // The payout fields are compared too (23 Nov 2026). A shop that switches
-  // between "with a company" and "without a company" on shop.lanapays.us must
-  // reach this till by itself: which tiles show depends on them. Before, the
-  // selected unit (and the single unit, auto-selected once) kept its payout
-  // fields until a reload.
+  // The fields of a shop without a company are compared too (23 Nov 2026): a
+  // shop that switches between "with a company" and "without a company" on
+  // shop.lanapays.us must reach this till by itself, since which tiles show
+  // depends on them. Only those fields: an old unit never carries them, so for
+  // it this refresh is exactly what it was (its bank fields are not compared,
+  // as before; Brilly decides whether old units should follow them too).
   useEffect(() => {
     if (!selectedUnit || businessUnits.length === 0) return;
     const fresh = businessUnits.find(u => u.unit_id === selectedUnit.unit_id);
@@ -333,7 +334,6 @@ const Index = () => {
     if (fresh !== selectedUnit) {
       // Compare on the fields we care about; preserve referential stability
       // so React doesn't re-render unnecessarily.
-      const list = (v: string[] | undefined) => JSON.stringify(v ?? []);
       const changed = (
         fresh.suspension_status !== selectedUnit.suspension_status
         || fresh.quota_volume_used !== selectedUnit.quota_volume_used
@@ -343,9 +343,6 @@ const Index = () => {
         || fresh.payout_account !== selectedUnit.payout_account
         || fresh.margin_percent !== selectedUnit.margin_percent
         || fresh.lanapays_payout_wallet !== selectedUnit.lanapays_payout_wallet
-        || fresh.payout_configured !== selectedUnit.payout_configured
-        || list(fresh.payout_problems) !== list(selectedUnit.payout_problems)
-        || list(fresh.payout_advice) !== list(selectedUnit.payout_advice)
         || JSON.stringify(fresh.direct_lana ?? null) !== JSON.stringify(selectedUnit.direct_lana ?? null)
       );
       if (changed) setSelectedUnit(fresh);
@@ -1105,7 +1102,12 @@ const Index = () => {
                   {noCompanyUnit && (
                     <div data-testid="no-company-note" className="rounded-2xl bg-primary/5 border border-primary/20 p-4 flex items-start gap-3">
                       <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
-                      <p className="text-sm font-medium text-foreground leading-snug">{t('home.noCompanyNote')}</p>
+                      {/* "… and accepts LANA directly" only while this till can take it:
+                          with the switch off (the default) there is no such button,
+                          and a seller told otherwise improvises a transfer by hand. */}
+                      <p className="text-sm font-medium text-foreground leading-snug">
+                        {t(effectiveUnit?.direct_lana?.enabled === true ? 'home.noCompanyNote' : 'home.noCompanyNoteCashOnly')}
+                      </p>
                     </div>
                   )}
 

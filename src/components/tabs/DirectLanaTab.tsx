@@ -109,10 +109,27 @@ const CURRENCY_SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€
  * May this attempt still change? Then the till keeps asking about it (never
  * signing anything new): on its way, sent, being checked, and also one every
  * server refused after it was sent, or one that was replaced, since either may
- * still turn up in a block.
+ * still turn up in a block. And one still 'quoted' after this till signed it:
+ * its submit never arrived, and until the quote runs out on the server it still
+ * could (the server then calls it expired, for certain).
  */
 const mayStillChange = (a: Pick<DirectAttempt, 'status' | 'sent'>): boolean =>
-  OPEN_STATUSES.includes(a.status) || a.status === 'superseded' || (a.status === 'refused' && a.sent === true);
+  OPEN_STATUSES.includes(a.status) || a.status === 'quoted' || a.status === 'superseded' || (a.status === 'refused' && a.sent === true);
+
+/**
+ * May this attempt still end up in a block though it is not known to be on its
+ * way? Then a new payment is started only after the seller says it is for
+ * another purchase (the customer may otherwise pay twice).
+ */
+const stillUnsettled = (a: Pick<DirectAttempt, 'status' | 'sent'>): boolean =>
+  mayStillChange(a) && a.status !== 'sent';
+
+const DIGITS = /^\d+$/;
+/** Is this answer the whole attempt (lib/directLanaStore.ts attemptView) of this payment? Only then is it shown. */
+const isAttemptOf = (data: any, attemptId: string): data is DirectAttempt =>
+  !!data && data.attempt_id === attemptId && typeof data.status === 'string' && typeof data.currency === 'string'
+  && typeof data.sent === 'boolean'
+  && [data.invoice_cents, data.pay_cents, data.amount_lanoshi, data.fee_lanoshi].every(v => typeof v === 'string' && DIGITS.test(v));
 
 /** The attempt that replaced this one, from its reason ("SUPERSEDED_BY dla_…"), or null. */
 const replacedBy = (a: Pick<DirectAttempt, 'status' | 'reason'>): string | null => {
@@ -136,13 +153,19 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
   const [plan, setPlan] = useState<DirectLanaPlan | null>(null);
   const [saleId, setSaleId] = useState<string | null>(null);
   const [attempt, setAttempt] = useState<DirectAttempt | null>(null);
-  const [refusal, setRefusal] = useState<{ code: string; pendingAttempt?: string } | null>(null);
+  // `frame` 'resend': the refusal of a re-send of a payment that may still be
+  // mined. It is said as "not sent again", never as "LANA were not sent".
+  const [refusal, setRefusal] = useState<{ code: string; pendingAttempt?: string; frame?: 'resend' } | null>(null);
   const [busy, setBusy] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [sales, setSales] = useState<DirectAttempt[] | null>(null);
   const [tick, setTick] = useState(0);
+  // "New payment" pressed while the shown payment may still be mined: asked first.
+  const [confirmingNew, setConfirmingNew] = useState(false);
   const cardRef = useRef<CardKey | null>(null);
   const confirming = useRef(false);
+  // The attempt whose submit got no answer at all from this till's point of view.
+  const lostSubmit = useRef<string | null>(null);
 
   const forgetCard = () => {
     forgetCardKey(cardRef.current);
@@ -163,9 +186,10 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
     sale_id: saleId,
   });
 
-  const reasonText = (code: string) => {
+  const reasonText = (code: string, frame?: 'resend') => {
     const { key, sentence } = directReasonKey(code);
-    return sentence ? t(key) : t('directLana.refused', { reason: t(key) });
+    if (sentence) return t(key);
+    return t(frame === 'resend' ? 'directLana.resendRefused' : 'directLana.refused', { reason: t(key) });
   };
   const codeOfError = (e: unknown) => (e instanceof DirectLanaError ? e.code : 'NETWORK');
 
@@ -188,7 +212,7 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
     const timer = setTimeout(async () => {
       try {
         const { status, data } = await fetchDirectSale(session, attempt.attempt_id);
-        if (status === 200 && data?.success && data.attempt_id === attempt.attempt_id) setAttempt(data);
+        if (status === 200 && data?.success && isAttemptOf(data, attempt.attempt_id)) setAttempt(data);
       } catch { /* asked again next time */ }
       setTick(n => n + 1);
     }, pollMs);
@@ -288,8 +312,10 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
       return;
     }
     setStep('sending');
+    // Not known to the till yet: as far as it knows, still the quote it signed.
+    // The server says what it is (and calls it expired once it can no longer be sent).
     const pending: DirectAttempt = {
-      attempt_id: plan.attempt_id, sale_id: plan.sale_id, status: 'unknown', sent: true, reason: null, txid: signed.txid,
+      attempt_id: plan.attempt_id, sale_id: plan.sale_id, status: 'quoted', sent: false, reason: null, txid: signed.txid,
       currency: plan.currency, invoice_cents: plan.invoice_cents, margin_percent: plan.margin_percent,
       pay_cents: plan.pay_cents, rate: plan.rate, amount_lanoshi: plan.amount, fee_lanoshi: plan.fee,
       invoice_number: plan.invoice_number, recipient_wallet: plan.recipient, recipient_name: plan.unit_name,
@@ -297,8 +323,13 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
     };
     try {
       const { status, data } = await submitDirectSale(session, { attempt_id: plan.attempt_id, raw: signed.raw, record: signed.record });
-      if (data?.attempt_id === plan.attempt_id && typeof data?.status === 'string') {
+      if (isAttemptOf(data, plan.attempt_id)) {
         setAttempt(data);
+        // A replacement refused before it left: the payment it was to replace
+        // may still be mined. The seller is told, and can open it.
+        if (data.status === 'refused' && !data.sent && typeof (data as any).pending_attempt_id === 'string') {
+          setRefusal({ code: 'PREVIOUS_PAYMENT_PENDING', pendingAttempt: (data as any).pending_attempt_id });
+        }
         setStep('status');
       } else if (status >= 400 && status < 500) {
         // Refused before anything was kept or sent.
@@ -306,11 +337,13 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
         setPlan(null);
         setStep('breakdown');
       } else {
+        lostSubmit.current = plan.attempt_id;
         setAttempt(pending);
         setStep('status');
       }
     } catch {
       // No answer: the payment may have gone out. Only asking can tell.
+      lostSubmit.current = plan.attempt_id;
       setAttempt(pending);
       setStep('status');
     } finally {
@@ -325,12 +358,14 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
     setRefusal(null);
     try {
       const { data } = await resendDirectSale(session, attempt.attempt_id);
-      if (data?.attempt_id === attempt.attempt_id && typeof data?.status === 'string') setAttempt(data);
-      if (data && data.success === false && answerCode(data)) setRefusal({ code: answerCode(data) });
+      if (isAttemptOf(data, attempt.attempt_id)) setAttempt(data);
+      // Not sent again, and why. The payment itself may still be mined: it is
+      // never said as "LANA were not sent".
+      if (data && data.success === false && answerCode(data)) setRefusal({ code: answerCode(data), frame: 'resend' });
       // Every server refused the same bytes again: say so; the status stays what the chain says.
-      else if (data?.resend === 'refused') setRefusal({ code: 'BROADCAST_REFUSED' });
+      else if (data?.resend === 'refused') setRefusal({ code: 'RESEND_REFUSED_BY_NETWORK' });
     } catch {
-      setRefusal({ code: 'NETWORK' });
+      setRefusal({ code: 'NETWORK', frame: 'resend' });
     } finally {
       setBusy(false);
     }
@@ -348,8 +383,9 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
   const showSale = async (attemptId: string) => {
     try {
       const { status, data } = await fetchDirectSale(session, attemptId);
-      if (status === 200 && data?.success) {
+      if (status === 200 && data?.success && isAttemptOf(data, attemptId)) {
         forgetCard();
+        setConfirmingNew(false);
         setAttempt(data);
         setSaleId(data.sale_id);
         setPrice(priceOfAttempt(data));
@@ -381,17 +417,49 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
     setSaleId(null);
     setAttempt(null);
     setRefusal(null);
+    setConfirmingNew(false);
     setStep('entry');
   };
 
-  const money = (cents: string, currency: string) => formatMoney(centsText(BigInt(cents)), currency, locale);
-  const lana = (lanoshi: string) => formatLana(lanaText(BigInt(lanoshi)), locale);
+  /** "New payment": asked first while the payment shown may still be mined (the customer could pay twice). */
+  const askNewSale = () => {
+    if (attempt && stillUnsettled(attempt)) {
+      setConfirmingNew(true);
+      return;
+    }
+    newSale();
+  };
+
+  /** Back from the list: to the payment that was shown, if one was. */
+  const backFromList = () => {
+    if (attempt) {
+      setStep('status');
+      return;
+    }
+    newSale();
+  };
+
+  // An amount the till cannot read is shown as a dash, never as a crash.
+  const money = (cents: string, currency: string) => {
+    try {
+      return formatMoney(centsText(BigInt(cents)), currency, locale);
+    } catch {
+      return '–';
+    }
+  };
+  const lana = (lanoshi: string) => {
+    try {
+      return formatLana(lanaText(BigInt(lanoshi)), locale);
+    } catch {
+      return '–';
+    }
+  };
 
   const refusalBox = refusal && (
     <div data-testid="direct-refusal" className="rounded-2xl bg-destructive/10 border-2 border-destructive/40 p-4 space-y-3">
       <div className="flex items-start gap-3">
         <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
-        <p className="text-base font-semibold text-destructive leading-snug">{reasonText(refusal.code)}</p>
+        <p className="text-base font-semibold text-destructive leading-snug">{reasonText(refusal.code, refusal.frame)}</p>
       </div>
       {refusal.pendingAttempt && (
         <Button variant="outline" className="w-full h-11 rounded-xl" onClick={() => showSale(refusal.pendingAttempt!)}>
@@ -464,7 +532,7 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
             ))}
           </ul>
         )}
-        <Button variant="outline" className="w-full h-12 rounded-2xl" onClick={newSale}>{t('common.back')}</Button>
+        <Button data-testid="direct-list-back" variant="outline" className="w-full h-12 rounded-2xl" onClick={backFromList}>{t('common.back')}</Button>
       </div>
     );
   }
@@ -632,45 +700,62 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
           {txLink}
         </div>
       )}
-      {a.status === 'unknown' && (
+      {(a.status === 'unknown' || a.status === 'quoted') && (
         <div className="space-y-4">
           <div className="rounded-2xl bg-blue-50 border-2 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800 p-6">
             <div className="flex flex-col items-center text-center gap-3">
               <Clock className="w-12 h-12 text-blue-500" />
               <p className="text-lg font-bold text-blue-700 dark:text-blue-400">{t('directLana.unknownTitle')}</p>
               <p className="text-base font-medium text-blue-700 dark:text-blue-300 leading-snug">{t('directLana.unknownText')}</p>
+              <p className="text-sm font-medium text-blue-700 dark:text-blue-300 leading-snug">{t('directLana.unknownNoSecond')}</p>
             </div>
           </div>
           {amounts}
-          <Button data-testid="direct-resend" variant="outline" className="w-full h-12 rounded-2xl gap-2" onClick={resend} disabled={busy}>
-            <Send className="w-4 h-4" /> {t('directLana.resend')}
-          </Button>
-          <p className="text-xs text-muted-foreground text-center">{t('directLana.resendHint')}</p>
+          {/* Only the server holds the signed bytes; a submit that never arrived has none to send again. */}
+          {a.status === 'unknown' && (
+            <>
+              <Button data-testid="direct-resend" variant="outline" className="w-full h-12 rounded-2xl gap-2" onClick={resend} disabled={busy}>
+                <Send className="w-4 h-4" /> {t('directLana.resend')}
+              </Button>
+              <p className="text-xs text-muted-foreground text-center">{t('directLana.resendHint')}</p>
+            </>
+          )}
           <Button data-testid="direct-pay-again" variant="outline" className="w-full h-12 rounded-2xl gap-2" onClick={payAgain} disabled={busy}>
             <RefreshCw className="w-4 h-4" /> {t('directLana.payAgain')}
           </Button>
           <p className="text-xs text-muted-foreground text-center">{t('directLana.payAgainHint')}</p>
         </div>
       )}
-      {(a.status === 'refused' || a.status === 'expired') && (
+      {a.status === 'refused' && a.sent && (
+        /* Every server refused it AFTER it was handed over: it may still be
+           mined, so it is never said as "LANA were not sent". */
+        <div className="space-y-4">
+          <div data-testid="direct-refused-sent" className="rounded-2xl bg-amber-50 dark:bg-amber-500/5 border-2 border-amber-300 dark:border-amber-500/30 p-6 text-center">
+            <AlertCircle className="w-12 h-12 text-amber-600 mx-auto" />
+            <p className="text-base font-semibold text-amber-800 dark:text-amber-300 leading-snug mt-3">{t('directLana.refusedSentText')}</p>
+          </div>
+          {amounts}
+          <Button data-testid="direct-resend" variant="outline" className="w-full h-12 rounded-2xl gap-2" onClick={resend} disabled={busy}>
+            <Send className="w-4 h-4" /> {t('directLana.resend')}
+          </Button>
+          <p className="text-xs text-muted-foreground text-center">{t('directLana.resendHint')}</p>
+          <Button data-testid="direct-pay-again" className="w-full h-12 rounded-2xl gap-2" onClick={payAgain} disabled={busy}>
+            <RefreshCw className="w-4 h-4" /> {t('directLana.payAgain')}
+          </Button>
+          <p className="text-xs text-muted-foreground text-center">{t('directLana.payAgainHint')}</p>
+        </div>
+      )}
+      {((a.status === 'refused' && !a.sent) || a.status === 'expired') && (
         <div className="space-y-4">
           <div className="rounded-2xl bg-destructive/10 border-2 border-destructive/50 p-6 text-center">
             <AlertCircle className="w-12 h-12 text-destructive mx-auto" />
-            <p className="text-base font-semibold text-destructive leading-snug mt-3">{reasonText(a.reason || (a.status === 'expired' ? 'QUOTE_EXPIRED' : 'BROADCAST_REFUSED'))}</p>
+            <p className="text-base font-semibold text-destructive leading-snug mt-3">
+              {reasonText(a.status === 'expired'
+                ? (lostSubmit.current === a.attempt_id ? 'NOT_RECEIVED' : 'QUOTE_EXPIRED')
+                : (a.reason || 'BROADCAST_REFUSED'))}
+            </p>
           </div>
-          {a.sent ? (
-            <>
-              <Button data-testid="direct-resend" variant="outline" className="w-full h-12 rounded-2xl gap-2" onClick={resend} disabled={busy}>
-                <Send className="w-4 h-4" /> {t('directLana.resend')}
-              </Button>
-              <Button data-testid="direct-pay-again" className="w-full h-12 rounded-2xl gap-2" onClick={payAgain} disabled={busy}>
-                <RefreshCw className="w-4 h-4" /> {t('directLana.payAgain')}
-              </Button>
-              <p className="text-xs text-muted-foreground text-center">{t('directLana.payAgainHint')}</p>
-            </>
-          ) : (
-            <Button data-testid="direct-try-again" className="w-full h-12 rounded-2xl" onClick={payAgain}>{t('common.tryAgain')}</Button>
-          )}
+          <Button data-testid="direct-try-again" className="w-full h-12 rounded-2xl" onClick={payAgain}>{t('common.tryAgain')}</Button>
         </div>
       )}
       {a.status === 'failed' && (
@@ -698,7 +783,18 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
         </div>
       )}
       {refusalBox}
-      <Button variant="outline" className="w-full h-12 rounded-2xl" onClick={newSale}>{t('common.newPayment')}</Button>
+      {confirmingNew ? (
+        /* The payment shown may still be mined: a new one is for another purchase only. */
+        <div data-testid="direct-new-sale-warning" className="rounded-2xl bg-amber-50 dark:bg-amber-500/5 border-2 border-amber-300 dark:border-amber-500/30 p-4 space-y-3">
+          <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 leading-snug">
+            {t('directLana.newSaleWarning', { amount: `${money(a.pay_cents, a.currency)} · ${lana(a.amount_lanoshi)}` })}
+          </p>
+          <Button data-testid="direct-new-sale-confirm" variant="outline" className="w-full h-11 rounded-xl" onClick={newSale}>{t('directLana.newSaleConfirm')}</Button>
+          <Button data-testid="direct-new-sale-cancel" className="w-full h-11 rounded-xl" onClick={() => setConfirmingNew(false)}>{t('common.back')}</Button>
+        </div>
+      ) : (
+        <Button data-testid="direct-new-sale" variant="outline" className="w-full h-12 rounded-2xl" onClick={askNewSale}>{t('common.newPayment')}</Button>
+      )}
       <button onClick={openList} className="text-sm text-muted-foreground hover:text-foreground flex items-center justify-center gap-2">
         <ListChecks className="w-4 h-4" /> {t('directLana.showList')}
       </button>

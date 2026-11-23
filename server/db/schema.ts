@@ -676,6 +676,9 @@ export function ensureDirectLanaTables(db: Database.Database): void {
       description TEXT NOT NULL,
       plan_json TEXT NOT NULL,
       replaces_json TEXT NOT NULL DEFAULT '[]',
+      -- What a 'superseded' attempt was before (JSON: status, reason), so it
+      -- is put back when its replacement is refused before it was sent.
+      superseded_from TEXT,
       txid TEXT UNIQUE,
       raw_tx TEXT,
       record_json TEXT,
@@ -719,6 +722,8 @@ export function ensureDirectLanaTables(db: Database.Database): void {
       PRIMARY KEY (unit_id, wallet)
     );
   `);
+  // A journal made before superseded_from existed gets it (no row has a value yet).
+  try { db.exec('ALTER TABLE direct_lana_sales ADD COLUMN superseded_from TEXT'); } catch { /* column exists */ }
   // The switch, OFF for every shop until set (server/lib/directLanaUnit.ts):
   // '' off, '*' every shop without a company, or unit ids joined by commas.
   db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('direct_lana_units', '')").run();

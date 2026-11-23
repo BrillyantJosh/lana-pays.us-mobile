@@ -74,11 +74,17 @@ const OWN_REASONS = [
   'PAYER_TYPE_NOT_ALLOWED', 'PAYER_OWNER_UNKNOWN', 'SELF_PAYMENT', 'CHAIN_UNAVAILABLE', 'CHAIN_PENDING',
   'CARD_PAYMENT_PENDING', 'SALE_PAYMENT_PENDING', 'SALE_ALREADY_PAID', 'INSUFFICIENT_FUNDS', 'INPUT_LIMIT',
   'WALLET_STATE_CHANGED', 'QUOTE_EXPIRED', 'DEVICE_CLOCK', 'BROADCAST_REFUSED', 'NETWORK',
+  // The owner saved another (valid) wallet meanwhile: nothing to fix, only to try again.
+  'WALLET_CHANGED',
+  // A re-send long after the card signed: pay again with the same card instead.
+  'RESEND_TOO_LATE',
+  // The till's own: its submit never got an answer, and the server says the quote ran out unused.
+  'NOT_RECEIVED',
 ];
 const GROUPS: Record<string, string> = {
   UNKNOWN_UNIT: 'UNIT', UNIT_NOT_DIRECT: 'UNIT', DIRECT_LANA_OFF: 'UNIT', UNIT_BLOCKED: 'UNIT',
   UNIT_AUTHOR_MISMATCH: 'UNIT', CURRENCY_UNSUPPORTED: 'UNIT', CURRENCY_MISMATCH: 'UNIT',
-  WALLET_INVALID: 'WALLET', WALLET_CHANGED: 'WALLET', PAYEE_NOT_REGISTERED: 'WALLET',
+  WALLET_INVALID: 'WALLET', PAYEE_NOT_REGISTERED: 'WALLET',
   PAYEE_TYPE_NOT_ALLOWED: 'WALLET', PAYEE_OWNER_MISMATCH: 'WALLET',
   PLAN_INVALID: 'PLAN', PLAN_AMOUNTS_CHANGED: 'PLAN', PLAN_INPUT_MISMATCH: 'PLAN', PLAN_RECIPIENT_CHANGED: 'PLAN',
   CARD_MISMATCH: 'PLAN', TX_INVALID: 'PLAN', RECORD_INVALID: 'PLAN', SALE_CONFLICT: 'PLAN', SALE_MISMATCH: 'PLAN',
@@ -94,6 +100,10 @@ const SHARED: Record<string, string> = {
   CARD_ADDRESS_NOT_KEY: 'lana.walletAddressNotWif',
   CARD_NOSTR_KEY: 'lana.nostrKeyNotWif',
   CARD_KEY_INVALID: 'lana.invalidWifKey',
+  // The till's own, about a payment that may still be mined: whole sentences,
+  // never after "LANA were not sent".
+  RESEND_REFUSED_BY_NETWORK: 'directLana.resendRefusedByNetwork',
+  PREVIOUS_PAYMENT_PENDING: 'directLana.previousStillChecked',
 };
 
 /**

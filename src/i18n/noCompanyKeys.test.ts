@@ -46,6 +46,15 @@ const KEYS = [
   'purchase.noPayoutAccount',
   'purchase.rewardWalletInvalid',
   'pay.closedNoPayoutAccount',
+  // Review fixes (23 Nov 2026): a sale sent but never confirmed, and the note
+  // while the till cannot take LANA directly.
+  'home.noCompanyNoteCashOnly',
+  'cash.saleAlreadyRecorded',
+  'cash.salePendingNotRecorded',
+  'cash.salePendingUnknown',
+  'cash.saleLockedHint',
+  'cash.saleDiscard',
+  'cash.saleDiscardUnknown',
 ];
 
 /** The cash-only twins: what a shop without a company reads where the others are sent to LANA. */
@@ -90,6 +99,15 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
     expect(strings['cash.saleNumberLabel']).toContain('{{number}}');
   });
 
+  it('a sale sent but not confirmed is named by its number and what was sold, and the cash-only note says no LANA', () => {
+    for (const k of ['cash.saleAlreadyRecorded', 'cash.salePendingNotRecorded', 'cash.salePendingUnknown']) {
+      expect(strings[k], k).toContain('{{number}}');
+      expect(strings[k], k).toContain('{{description}}');
+    }
+    expect(strings['cash.saleLockedHint']).toContain('{{number}}');
+    expect(strings['home.noCompanyNoteCashOnly']).not.toMatch(/\bLAN[AEOI]\b|LANA/i);
+  });
+
   it('the payout refusals that ask for a fix name where it is fixed', () => {
     expect(strings['purchase.noPayoutAccount']).toContain('shop.lanapays.us');
     expect(strings['purchase.rewardWalletInvalid']).toContain('shop.lanapays.us');
@@ -99,6 +117,9 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
 describe('Slovenian, as Brilly wrote it', () => {
   it('the calm note on the home screen', () => {
     expect((sl as Record<string, string>)['home.noCompanyNote']).toBe('Ta trgovina prodaja za gotovino in sprejema LANE neposredno.');
+  });
+  it('the note while the till cannot take LANA directly says only cash', () => {
+    expect((sl as Record<string, string>)['home.noCompanyNoteCashOnly']).toBe('Ta trgovina prodaja za gotovino.');
   });
   it('the question at the cash till', () => {
     expect((sl as Record<string, string>)['cash.whatDidYouSell']).toBe('Kaj ste prodali?');

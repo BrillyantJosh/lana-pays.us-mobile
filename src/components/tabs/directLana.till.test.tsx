@@ -158,6 +158,8 @@ type Sent = { url: string; method: string; headers: string; body: string };
 let requests: Sent[] = [];
 /** The next submit reaches the server, but its answer never reaches the till. */
 let loseNextSubmitAnswer = false;
+/** The next submit never reaches the server at all (a proxy 502, a dropped connection). */
+let dropNextSubmit = false;
 const submits = () => requests.filter(r => r.url === '/api/direct-lana/submit');
 const zeroed = (c: CardKey) => c.key.every(b => b === 0);
 const flat = (s: string | null | undefined) => String(s ?? '').replace(/[  ]/g, ' ');
@@ -196,6 +198,7 @@ beforeEach(async () => {
   published.length = 0;
   requests = [];
   loseNextSubmitAnswer = false;
+  dropNextSubmit = false;
   globalThis.__cards = [];
   globalThis.__scanValue = CARD_WIF;
   globalThis.__session = { nostrHexId: OWNER_HEX, privateKeyHex: bytesToHex(OWNER), currency: 'EUR' };
@@ -208,6 +211,10 @@ beforeEach(async () => {
     });
     // Anything but LANA neposredno is not this tab's business: no answer for it.
     if (!String(url).startsWith('/api/direct-lana/')) return new Response('{}', { status: 404 });
+    if (dropNextSubmit && url === '/api/direct-lana/submit') {
+      dropNextSubmit = false;
+      throw new TypeError('Failed to fetch');
+    }
     const res = await realFetch(base + url, init);
     if (loseNextSubmitAnswer && url === '/api/direct-lana/submit') {
       loseNextSubmitAnswer = false;
@@ -457,7 +464,10 @@ describe('after sending, only the chain decides; the till never signs again by i
     await screen.findByTestId('direct-status-unknown');
     chain.mode = 'refuse';
     fireEvent.click(screen.getByTestId('direct-resend'));
-    expect(await screen.findByTestId('direct-refusal')).toHaveTextContent('omrežje je plačilo zavrnilo');
+    // Said as what it is: the same bytes refused again, the payment itself still being checked.
+    const box = await screen.findByTestId('direct-refusal');
+    expect(box).toHaveTextContent('Omrežje je isto plačilo znova zavrnilo. Dokler se ne razjasni, ne vzemi drugega plačila.');
+    expect(box).not.toHaveTextContent('niso bile poslane');
     expect(screen.getByTestId('direct-status-unknown')).toBeInTheDocument();
   });
 
@@ -467,7 +477,7 @@ describe('after sending, only the chain decides; the till never signs again by i
     await toConfirm('10,00', '', 400);
     await confirmPayment();
     // The server did send it; the till only knows it may have gone out ...
-    await screen.findByTestId('direct-status-unknown');
+    expect(await screen.findByTestId('direct-status-quoted')).toHaveTextContent('Plačilo se preverja (običajno nekaj minut). Ne vzemi drugega plačila.');
     // ... and finds out by asking, never by signing again.
     await screen.findByTestId('direct-status-sent', {}, { timeout: 3000 });
     expect(submits().length).toBe(1);
@@ -533,5 +543,154 @@ describe('in English too', () => {
     expect(flat(confirmText.textContent)).toBe(
       `Pay 42.96875 LANA + network fee 0.0003945 LANA → Kmetija Novak (${shortAddress(SHOP_WALLET)}). The payment cannot be undone.`,
     );
+  });
+});
+
+// ── Review fixes, second round (23 Nov 2026) ────────────────────────────────
+
+const quotedRow = () => db.prepare("SELECT * FROM direct_lana_sales WHERE status = 'quoted' ORDER BY created_at DESC LIMIT 1").get() as any;
+
+describe('an answer the till cannot show as a payment never blanks the till (review)', () => {
+  it('the quote ran out on the server at the last second: "expired", in words, the till still there', async () => {
+    await toConfirm();
+    // The till's own clock says the quote is still good; the server's says not.
+    db.prepare('UPDATE direct_lana_sales SET expires_at = ? WHERE id = ?').run(Math.floor(Date.now() / 1000) - 5, quotedRow().id);
+    await confirmPayment();
+    const expired = await screen.findByTestId('direct-status-expired');
+    expect(expired).toHaveTextContent('LANA niso bile poslane: ponudba je potekla. Skeniraj kartico znova.');
+    expect(screen.getByTestId('direct-try-again')).toBeInTheDocument();
+    expect(chain.broadcasts).toEqual([]);
+    expect(zeroed(globalThis.__cards[0])).toBe(true);
+  });
+
+  it('a submit that never reached the server: "being checked" while it still could, then for certain "not sent"', async () => {
+    dropNextSubmit = true;
+    await toConfirm('10,00', '', 40);
+    await confirmPayment();
+    const checking = await screen.findByTestId('direct-status-quoted');
+    expect(checking).toHaveTextContent('Ne vzemi gotovine in ne skeniraj druge kartice.');
+    // Nothing on the server to send again.
+    expect(screen.queryByTestId('direct-resend')).not.toBeInTheDocument();
+    // Still asked about, until the server says it can no longer be sent.
+    await new Promise(r => setTimeout(r, 200));
+    expect(screen.getByTestId('direct-status-quoted')).toBeInTheDocument();
+    db.prepare('UPDATE direct_lana_sales SET expires_at = ? WHERE id = ?').run(Math.floor(Date.now() / 1000) - 1, quotedRow().id);
+    const refused = await screen.findByTestId('direct-status-expired', {}, { timeout: 3000 });
+    expect(refused).toHaveTextContent('LANA niso bile poslane: plačilo ni prišlo do strežnika. Skeniraj kartico znova.');
+    expect(chain.broadcasts).toEqual([]);
+    expect(submits().length).toBe(1);
+  });
+});
+
+describe('what the till says agrees with what it offers (review)', () => {
+  it('"being checked": no cash, no other card; paying again is said not to be a second payment', async () => {
+    chain.mode = 'odd';
+    await toConfirm();
+    await confirmPayment();
+    const unknown = await screen.findByTestId('direct-status-unknown');
+    expect(unknown).toHaveTextContent('Ne vzemi gotovine in ne skeniraj druge kartice.');
+    expect(unknown).toHaveTextContent('To ni drugo plačilo: porabi isti denar s kartice kot prejšnje, zato se lahko izvede samo eno od obeh.');
+    expect(unknown.textContent).not.toMatch(/kovanc/);
+  });
+
+  it('refused by every server AFTER it was sent: never "LANA were not sent"; it may still go through', async () => {
+    chain.mode = 'refuse';
+    await toConfirm();
+    await confirmPayment();
+    await screen.findByTestId('direct-status-refused');
+    const box = screen.getByTestId('direct-refused-sent');
+    expect(box).toHaveTextContent('Omrežje je plačilo zavrnilo, a je bilo poslano, zato se lahko še izvede.');
+    expect(screen.getByTestId('direct-status-refused')).not.toHaveTextContent('niso bile poslane');
+    expect(screen.getByTestId('direct-resend')).toBeInTheDocument();
+    expect(screen.getByTestId('direct-pay-again')).toBeInTheDocument();
+  });
+
+  it('a re-send refused for a reason (the price moved): "the same payment was not sent again", not "LANA were not sent"', async () => {
+    chain.mode = 'odd';
+    await toConfirm();
+    await confirmPayment();
+    await screen.findByTestId('direct-status-unknown');
+    store38888('0.3');
+    fireEvent.click(screen.getByTestId('direct-resend'));
+    const box = await screen.findByTestId('direct-refusal');
+    expect(box).toHaveTextContent('Isto plačilo ni bilo poslano znova: cena LANA se je vmes spremenila. Poskusi znova.');
+    expect(screen.getByTestId('direct-status-unknown')).toBeInTheDocument();
+    expect(chain.broadcasts.length).toBe(1);
+  });
+
+  it('a shop wallet changed between the quote and the submit: "try again", not "fix the wallet"', async () => {
+    await toConfirm();
+    const other = addressOfKey(keyOf(13));
+    registrar.set(other, wallet('Main Wallet', OWNER_HEX));
+    db.prepare('UPDATE business_units SET raw_event = ? WHERE unit_id = ?').run(JSON.stringify({
+      kind: 30901, pubkey: OWNER_HEX, content: '',
+      tags: [['d', UNIT], ['name', 'Kmetija Novak'], ['payout_account', 'none'], ['margin_percent', '10'],
+        ['lanapays_payout_method', 'lana'], ['lanapays_payout_wallet', other]],
+    }), UNIT);
+    await confirmPayment();
+    const refused = await screen.findByTestId('direct-status-refused');
+    expect(refused).toHaveTextContent('LANA niso bile poslane: denarnica trgovine se je vmes spremenila. Poskusi znova.');
+    expect(refused).not.toHaveTextContent('shop.lanapays.us');
+  });
+});
+
+describe('a new payment while one may still be mined is for another purchase only (review)', () => {
+  it('"New payment" on "being checked" asks first, naming the payment; Back keeps it on the screen', async () => {
+    chain.mode = 'odd';
+    await toConfirm();
+    await confirmPayment();
+    await screen.findByTestId('direct-status-unknown');
+    fireEvent.click(screen.getByTestId('direct-new-sale'));
+    const warning = screen.getByTestId('direct-new-sale-warning');
+    expect(flat(warning.textContent)).toContain('Plačilo 11,00 € · 42,96875 LANA se še preverja in se lahko še izvede.');
+    expect(screen.queryByTestId('direct-amount')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('direct-new-sale-cancel'));
+    expect(screen.getByTestId('direct-status-unknown')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('direct-new-sale'));
+    fireEvent.click(screen.getByTestId('direct-new-sale-confirm'));
+    expect(await screen.findByTestId('direct-amount')).toBeInTheDocument();
+  });
+
+  it('— after a payment that went out ("sent"), a new payment starts at once', async () => {
+    await toConfirm();
+    await confirmPayment();
+    await screen.findByTestId('direct-status-sent');
+    fireEvent.click(screen.getByTestId('direct-new-sale'));
+    expect(await screen.findByTestId('direct-amount')).toBeInTheDocument();
+  });
+
+  it('back from the list returns to the payment being checked, not to a new sale', async () => {
+    chain.mode = 'odd';
+    await toConfirm();
+    await confirmPayment();
+    await screen.findByTestId('direct-status-unknown');
+    fireEvent.click(screen.getByText('Pokaži neposredna plačila'));
+    await screen.findByTestId('direct-sale-row');
+    fireEvent.click(screen.getByTestId('direct-list-back'));
+    expect(await screen.findByTestId('direct-status-unknown')).toBeInTheDocument();
+  });
+});
+
+describe('a replacement refused before it left points back to the payment still being checked (review)', () => {
+  it('the price moved before the replacement was sent: the earlier payment is "being checked" again, one tap away', async () => {
+    chain.mode = 'odd';
+    await toConfirm();
+    await confirmPayment();
+    await screen.findByTestId('direct-status-unknown');
+    const first = rows()[0];
+
+    chain.mode = 'accept';
+    fireEvent.click(screen.getByTestId('direct-pay-again'));
+    fireEvent.click(await screen.findByText('SCAN-NOW'));
+    await screen.findByTestId('direct-confirm-text');
+    store38888('0.3');
+    await confirmPayment();
+    await screen.findByTestId('direct-status-refused');
+    const box = screen.getByTestId('direct-refusal');
+    expect(box).toHaveTextContent('Prejšnje plačilo za ta nakup se še preverja in se lahko še izvede. Ne vzemi drugega plačila.');
+    expect((db.prepare('SELECT status FROM direct_lana_sales WHERE id = ?').get(first.id) as any).status).toBe('unknown');
+    fireEvent.click(screen.getByText('Pokaži to plačilo'));
+    expect(await screen.findByTestId('direct-status-unknown')).toBeInTheDocument();
+    expect(chain.broadcasts.length).toBe(1);
   });
 });

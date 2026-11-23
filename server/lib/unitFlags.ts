@@ -88,6 +88,46 @@ export function isNoPayoutAccountUnit(rawEvent: unknown): boolean | undefined {
   return tagsNamed(tags, 'payout_account').some(t => t[1] === 'none');
 }
 
+/** The receiver identity tags a unit without a company never signs (KIND 30901 v1.4.0). */
+const RECEIVER_IDENTITY_TAGS = ['receiver_name', 'receiver_type', 'receiver_register', 'receiver_tax_number', 'receiver_registration_number'];
+
+/**
+ * Is this EXACTLY a unit without a company and without a bank account, as
+ * shop.lanapays.us option (c) signs it (its form and Fast Onboarding)? This is
+ * the gate of LANA neposredno, the one path where money goes past the brain
+ * (lib/directLanaUnit.ts), so it reads strictly and one doubt keeps it shut:
+ *   - exactly one payout_account tag, and its value is "none";
+ *   - no receiver identity tag (receiver_name, receiver_type,
+ *     receiver_register, receiver_tax_number, receiver_registration_number),
+ *     no bank_* tag and no payment_scheme* tag: a unit that names a company or
+ *     a bank account is not one, whatever else it signs. The address tags
+ *     (receiver_address, _zip, _city, _country) are the place of sale and stay;
+ *   - exactly one lanapays_payout_method, and it is "lana";
+ *   - no online_shop tag other than "false".
+ * An event that cannot be read is not one either.
+ *
+ * isNoPayoutAccountUnit above stays as it is for the doors it CLOSES (LANA
+ * through the brain, the till's LANA tiles): there one "none" among several
+ * tags is enough to refuse. Here the same tags would OPEN a door, so they are
+ * not enough.
+ */
+export function isStrictNoPayoutAccountUnit(rawEvent: unknown): boolean {
+  const tags = storedTags(rawEvent);
+  if (!tags) return false;
+  const payout = tagsNamed(tags, 'payout_account');
+  if (payout.length !== 1 || payout[0][1] !== 'none') return false;
+  for (const t of tags) {
+    if (!Array.isArray(t)) continue;
+    // Compared without regard to case here: a doubt closes this door.
+    const name = typeof t[0] === 'string' ? t[0].trim().toLowerCase() : '';
+    if (RECEIVER_IDENTITY_TAGS.includes(name) || name.startsWith('bank_') || name.startsWith('payment_scheme')) return false;
+  }
+  const method = tagsNamed(tags, 'lanapays_payout_method');
+  if (method.length !== 1 || method[0][1] !== 'lana') return false;
+  if (tagsNamed(tags, 'online_shop').some(t => t[1] !== 'false')) return false;
+  return true;
+}
+
 /** The largest margin a unit without a company may add to a direct LANA payment. */
 export const MAX_MARGIN_PERCENT = 20;
 

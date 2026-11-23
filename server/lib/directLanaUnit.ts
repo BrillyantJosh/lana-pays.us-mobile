@@ -2,7 +2,9 @@
  * Which shops may take LANA neposredno, and the switch that turns it on.
  *
  * ONLY a shop without a company and without a bank account (KIND 30901
- * payout_account "none", shop.lanapays.us option (c)). Every other shop sells
+ * payout_account "none", shop.lanapays.us option (c)), read strictly: one
+ * payout_account tag, no company or bank tag beside it, its reward method
+ * "lana", no online shop (unitFlags.ts isStrictNoPayoutAccountUnit). Every other shop sells
  * LANA through the brain, as before, and can never reach this path: the
  * server refuses it here, whatever a till sends. On top of that the shop's
  * stored, owner-signed KIND 30901 must name:
@@ -26,7 +28,7 @@
 import type Database from 'better-sqlite3';
 import type { Request } from 'express';
 import { SIMPLE_UNIT_SQL } from './unitOrigin.js';
-import { isNoPayoutAccountUnit, unitMarginPercent, unitPayoutWallet } from './unitFlags.js';
+import { isStrictNoPayoutAccountUnit, unitMarginPercent, unitPayoutWallet } from './unitFlags.js';
 import { DIRECT_CURRENCIES, isAddress, clip, MAX_RECIPIENT_NAME } from './directLanaCore.js';
 import { readDirectParams } from './directLanaParams.js';
 import { verifyRequestSignature } from './nip98.js';
@@ -132,7 +134,8 @@ export function payeeMarkedFrozen(db: Database.Database, unitId: string, wallet:
  */
 export function directUnitState(db: Database.Database, row: any, opts: { ignoreSwitch?: boolean } = {}): DirectUnitState {
   if (!row) return { ok: false, code: 'UNKNOWN_UNIT' };
-  if (isNoPayoutAccountUnit(row.raw_event) !== true) return { ok: false, code: 'UNIT_NOT_DIRECT' };
+  // Exactly option (c), nothing of a company or a bank beside it (unitFlags.ts).
+  if (!isStrictNoPayoutAccountUnit(row.raw_event)) return { ok: false, code: 'UNIT_NOT_DIRECT' };
   if (!opts.ignoreSwitch && !directLanaSwitchedOn(db, row.unit_id)) return { ok: false, code: 'DIRECT_LANA_OFF' };
   if (BLOCKED.includes(String(row.suspension_status || 'active'))) return { ok: false, code: 'UNIT_BLOCKED' };
   let author = '';

@@ -95,7 +95,8 @@ afterEach(() => {
 
 const lanaTile = () => screen.queryByText(i18n.t('home.payWithLana'));
 const lanaOnlineTile = () => screen.queryByText(i18n.t('home.payLanaOnline'));
-const note = () => screen.queryByText(i18n.t('home.noCompanyNote'));
+// The calm note of a shop without a company (its words depend on the direct-LANA switch, Index.directLana.test).
+const note = () => screen.queryByTestId('no-company-note');
 
 async function open() {
   render(<Index />);
@@ -121,7 +122,9 @@ describe('a shop without a company and without a bank account', () => {
   it('no LANA tile, no Lana-online tile, the calm note instead', async () => {
     units = [noCompanyUnit];
     await open();
-    expect(await screen.findByText(i18n.t('home.noCompanyNote'))).toBeInTheDocument();
+    // No direct-LANA button in this answer (an older server, or the switch off): the note says cash only.
+    expect(await screen.findByText(i18n.t('home.noCompanyNoteCashOnly'))).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('home.noCompanyNote'))).not.toBeInTheDocument();
     expect(lanaTile()).not.toBeInTheDocument();
     expect(lanaOnlineTile()).not.toBeInTheDocument();
     // The cash tile is there as for every shop.
@@ -131,7 +134,7 @@ describe('a shop without a company and without a bank account', () => {
   it('is never asked for bank details, whatever the payout fields say', async () => {
     units = [{ ...noCompanyUnit, payout_configured: false, payout_problems: ['ACCOUNT_MISSING'], payout_advice: ['RECEIVER_NOT_CHOSEN'] }];
     await open();
-    await screen.findByText(i18n.t('home.noCompanyNote'));
+    await screen.findByTestId('no-company-note');
     expect(screen.queryByText(i18n.t('home.lanaPayoutNotConfigured'))).not.toBeInTheDocument();
     expect(screen.queryByText(i18n.t('payoutCheck.titleBlocking'))).not.toBeInTheDocument();
     expect(screen.queryByText(i18n.t('payoutCheck.titleAdvice'))).not.toBeInTheDocument();
@@ -164,7 +167,7 @@ describe('a shop without a company and without a bank account', () => {
   it('the cash till is told it is a shop without a company', async () => {
     units = [noCompanyUnit];
     await open();
-    await screen.findByText(i18n.t('home.noCompanyNote'));
+    await screen.findByTestId('no-company-note');
     fireEvent.click(screen.getByText(i18n.t('home.cashPayment')));
     expect(await screen.findByText('CASH-TAB noCompany=true')).toBeInTheDocument();
   });
@@ -226,5 +229,35 @@ describe('a switch on shop.lanapays.us reaches the till by itself', () => {
     fireEvent.click(screen.getByText(i18n.t('common.back')));
     await waitFor(() => expect(note()).toBeInTheDocument());
     expect(lanaTile()).not.toBeInTheDocument();
+  });
+});
+
+describe('an old unit: the selected-shop refresh is exactly as before (review: SPEC 6, old units unchanged)', () => {
+  async function nextPoll() {
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  }
+
+  it('its bank data changing mid-session does not change its tiles until a reload, as before 23 Nov 2026', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await open();
+    await waitFor(() => expect(lanaTile()).toBeInTheDocument());
+    const tile = () => lanaTile()!.closest('button')!;
+    expect(tile()).not.toBeDisabled();
+
+    // The owner removed the IBAN on shop.lanapays.us: the next poll says so, nothing else changed.
+    units = [{ ...companyUnit, payout_configured: false, payout_problems: ['ACCOUNT_MISSING'] }];
+    await nextPoll();
+    await nextPoll();
+    expect(tile()).not.toBeDisabled();
+    expect(screen.queryByText(i18n.t('home.lanaPayoutNotConfigured'))).not.toBeInTheDocument();
+  });
+
+  it('— a quota change still refreshes it, as before (and brings the new bank data with it)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await open();
+    await waitFor(() => expect(lanaTile()).toBeInTheDocument());
+    units = [{ ...companyUnit, payout_configured: false, quota_tx_used: 1 }];
+    await nextPoll();
+    await waitFor(() => expect(lanaTile()!.closest('button')).toBeDisabled());
   });
 });

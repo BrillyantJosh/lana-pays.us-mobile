@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isOnlineShopUnit, isNoPayoutAccountUnit, unitMarginPercent, unitPayoutWallet, MAX_MARGIN_PERCENT } from './unitFlags.js';
+import { isOnlineShopUnit, isNoPayoutAccountUnit, isStrictNoPayoutAccountUnit, unitMarginPercent, unitPayoutWallet, MAX_MARGIN_PERCENT } from './unitFlags.js';
 
 const ev = (tags: string[][]) => JSON.stringify({ kind: 30901, tags, content: '' });
 
@@ -155,5 +155,56 @@ describe('unitPayoutWallet — the one wallet the unit names', () => {
 
   it('is undefined when it cannot tell', () => {
     for (const raw of UNREADABLE) expect(unitPayoutWallet(raw)).toBeUndefined();
+  });
+});
+
+describe('isStrictNoPayoutAccountUnit: the gate of LANA neposredno reads option (c) exactly', () => {
+  /** What shop.lanapays.us option (c) signs (BusinessUnitForm and Fast Onboarding). */
+  const c = [
+    ['d', 'u1'], ['name', 'Kmetija Novak'], ['receiver_address', 'Glavna 1'], ['receiver_zip', '1000'],
+    ['receiver_city', 'Ljubljana'], ['receiver_country', 'SI'], ['lanapays_payout_method', 'lana'],
+    ['online_shop', 'false'], ['online_shop_shipping_fee', '0.00'], ['payout_account', 'none'], ['margin_percent', '10'],
+    ['lanapays_payout_wallet', 'LbtLTSACAREiT513CVNpbg6NeE5cFbrhkC'],
+  ];
+  const without = (name: string) => c.filter(t => t[0] !== name);
+
+  it('the form\'s own event is one; so is one without an online_shop tag (absent = no online shop)', () => {
+    expect(isStrictNoPayoutAccountUnit(ev(c))).toBe(true);
+    expect(isStrictNoPayoutAccountUnit(ev(without('online_shop')))).toBe(true);
+  });
+
+  it('one "none" among other payout_account tags is not one (it is enough to CLOSE a door, not to open this one)', () => {
+    const two = ev([['payout_account', 'bank'], ...c]);
+    expect(isNoPayoutAccountUnit(two)).toBe(true);
+    expect(isStrictNoPayoutAccountUnit(two)).toBe(false);
+    expect(isStrictNoPayoutAccountUnit(ev([...c, ['payout_account', 'none']]))).toBe(false);
+    expect(isStrictNoPayoutAccountUnit(ev([...without('payout_account'), ['payout_account', 'None']]))).toBe(false);
+  });
+
+  it.each([
+    'receiver_name', 'receiver_type', 'receiver_register', 'receiver_tax_number', 'receiver_registration_number',
+    'bank_name', 'bank_address', 'bank_country', 'bank_swift', 'bank_account',
+    'payment_scheme', 'payment_scheme_label', 'payment_scheme_fields', 'Receiver_Name', 'BANK_ACCOUNT',
+  ])('a %s tag beside it, even empty: not one', (name) => {
+    expect(isStrictNoPayoutAccountUnit(ev([...c, [name, '']]))).toBe(false);
+    expect(isStrictNoPayoutAccountUnit(ev([...c, [name, 'x']]))).toBe(false);
+  });
+
+  it('its reward method must be exactly one "lana"', () => {
+    expect(isStrictNoPayoutAccountUnit(ev(without('lanapays_payout_method')))).toBe(false);
+    expect(isStrictNoPayoutAccountUnit(ev([...without('lanapays_payout_method'), ['lanapays_payout_method', 'fiat']]))).toBe(false);
+    expect(isStrictNoPayoutAccountUnit(ev([...c, ['lanapays_payout_method', 'lana']]))).toBe(false);
+  });
+
+  it('an online shop, or an online_shop that is not "false": not one', () => {
+    for (const v of ['true', 'TRUE', '', 'no']) {
+      expect(isStrictNoPayoutAccountUnit(ev([...without('online_shop'), ['online_shop', v]])), v).toBe(false);
+    }
+  });
+
+  it('an event that cannot be read: not one', () => {
+    expect(isStrictNoPayoutAccountUnit(undefined)).toBe(false);
+    expect(isStrictNoPayoutAccountUnit('{not json')).toBe(false);
+    expect(isStrictNoPayoutAccountUnit(JSON.stringify({ kind: 30901 }))).toBe(false);
   });
 });

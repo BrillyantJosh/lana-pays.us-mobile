@@ -154,8 +154,8 @@ Set it on the admin page, in the section "LANA direct". The server writes it onl
 ### Before turning it on
 
 - KIND 38888 names at least two Electrum servers (port 5097), the relays, and an `fx` price for the shop's currency (EUR, GBP or USD). With fewer than two Electrum servers every direct sale is refused.
-- The registrar key of this app has room: each direct sale asks the registrar four times (the card and the shop's wallet, at the quote and at the submit), and once more after the payment is in a block.
-- The shop's KIND 30901 has `payout_account` `none`, a readable `margin_percent`, and a `lanapays_payout_wallet` that is the owner's registered, unfrozen Main Wallet. The owner signed the event.
+- The registrar key of this app has room: each direct sale asks the registrar four times (the card and the shop's wallet, at the quote and at the submit), twice more for each re-send, and once more after the payment is in a block.
+- The shop's KIND 30901 is exactly what shop.lanapays.us option (c) signs: one `payout_account` tag, `none`; no `receiver_name`, `receiver_type`, `receiver_register`, `receiver_tax_number`, `receiver_registration_number`, `bank_*` or `payment_scheme*` tag; one `lanapays_payout_method`, `lana`; no `online_shop` other than `false`. Any of these otherwise and the shop takes no direct LANA (`UNIT_NOT_DIRECT`), whatever else it signs. It also has a readable `margin_percent` and a `lanapays_payout_wallet` that is the owner's registered, unfrozen Main Wallet, and the owner signed the event.
 
 ### Reading the journal
 
@@ -166,7 +166,9 @@ Table `direct_lana_sales` holds one row per attempt. It never holds a key. Its `
 - `sent`: a server answered with exactly its txid. `paid`: in a block.
 - `unknown`: handed over, and no server confirmed it. Only the chain resolves it, never time: in a block it is `paid`; a coin it spends, spent by another transaction 6 blocks deep, makes it `failed`.
 - `refused`: with `sent` = 0 nothing went out; with `sent` = 1 every server refused it.
-- `superseded`: replaced by a payment that spends one of the same coins, so at most one of them can ever be in a block.
+- `superseded`: replaced by a payment that spends one of the same coins, so at most one of them can ever be in a block. If that replacement is refused before it was sent, the superseded row goes back to what it was (`superseded_from` keeps it): a payment that never left replaces nothing.
+
+A payment that is `unknown`, or `refused` with `sent` = 1, may be sent again with its identical bytes, only when the seller asks, only within 30 minutes of the card's signature (`RESEND_TOO_LATE` after that), and only when every check of a submit passes again: the switch, the shop, its wallet, the register, KIND 87058, the same LANA price, nothing of the card's waiting for a block. Otherwise the seller pays again with the same card, which spends one of the same coins.
 
 The record is published only for `paid` rows. Read it the way the checks above are read, for example:
 
@@ -175,4 +177,8 @@ SELECT status, sent, COUNT(*) AS n FROM direct_lana_sales GROUP BY status, sent;
 SELECT id, unit_id, status, reason, txid, record_published FROM direct_lana_sales WHERE status IN ('unknown', 'refused', 'superseded') ORDER BY created_at DESC LIMIT 20;
 ```
 
-Lines to look for in the container log: `[direct-lana] ALERT shop wallet frozen` (that shop's button stays off until the registrar says otherwise), and `[direct-lana] ALERT attempt … cannot be marked paid` (check that sale by hand).
+Lines to look for in the container log: `[direct-lana] ALERT shop wallet frozen` (that shop's button stays off until the registrar says otherwise), `[direct-lana] ALERT attempt … cannot be marked paid` (check that sale by hand), and `[direct-lana] ALERT attempt … stays superseded by …` (its replacement was never sent; it may still be mined).
+
+### Cash sales of a shop without a company
+
+Such a shop has no invoices: the till sends "what was sold (#n, DD.MM.YYYY)" as the invoice number, with the unit's next sale number (`POST /api/cash-sale-number`), and the brain refuses the same text twice on one unit. A sale whose text was sent but never confirmed is kept in the till's browser (localStorage, per unit) and comes back as the same sale after a reload or a trip home. Before the seller may change its words or drop it, the till asks `POST /api/cash-sale-recorded`, which answers only what the brain's duplicate check answered (503 when the brain cannot be asked, never "not recorded").

@@ -18,6 +18,7 @@ import { localNameFor, registeredCardStep, newCardMode, regularCustomerStep, typ
 import { freshReceiptFields, duplicateRefusal, checkDedup, canContinueAfterHit, type DedupHit } from "@/lib/receiptDedup";
 import { DuplicateNumberFix, RefusedNumberHint } from "@/components/DuplicateNumberFix";
 import { payoutRefusalKey, saleInvoiceNumber, readSaleNumber, SALE_DESCRIPTION_MAX, type SaleNumber } from "@/lib/payoutAccount";
+import { readPendingSale, keepPendingSale, forgetPendingSale, saleRecorded, type PendingSale } from "@/lib/pendingSale";
 
 const currencyIcons: Record<string, typeof PoundSterling> = {
   GBP: PoundSterling, USD: DollarSign, EUR: Euro,
@@ -257,10 +258,93 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
     return asked;
   };
 
+  // ══════ A SALE SENT BUT NOT CONFIRMED (shop without a company) ══════
+  // Once a sale's text has gone to the brain it stays exactly that text until
+  // the brain confirms the sale, says it has it, says it has not, or the seller
+  // drops it (asking the brain first). It is kept in this browser too
+  // (lib/pendingSale.ts), so going home, a reload or a dropped tab after a lost
+  // answer brings back the SAME sale, which the brain refuses if it has it,
+  // never a second number or other words for it (review, 23 Nov 2026).
+  const [pendingSale, setPendingSale] = useState<PendingSale | null>(null);
+  /** What the till says about a sale it brought back: asking, cannot tell, or not recorded. */
+  const [pendingNote, setPendingNote] = useState<{ kind: 'checking' | 'unknown' | 'notRecorded'; number: number; description: string } | null>(null);
+  /** The brain already has this sale: it is done and is never sent again. */
+  const [saleRecordedBox, setSaleRecordedBox] = useState<{ number: number; description: string } | null>(null);
+
+  /** Right before a sale's text goes to the brain: from now on it is that text. */
+  const markSaleSent = (pd: PurchaseSnapshot) => {
+    if (!noCompany || !pd.sale) return;
+    setPendingSale(keepPendingSale(pd.unitId, pd.sale.number, pd.sale.description, pd.amount));
+    setPendingNote(null);
+  };
+
+  /** The brain has this sale already: say so, forget it, and never send it again. */
+  const saleAlreadyRecorded = (sale: { number: number; description: string }) => {
+    forgetPendingSale(unitId);
+    setPendingSale(null);
+    setPendingNote(null);
+    saleNumberRef.current = null;
+    setSaleNumber(null);
+    setSaleRecordedBox(sale);
+  };
+
+  /**
+   * Ask the brain whether it has a sale this till sent and never heard back
+   * about. Has it: done. Has not: the sale may go on (its number kept) and its
+   * words may change, or, when the seller chose to drop it, it is dropped.
+   * Cannot tell: it stays exactly as it was sent.
+   */
+  const reconcilePending = async (kept: PendingSale, drop = false) => {
+    setPendingNote({ kind: 'checking', number: kept.number, description: kept.description });
+    const answer = await saleRecorded(kept.unit_id, kept.text, withCallerHex({ 'Content-Type': 'application/json' }), session?.nostrHexId);
+    if (answer?.recorded === true) {
+      saleAlreadyRecorded({ number: kept.number, description: kept.description });
+      return;
+    }
+    if (answer?.recorded === false) {
+      forgetPendingSale(kept.unit_id);
+      setPendingSale(null);
+      if (drop) {
+        setPendingNote(null);
+        saleNumberRef.current = null;
+        setSaleNumber(null);
+        setInvoiceNumber('');
+        setAmount('');
+      } else {
+        setPendingNote({ kind: 'notRecorded', number: kept.number, description: kept.description });
+      }
+      return;
+    }
+    setPendingNote({ kind: 'unknown', number: kept.number, description: kept.description });
+    if (drop) setSubmitError(t('cash.saleDiscardUnknown'));
+  };
+
+  // A shop without a company: a sale this browser sent and never heard back
+  // about comes back as it was sent, and the brain is asked whether it has it.
+  useEffect(() => {
+    if (!noCompany || !unitId) return;
+    const kept = readPendingSale(unitId);
+    if (!kept) {
+      // Another shop's sale never stays on this one.
+      setPendingSale(p => (p && p.unit_id !== unitId ? null : p));
+      return;
+    }
+    setPendingSale(kept);
+    saleNumberRef.current = { number: kept.number, date: kept.date };
+    setSaleNumber({ number: kept.number, date: kept.date });
+    setInvoiceNumber(kept.description);
+    setAmount(kept.amount);
+    setStep("invoice");
+    void reconcilePending(kept);
+  }, [noCompany, unitId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /** A confirmed sale used its number: the next sale gets a new one. */
   const confirmSale = () => {
     saleNumberRef.current = null;
     setSaleNumber(null);
+    forgetPendingSale(unitId);
+    setPendingSale(null);
+    setPendingNote(null);
     setStep("confirmed");
   };
 
@@ -281,7 +365,8 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
       receiptDescription: analysisDescription,
     };
     if (!noCompany) return base;
-    const description = invoiceNumber.trim();
+    // A sale already sent keeps the words it was sent with (see pendingSale).
+    const description = (pendingSale ? pendingSale.description : invoiceNumber).trim();
     if (!description) return base; // the button is disabled without one; nothing is sent
     const sale = await ensureSaleNumber();
     if (!sale) return null;
@@ -565,6 +650,17 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
    *  only reopens the wallet scanner and would send the same thing again. */
   const showPurchaseRefusal = (status: number, data: any, sentNumber: string) => {
     const dup = duplicateRefusal(status, data, sentNumber);
+    // A shop without a company: its text IS its sale number, so "this text is
+    // already used" means the brain has THIS sale already (an answer lost
+    // before). It is done: never sent again under other words.
+    const sale = purchaseDataRef.current?.sale;
+    if (dup?.by === 'invoice' && noCompany && sale) {
+      setCheckError(null);
+      setSubmitError(null);
+      saleAlreadyRecorded({ number: sale.number.number, description: sale.description });
+      setStep("invoice");
+      return;
+    }
     if (dup?.by === 'invoice') {
       setCheckError(null);
       setSubmitError(formatPurchaseError(status, data));
@@ -609,8 +705,9 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
     setEmail("");
     setCountryCode("+386");
     setMobile("");
-    setInvoiceNumber("");
-    setAmount("");
+    // A sale already sent and not yet confirmed starts over as that same sale.
+    setInvoiceNumber(pendingSale ? pendingSale.description : "");
+    setAmount(pendingSale ? pendingSale.amount : "");
     purchaseDataRef.current = null;
     onClearWallet?.();
   };
@@ -796,6 +893,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
           }
 
           setIsSubmitting(true);
+          markSaleSent(pd);
           const res = await sendPurchase(session, {
             unit_id: pd.unitId,
             payment_type: 'cash',
@@ -897,6 +995,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
     setSubmitError(null);
 
     try {
+      markSaleSent(pd);
       const res = await sendPurchase(session, {
         unit_id: pd.unitId,
         payment_type: 'cash',
@@ -1026,6 +1125,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
           }
 
           console.log('[CashTab] Auto-submitting purchase after registration...');
+          markSaleSent(pd);
           const purchaseRes = await sendPurchase(session, {
             unit_id: pd.unitId,
             payment_type: 'cash',
@@ -1083,6 +1183,28 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
       </div>
     );
   };
+
+  // ═══════════════════════════════════════════════════════════════
+  // A SALE THE BRAIN ALREADY HAS (shop without a company)
+  // ═══════════════════════════════════════════════════════════════
+  if (saleRecordedBox) {
+    return (
+      <div className="flex flex-col gap-5 px-6 py-4">
+        <div data-testid="cash-sale-recorded" className="rounded-2xl bg-primary/5 border-2 border-primary/30 p-6 text-center space-y-3">
+          <CheckCircle2 className="w-12 h-12 text-primary mx-auto" />
+          <p className="text-lg font-semibold text-foreground leading-snug break-words">
+            {t('cash.saleAlreadyRecorded', { number: saleRecordedBox.number, description: saleRecordedBox.description })}
+          </p>
+        </div>
+        <Button
+          onClick={() => { setSaleRecordedBox(null); setInvoiceNumber(""); setAmount(""); resetAll(); }}
+          className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
+        >
+          {t('common.newPayment')}
+        </Button>
+      </div>
+    );
+  }
 
   // ═══════════════════════════════════════════════════════════════
   // RECEIPT STEP
@@ -1328,8 +1450,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
   // The brain refused this number at payment; the same number would be
   // refused again, so the wallet is not scanned until it changes. For a shop
   // without a company the text sent is what was sold plus this sale's number.
-  const textToSend = noCompany && saleNumber ? saleInvoiceNumber(invoiceNumber, saleNumber) : invoiceNumber;
+  const textToSend = noCompany && saleNumber ? saleInvoiceNumber(pendingSale ? pendingSale.description : invoiceNumber, saleNumber) : invoiceNumber;
   const numberStillRefused = refusedNumber !== null && textToSend.trim() === refusedNumber.trim();
+  // Asking the brain about a sale it may already have: nothing is sent meanwhile.
+  const checkingPending = noCompany && pendingNote?.kind === 'checking';
   return (
     <div className="flex flex-col gap-5 px-6 py-4">
       <div className="flex items-center gap-4">
@@ -1348,22 +1472,48 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
           /* A shop without a company issues no invoices: the seller says what
              was sold, and the till adds the sale number when the sale is sent. */
           <div className="space-y-2">
+            {pendingNote && (
+              <div data-testid="cash-sale-pending" className="rounded-xl bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/20 p-3 flex items-start gap-2">
+                {pendingNote.kind === 'checking' && <Loader2 className="w-4 h-4 animate-spin text-amber-700 shrink-0 mt-0.5" />}
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300 leading-snug break-words">
+                  {t(pendingNote.kind === 'notRecorded' ? 'cash.salePendingNotRecorded' : 'cash.salePendingUnknown', { number: pendingNote.number, description: pendingNote.description })}
+                </p>
+              </div>
+            )}
             <Label htmlFor="cash-sale-description" className="text-sm font-medium text-foreground">
               {t('cash.whatDidYouSell')} <span className="text-destructive">*</span>
             </Label>
             <Input
               id="cash-sale-description"
               placeholder={t('cash.whatDidYouSellPlaceholder')}
-              value={invoiceNumber}
+              value={pendingSale ? pendingSale.description : invoiceNumber}
               maxLength={SALE_DESCRIPTION_MAX}
+              readOnly={!!pendingSale}
               onChange={(e) => {
+                // A sale already sent keeps its words until the brain answers about it.
+                if (pendingSale) return;
                 setInvoiceNumber(e.target.value);
                 if (refusedNumber) setSubmitError(null);
               }}
               className="h-12 rounded-xl bg-background border-input"
             />
             <RefusedNumberHint refused={refusedNumber} current={textToSend} />
-            <p className="text-[11px] text-muted-foreground">{t('cash.saleNumberHint')}</p>
+            {pendingSale ? (
+              <div className="space-y-2">
+                <p className="text-[11px] text-muted-foreground">{t('cash.saleLockedHint', { number: pendingSale.number })}</p>
+                <Button
+                  data-testid="cash-sale-discard"
+                  variant="outline"
+                  onClick={() => { setSubmitError(null); void reconcilePending(pendingSale, true); }}
+                  disabled={pendingNote?.kind === 'checking' || isSubmitting}
+                  className="w-full h-10 rounded-xl text-sm"
+                >
+                  {t('cash.saleDiscard')}
+                </Button>
+              </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">{t('cash.saleNumberHint')}</p>
+            )}
           </div>
         ) : (
         <div className="space-y-2">
@@ -1425,7 +1575,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
           setStep("scan");
           setScannerOpen(true);
         }}
-        disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || gettingSaleNumber || cashBlocked() || numberStillRefused}
+        disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || gettingSaleNumber || checkingPending || cashBlocked() || numberStillRefused}
         className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
       >
         <Camera className="w-5 h-5" />{t('cash.scanCustomerWallet')}
@@ -1464,7 +1614,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
                 <button
                   key={c.customer_hex_id}
                   onClick={() => handleSelectRegularCustomer(c)}
-                  disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || gettingSaleNumber || cashBlocked() || numberStillRefused}
+                  disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || gettingSaleNumber || checkingPending || cashBlocked() || numberStillRefused}
                   className="rounded-xl bg-card border border-border p-3 flex items-center gap-3 active:scale-[0.98] transition-all hover:border-primary/30 disabled:opacity-40 disabled:pointer-events-none text-left"
                 >
                   {c.picture ? (
