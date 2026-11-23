@@ -9,6 +9,8 @@
 import type { Request, Response } from 'express';
 import type Database from 'better-sqlite3';
 import { getMaxTransaction, foldQuotaRemaining, foldCustomerWindow, readCustomerWindowDays, clampCashAmount, exceedsVolumeLimit, round2 } from './lib/maxTransaction.js';
+import { isNoPayoutAccountUnit } from './lib/unitFlags.js';
+import { noPayoutAccountRefusal } from './lib/noPayoutAccount.js';
 
 export function brainPurchaseHandler(db: Database.Database, BRAIN_API_URL: string, BRAIN_PURCHASE_KEY: string) {
   return async (req: Request, res: Response) => {
@@ -52,7 +54,7 @@ export function brainPurchaseHandler(db: Database.Database, BRAIN_API_URL: strin
     if (typeof unitId === 'string' && unitId.length > 0) {
       const u = db.prepare(`
         SELECT suspension_status, quota_volume_used, quota_volume_limit,
-               quota_tx_used, quota_tx_limit, quota_currency, currency
+               quota_tx_used, quota_tx_limit, quota_currency, currency, raw_event
         FROM business_units WHERE unit_id = ?
       `).get(unitId) as any;
 
@@ -72,6 +74,17 @@ export function brainPurchaseHandler(db: Database.Database, BRAIN_API_URL: strin
               ? 'Merchant is awaiting admin approval — payments paused'
               : `Cannot process purchase: merchant is ${u.suspension_status}`,
           });
+        }
+        // A shop without a bank account (KIND 30901 payout_account "none",
+        // shop.lanapays.us option (c)) sells for CASH only through the brain:
+        // a LANA sale there pays the invoice to a bank account it does not have.
+        // "Not cash", never "=== 'lana'": this handler treats every value other
+        // than 'cash' as LANA (none of the cash rules below apply to it), so any
+        // other value must meet this refusal too. Before anything reaches the
+        // brain, so the customer's signed transaction is never handed on.
+        if (!isCash && isNoPayoutAccountUnit(u.raw_event) === true) {
+          console.warn(`[mobile] Blocking non-cash pre-flight: unit ${unitId.slice(0, 12)} has no bank account (payout_account=none)`);
+          return res.status(409).json(noPayoutAccountRefusal());
         }
         if (isCash) {
           // CASH-only monthly limit. LANA is never gated here.

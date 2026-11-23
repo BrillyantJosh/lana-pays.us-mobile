@@ -536,3 +536,134 @@ describe('the limits together', () => {
     expect(windowLookups()).toHaveLength(c.asked === false ? 0 : 1);
   });
 });
+
+// ── A shop without a company and without a bank account (23 Nov 2026) ──────
+// KIND 30901 ["payout_account","none"], shop.lanapays.us option (c). Through the
+// brain it sells for CASH only: a LANA sale there pays the invoice to a bank
+// account the shop does not have. The proxy refuses every payment_type that is
+// not 'cash', before anything is forwarded, and cash meets every rule it met.
+const NO_COMPANY_EVENT = JSON.stringify({ kind: 30901, tags: [['d', UNIT], ['name', 'Kmetija'], ['payout_account', 'none'], ['margin_percent', '10']] });
+const setRawEvent = (raw: string | null) => db.prepare('UPDATE business_units SET raw_event = ? WHERE unit_id = ?').run(raw, UNIT);
+const lanaSaleBody = (amount: number) => ({ payment_type: 'lana', amount, signed_tx_hex: 'ab', ...CUSTOMER });
+
+describe('a shop without a bank account: LANA is refused before the brain, cash is a sale as before', () => {
+  it('a LANA sale: 409 UNIT_NO_PAYOUT_ACCOUNT in plain words, nothing reaches the brain', async () => {
+    seed({ maxTx: '200.00' });
+    setRawEvent(NO_COMPANY_EVENT);
+    const r = await sell(lanaSaleBody(50));
+
+    expect(r.status).toBe(409);
+    expect(r.body).toMatchObject({ success: false, code: 'UNIT_NO_PAYOUT_ACCOUNT' });
+    // Words for a tab with older code, which prints `error` as it is.
+    expect(r.body.error).toMatch(/no bank account/);
+    expect(r.body.error).not.toBe('UNIT_NO_PAYOUT_ACCOUNT');
+    expect(forwarded()).toEqual([]);
+    expect(windowLookups()).toEqual([]);
+  });
+
+  it.each([
+    ['"LANA"', 'LANA'], ['"card"', 'card'], ['an empty string', ''], ['"Cash" (not exactly cash)', 'Cash'], ['a number', 1],
+  ])('any payment_type that is not "cash" is refused the same way: %s', async (_label, paymentType) => {
+    seed({ maxTx: '200.00' });
+    setRawEvent(NO_COMPANY_EVENT);
+    const r = await sell({ ...lanaSaleBody(50), payment_type: paymentType });
+
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe('UNIT_NO_PAYOUT_ACCOUNT');
+    expect(forwarded()).toEqual([]);
+  });
+
+  it('no payment_type at all is refused too ("not cash", never "=== lana")', async () => {
+    seed({ maxTx: '200.00' });
+    setRawEvent(NO_COMPANY_EVENT);
+    const { payment_type: _drop, ...body } = lanaSaleBody(50);
+    const r = await sell(body);
+
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe('UNIT_NO_PAYOUT_ACCOUNT');
+    expect(forwarded()).toEqual([]);
+  });
+
+  it('a cash sale goes through, with the limits of every unit (the per-invoice limit reduces it)', async () => {
+    seed({ maxTx: '200.00' });
+    setRawEvent(NO_COMPANY_EVENT);
+    const r = await sell(cashSale(250));
+
+    expect(r.status).toBe(200);
+    expect(forwarded()).toHaveLength(1);
+    expect(forwarded()[0].body.payment_type).toBe('cash');
+    expect(forwarded()[0].body.amount).toBe(200);
+    expect(r.body.amount_adjusted).toEqual({ original: 250, adjusted: 200, currency: 'EUR' });
+  });
+
+  it('the same customer\'s window applies to its cash as to every unit', async () => {
+    seed({ maxTx: '200.00' });
+    setRawEvent(NO_COMPANY_EVENT);
+    lookup = { spent: 200 };
+    const r = await sell(cashSale(19.9));
+
+    expect(r.status).toBe(403);
+    expect(r.body.error).toBe('CUSTOMER_WINDOW_EXCEEDED');
+    expect(forwarded()).toEqual([]);
+  });
+
+  it('during a Split its cash is locked like every unit\'s cash', async () => {
+    seed({ maxTx: '200.00' });
+    setRawEvent(NO_COMPANY_EVENT);
+    db.prepare("UPDATE app_settings SET value = 'true' WHERE key = 'split_happening'").run();
+    const cash = await sell(cashSale(19.9));
+    const lana = await sell(lanaSaleBody(19.9));
+
+    expect(cash.status).toBe(403);
+    expect(cash.body.error).toBe('SPLIT_HAPPENING');
+    expect(lana.status).toBe(409);
+    expect(lana.body.code).toBe('UNIT_NO_PAYOUT_ACCOUNT');
+    expect(forwarded()).toEqual([]);
+  });
+
+  it('at the monthly limit: cash is the month\'s refusal, LANA is still this refusal', async () => {
+    seed({ status: 'quota_blocked' });
+    setRawEvent(NO_COMPANY_EVENT);
+    const cash = await sell(cashSale(19.9));
+    const lana = await sell(lanaSaleBody(19.9));
+
+    expect(cash.status).toBe(403);
+    expect(cash.body.error).toBe('MERCHANT_QUOTA_EXCEEDED');
+    expect(lana.status).toBe(409);
+    expect(lana.body.code).toBe('UNIT_NO_PAYOUT_ACCOUNT');
+    expect(forwarded()).toEqual([]);
+  });
+
+  it('awaiting approval: the approval refusal comes first, as for every unit', async () => {
+    seed({ status: 'pending' });
+    setRawEvent(NO_COMPANY_EVENT);
+    const r = await sell(lanaSaleBody(19.9));
+
+    expect(r.status).toBe(403);
+    expect(r.body.error).toBe('MERCHANT_PENDING');
+    expect(forwarded()).toEqual([]);
+  });
+});
+
+describe('every other unit: a LANA sale is forwarded exactly as before', () => {
+  const COMPANY_EVENT = JSON.stringify({ kind: 30901, tags: [['d', UNIT], ['receiver_type', 'company'], ['bank_account', 'SI56 1920 0123 4567 892']] });
+
+  it.each([
+    ['no raw event stored', null],
+    ['an unreadable raw event (we cannot tell: as before)', '{not json'],
+    ['a company unit', COMPANY_EVENT],
+    ['payout_account with another value', JSON.stringify({ kind: 30901, tags: [['d', UNIT], ['payout_account', 'bank']] })],
+    ['payout_account "None", not the exact value', JSON.stringify({ kind: 30901, tags: [['d', UNIT], ['payout_account', 'None']] })],
+  ])('%s', async (_label, raw) => {
+    seed({ maxTx: '200.00' });
+    setRawEvent(raw);
+    const body = { unit_id: UNIT, currency: 'EUR', invoice_number: 'INV-1', ...lanaSaleBody(999) };
+    const r = await sell(body);
+
+    expect(r.status).toBe(200);
+    expect(forwarded()).toHaveLength(1);
+    // The body the brain gets is the body the till sent: nothing added, nothing changed.
+    expect(forwarded()[0].body).toEqual(body);
+    expect(r.body).toEqual({ success: true, data: { transaction_id: 'tx_1' } });
+  });
+});

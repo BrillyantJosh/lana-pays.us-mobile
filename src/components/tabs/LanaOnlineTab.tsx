@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
 import { currencySymbol as symbolFor } from '@/lib/format';
+import { payoutRefusalKey } from '@/lib/payoutAccount';
 import { PaymentRequestList, payUrlFor, type PaymentRequestRow } from '@/components/PaymentRequestList';
 import { freshReceiptFields, checkDedup, canContinueAfterHit, type DedupHit } from '@/lib/receiptDedup';
 import { DuplicateNumberFix } from '@/components/DuplicateNumberFix';
@@ -234,6 +235,9 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
       if (!res.ok || !json.success) {
         if (res.status === 409 && json?.error === 'DUPLICATE_INVOICE') {
           setCreateError(t('cash.duplicateInvoice', { date: '' }));
+        } else if (payoutRefusalKey(json)) {
+          // A shop without a bank account takes no LANA through a link.
+          setCreateError(t(payoutRefusalKey(json)!));
         } else {
           setCreateError(json?.error || t('lana.purchaseFailed'));
         }

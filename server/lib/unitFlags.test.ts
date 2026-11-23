@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isOnlineShopUnit } from './unitFlags.js';
+import { isOnlineShopUnit, isNoPayoutAccountUnit, unitMarginPercent, unitPayoutWallet, MAX_MARGIN_PERCENT } from './unitFlags.js';
 
 const ev = (tags: string[][]) => JSON.stringify({ kind: 30901, tags, content: '' });
 
@@ -49,5 +49,111 @@ describe('isOnlineShopUnit — the Orders tile gate', () => {
   it('ignores malformed tag entries instead of throwing', () => {
     expect(isOnlineShopUnit(JSON.stringify({ tags: [null, 5, ['online_shop', 'true']] }))).toBe(true);
     expect(isOnlineShopUnit(JSON.stringify({ tags: [null, 5] }))).toBe(false);
+  });
+});
+
+// The cases a reader cannot tell, shared by the three readers below: none of
+// them may answer as if it had read a tag.
+const UNREADABLE: unknown[] = [
+  undefined, null, '', '   ', '{not json', '"a string"',
+  JSON.stringify({ kind: 30901 }), JSON.stringify({ tags: 'nope' }),
+];
+
+describe('isNoPayoutAccountUnit — a shop without a company and without a bank account (KIND 30901 v1.4.0)', () => {
+  it('is true only for an exact payout_account=none tag', () => {
+    expect(isNoPayoutAccountUnit(ev([['d', 'u1'], ['payout_account', 'none']]))).toBe(true);
+  });
+
+  it('is false for every unit as it was before the tag existed (old units stay exactly as they are)', () => {
+    expect(isNoPayoutAccountUnit(ev([['d', 'u1'], ['name', 'Shop'], ['bank_account', 'SI56 1910 0000 0123 438']]))).toBe(false);
+    expect(isNoPayoutAccountUnit(ev([['receiver_type', 'person']]))).toBe(false);
+  });
+
+  it('matches name and value exactly, as the shop writes them: no other value means "none"', () => {
+    for (const value of ['None', 'NONE', ' none', 'none ', 'no', 'false', '', 'bank']) {
+      expect(isNoPayoutAccountUnit(ev([['payout_account', value]])), value).toBe(false);
+    }
+    expect(isNoPayoutAccountUnit(ev([['payout_account']]))).toBe(false);
+    // A prefix is not the tag.
+    expect(isNoPayoutAccountUnit(ev([['payout_account_type', 'none']]))).toBe(false);
+  });
+
+  it('never borrows the markers the fleet already uses for other things', () => {
+    // cash_only names a Direct.Fund investor; lana_only / unit_type are Simple's.
+    expect(isNoPayoutAccountUnit(ev([['cash_only', 'true']]))).toBe(false);
+    expect(isNoPayoutAccountUnit(ev([['lana_only', 'true'], ['unit_type', 'simple.lanapays.us']]))).toBe(false);
+  });
+
+  it('two payout_account tags that disagree: one "none" is enough (refusing LANA moves no money)', () => {
+    expect(isNoPayoutAccountUnit(ev([['payout_account', 'bank'], ['payout_account', 'none']]))).toBe(true);
+    expect(isNoPayoutAccountUnit(ev([['payout_account', 'none'], ['payout_account', 'bank']]))).toBe(true);
+  });
+
+  it('is undefined when it cannot tell, and ignores malformed entries', () => {
+    for (const raw of UNREADABLE) expect(isNoPayoutAccountUnit(raw)).toBeUndefined();
+    expect(isNoPayoutAccountUnit(JSON.stringify({ tags: [null, 5, 'x', ['payout_account', 'none']] }))).toBe(true);
+    expect(isNoPayoutAccountUnit(JSON.stringify({ tags: [null, 5] }))).toBe(false);
+  });
+});
+
+describe('unitMarginPercent — the KIND 30905 reading of margin_percent, for direct LANA sales only', () => {
+  const margin = (...values: Array<string | undefined>) =>
+    unitMarginPercent(ev([['d', 'u1'], ...values.map(v => (v === undefined ? ['margin_percent'] : ['margin_percent', v]))]));
+
+  it('absent, empty or "0" is 0', () => {
+    expect(unitMarginPercent(ev([['d', 'u1']]))).toBe(0);
+    expect(margin('')).toBe(0);
+    expect(margin('   ')).toBe(0);
+    expect(margin('0')).toBe(0);
+    expect(margin(undefined)).toBe(0);
+  });
+
+  it('every whole percent from 1 to 20 as written', () => {
+    expect(MAX_MARGIN_PERCENT).toBe(20);
+    for (let m = 1; m <= 20; m++) expect(margin(String(m))).toBe(m);
+    // Trimmed, as the 30905 reader trims.
+    expect(margin(' 10 ')).toBe(10);
+  });
+
+  it('anything else is null: such a unit takes no direct LANA sale (fail closed)', () => {
+    for (const value of ['21', '100', '-1', '-0', '01', '00', '10.0', '10.5', '1e1', '10%', 'ten', '+5', '0x10', '２']) {
+      expect(margin(value), value).toBeNull();
+    }
+  });
+
+  it('two margin_percent tags say two prices: neither is taken', () => {
+    expect(margin('10', '10')).toBeNull();
+    expect(margin('10', '20')).toBeNull();
+  });
+
+  it('a value that is not text is null', () => {
+    expect(unitMarginPercent(JSON.stringify({ tags: [['margin_percent', 10]] }))).toBeNull();
+  });
+
+  it('is undefined when it cannot tell', () => {
+    for (const raw of UNREADABLE) expect(unitMarginPercent(raw)).toBeUndefined();
+  });
+});
+
+describe('unitPayoutWallet — the one wallet the unit names', () => {
+  const W1 = 'LbtLTSACAREiT513CVNpbg6NeE5cFbrhkC';
+  const W2 = 'LN4sFqQS2w3LiFmjMRVMvYPDuU9gsJpxef';
+
+  it('the one wallet named, trimmed', () => {
+    expect(unitPayoutWallet(ev([['lanapays_payout_wallet', W1]]))).toBe(W1);
+    expect(unitPayoutWallet(ev([['lanapays_payout_wallet', ` ${W1} `]]))).toBe(W1);
+    // The same wallet twice is still one wallet.
+    expect(unitPayoutWallet(ev([['lanapays_payout_wallet', W1], ['lanapays_payout_wallet', W1]]))).toBe(W1);
+  });
+
+  it('none, an empty one, or two different ones: null, never a guess about where money goes', () => {
+    expect(unitPayoutWallet(ev([['d', 'u1']]))).toBeNull();
+    expect(unitPayoutWallet(ev([['lanapays_payout_wallet', '']]))).toBeNull();
+    expect(unitPayoutWallet(ev([['lanapays_payout_wallet']]))).toBeNull();
+    expect(unitPayoutWallet(ev([['lanapays_payout_wallet', W1], ['lanapays_payout_wallet', W2]]))).toBeNull();
+  });
+
+  it('is undefined when it cannot tell', () => {
+    for (const raw of UNREADABLE) expect(unitPayoutWallet(raw)).toBeUndefined();
   });
 });

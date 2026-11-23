@@ -24,6 +24,7 @@ import RegisterCustomerTab from "@/components/tabs/RegisterCustomerTab";
 import CaretakerTab from "@/components/tabs/CaretakerTab";
 import MobileQuotaPanel from "@/components/MobileQuotaPanel";
 import { useAuth } from "@/contexts/AuthContext";
+import { isNoPayoutAccountUnit } from "@/lib/payoutAccount";
 import lanaIcon from "@/assets/lana-icon.png";
 import mandalaMesh from "@/assets/mandala-mesh.png";
 
@@ -51,6 +52,16 @@ interface BusinessUnit {
   // LanaRetail portals. Absent (old server / unparseable event) ⇒ treat as true,
   // see ordersVisible.
   online_shop?: boolean;
+  // Server-computed from KIND 30901 v1.4.0: 'none' = a seller without a company
+  // and without a bank account (shop.lanapays.us option (c)). Such a shop sells
+  // for cash through this till and takes LANA only directly, never through the
+  // brain. Absent = a shop as before (strict === 'none', lib/payoutAccount.ts).
+  payout_account?: 'none';
+  // Only with payout_account 'none': the margin (0..20 %) the shop adds to a
+  // DIRECT LANA payment, or null when it cannot be read; and the wallet its
+  // reward and its direct LANA go to.
+  margin_percent?: number | null;
+  lanapays_payout_wallet?: string | null;
   // suspension_status now carries the Merchant Registration Gateway status:
   //   'pending' | 'active' | 'quota_warning_80' | 'quota_blocked' | 'suspended' | 'rejected'
   suspension_status: string;
@@ -256,6 +267,9 @@ const Index = () => {
   const [splitHappeningUntil, setSplitHappeningUntil] = useState<string | null>(null);
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
   const [lanaPaymentRequest, setLanaPaymentRequest] = useState<{ walletAddress: string } | null>(null);
+  // Was the open LANA view opened for a shop without a company? Set when a LANA
+  // view is opened, never while it is open (see the views below).
+  const [lanaViewClosed, setLanaViewClosed] = useState(false);
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | null>(null);
   const [loadingUnits, setLoadingUnits] = useState(true);
@@ -271,6 +285,9 @@ const Index = () => {
 
   // Sync selected unit ID to window for payment tabs to access
   const effectiveUnit = selectedUnit || (businessUnits.length === 1 ? businessUnits[0] : null);
+  // A seller without a company and without a bank account: cash through this
+  // till, LANA only directly (never through the brain). Absent field = as before.
+  const noCompanyUnit = isNoPayoutAccountUnit(effectiveUnit);
 
   // Stable identity for the child-facing list (see the note on setBusinessUnits).
   const unblockedUnits = useMemo(() => businessUnits.filter(u => !isUnitBlocked(u)), [businessUnits]);
@@ -295,6 +312,12 @@ const Index = () => {
   // Whenever the polled list refreshes, swap our selected reference for the
   // fresh row so suspension_status / quota fields stay current. This drives
   // the auto-deselect-when-blocked UX without a separate effect.
+  //
+  // The payout fields are compared too (23 Nov 2026). A shop that switches
+  // between "with a company" and "without a company" on shop.lanapays.us must
+  // reach this till by itself: which tiles show depends on them. Before, the
+  // selected unit (and the single unit, auto-selected once) kept its payout
+  // fields until a reload.
   useEffect(() => {
     if (!selectedUnit || businessUnits.length === 0) return;
     const fresh = businessUnits.find(u => u.unit_id === selectedUnit.unit_id);
@@ -305,12 +328,19 @@ const Index = () => {
     if (fresh !== selectedUnit) {
       // Compare on the fields we care about; preserve referential stability
       // so React doesn't re-render unnecessarily.
+      const list = (v: string[] | undefined) => JSON.stringify(v ?? []);
       const changed = (
         fresh.suspension_status !== selectedUnit.suspension_status
         || fresh.quota_volume_used !== selectedUnit.quota_volume_used
         || fresh.quota_volume_limit !== selectedUnit.quota_volume_limit
         || fresh.quota_tx_used !== selectedUnit.quota_tx_used
         || fresh.quota_tx_limit !== selectedUnit.quota_tx_limit
+        || fresh.payout_account !== selectedUnit.payout_account
+        || fresh.margin_percent !== selectedUnit.margin_percent
+        || fresh.lanapays_payout_wallet !== selectedUnit.lanapays_payout_wallet
+        || fresh.payout_configured !== selectedUnit.payout_configured
+        || list(fresh.payout_problems) !== list(selectedUnit.payout_problems)
+        || list(fresh.payout_advice) !== list(selectedUnit.payout_advice)
       );
       if (changed) setSelectedUnit(fresh);
     }
@@ -407,8 +437,14 @@ const Index = () => {
     return () => clearInterval(interval);
   }, [session?.nostrHexId, t]);
 
+  /** Open a LANA view, deciding once whether this shop may sell for LANA here. */
+  const openLanaView = (view: "lana" | "lana-online") => {
+    setLanaViewClosed(noCompanyUnit);
+    setActiveView(view);
+  };
+
   const openLanaOnline = () => {
-    setActiveView("lana-online");
+    openLanaView("lana-online");
     // Mark paid requests as seen → clears the badge; list still shows them.
     if (session?.nostrHexId) {
       fetch('/api/payment-requests/mark-seen', {
@@ -526,7 +562,7 @@ const Index = () => {
 
   const handlePayWithLana = (walletAddress: string) => {
     setLanaPaymentRequest({ walletAddress });
-    setActiveView("lana");
+    openLanaView("lana");
   };
 
   const goHome = () => {
@@ -1002,7 +1038,9 @@ const Index = () => {
               // entered payout data, disable ONLY the LANA button and show a clear
               // notice. Strict `=== false` is fail-open: if the server field is ever
               // absent (old build / rollout lag) we never wrongly block LANA.
-              const lanaPayoutMissing = !!effectiveUnit && effectiveUnit.payout_configured === false;
+              // A seller without a company chose to have no bank account: there is
+              // no LANA tile to grey and nothing to ask them to enter.
+              const lanaPayoutMissing = !!effectiveUnit && !noCompanyUnit && effectiveUnit.payout_configured === false;
               // Monthly cash limit reached → disable ONLY the cash button; LANA
               // stays available (the limit never applies to LANA).
               const cashQuotaBlocked = !!effectiveUnit && isCashQuotaBlocked(effectiveUnit);
@@ -1018,17 +1056,19 @@ const Index = () => {
                     }`}
                   >
                     {splitHappening ? (
-                      /* Split in progress → the notice lives ON the cash button (EN + SL) so it can't be missed. */
+                      /* Split in progress → the notice lives ON the cash button (EN + SL) so it can't be missed.
+                         A shop without a company has no LANA through this till, so its text says
+                         when cash comes back instead of "pay with LANA". */
                       <div className="relative z-10 flex flex-col items-center gap-1.5 text-center">
                         <MitosisIcon className="w-10 h-10 text-destructive" />
                         <span className="text-base font-bold text-destructive leading-tight">{t('split.happening.title', { lng: 'en' })}</span>
-                        <span className="text-xs font-medium text-destructive/90 leading-snug">{t('split.happening.body', { lng: 'en' })}</span>
+                        <span className="text-xs font-medium text-destructive/90 leading-snug">{t(noCompanyUnit ? 'split.happening.bodyNoCompany' : 'split.happening.body', { lng: 'en' })}</span>
                         {(() => {
                           const m = untilMessage(splitHappeningUntil, 'en');
                           return m ? <span className="text-xs font-bold text-destructive leading-snug">{t(m.key, { lng: 'en', ...m.values })}</span> : null;
                         })()}
                         <span className="text-base font-bold text-destructive leading-tight mt-1">{t('split.happening.title', { lng: 'sl' })}</span>
-                        <span className="text-xs font-medium text-destructive/90 leading-snug">{t('split.happening.body', { lng: 'sl' })}</span>
+                        <span className="text-xs font-medium text-destructive/90 leading-snug">{t(noCompanyUnit ? 'split.happening.bodyNoCompany' : 'split.happening.body', { lng: 'sl' })}</span>
                         {(() => {
                           const m = untilMessage(splitHappeningUntil, 'sl');
                           return m ? <span className="text-xs font-bold text-destructive leading-snug">{t(m.key, { lng: 'sl', ...m.values })}</span> : null;
@@ -1053,8 +1093,19 @@ const Index = () => {
                     )}
                   </button>
 
+                  {/* A shop without a company: cash through this till, LANA only
+                      directly. Neither LANA tile is shown (the server refuses
+                      both rails for it too); a calm note says why. */}
+                  {noCompanyUnit && (
+                    <div data-testid="no-company-note" className="rounded-2xl bg-primary/5 border border-primary/20 p-4 flex items-start gap-3">
+                      <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                      <p className="text-sm font-medium text-foreground leading-snug">{t('home.noCompanyNote')}</p>
+                    </div>
+                  )}
+
+                  {!noCompanyUnit && (
                   <button
-                    onClick={() => setActiveView("lana")}
+                    onClick={() => openLanaView("lana")}
                     disabled={lanaPayDisabled || lanaPayoutMissing}
                     className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
@@ -1072,10 +1123,12 @@ const Index = () => {
                     <span className="relative z-10 text-xl font-bold text-foreground text-center leading-tight">{t('home.payWithLana')}</span>
                     <span className="relative z-10 text-xs text-muted-foreground text-center leading-snug">{t('home.lanaPayment')}</span>
                   </button>
+                  )}
 
                   {/* Lana-online — remote payment request. Same gates as the LANA
                       button (payout data required; splitHappening never blocks the
                       LANA rail). Red badge = paid requests not yet seen. */}
+                  {!noCompanyUnit && (
                   <button
                     onClick={openLanaOnline}
                     disabled={lanaPayDisabled || lanaPayoutMissing}
@@ -1100,6 +1153,7 @@ const Index = () => {
                     <span className="relative z-10 text-xl font-bold text-foreground text-center leading-tight">{t('home.payLanaOnline')}</span>
                     <span className="relative z-10 text-xs text-muted-foreground text-center leading-snug">{t('home.lanaOnlinePayment')}</span>
                   </button>
+                  )}
 
                   {noFunds && !noShopSelected && (
                     <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
@@ -1121,8 +1175,9 @@ const Index = () => {
 
                   {/* Payout details the bank would refuse (red) or that will likely
                       stop a payout (amber) — Brilly, 21 Nov 2026. The fix is in the
-                      app where the shop was opened. */}
-                  {effectiveUnit && ((effectiveUnit.payout_problems?.length || 0) > 0 || (effectiveUnit.payout_advice?.length || 0) > 0) && !lanaPayoutMissing && (() => {
+                      app where the shop was opened. Never for a shop without a
+                      company: it has no bank, and must not be told to enter one. */}
+                  {effectiveUnit && !noCompanyUnit && ((effectiveUnit.payout_problems?.length || 0) > 0 || (effectiveUnit.payout_advice?.length || 0) > 0) && !lanaPayoutMissing && (() => {
                     const problems = effectiveUnit.payout_problems || [];
                     const advice = effectiveUnit.payout_advice || [];
                     const red = problems.length > 0;
@@ -1147,14 +1202,15 @@ const Index = () => {
                   })()}
 
                   {/* Monthly cash limit reached → cash is greyed above; explain why,
-                      and point the seller to LANA (which stays unlimited). */}
+                      and point the seller to LANA (which stays unlimited). A shop
+                      without a company has no LANA here: it is told when cash opens. */}
                   {cashQuotaBlocked && !cashPayDisabled && (
                     <div className="rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 p-6 text-center space-y-3">
                       <div className="w-14 h-14 mx-auto rounded-full bg-amber-500/15 flex items-center justify-center">
                         <Banknote className="w-7 h-7 text-amber-600 dark:text-amber-400" />
                       </div>
                       <h3 className="text-xl font-bold text-amber-700 dark:text-amber-400">{t('home.cashLimitReachedTitle')}</h3>
-                      <p className="text-base font-medium text-amber-700/90 dark:text-amber-300/90 leading-relaxed">{t('home.cashLimitReachedDetail')}</p>
+                      <p className="text-base font-medium text-amber-700/90 dark:text-amber-300/90 leading-relaxed">{t(noCompanyUnit ? 'home.cashLimitReachedDetailNoCompany' : 'home.cashLimitReachedDetail')}</p>
                     </div>
                   )}
 
@@ -1275,12 +1331,24 @@ const Index = () => {
               <WalletsTab onPayWithCash={handlePayWithCash} onPayWithLana={handlePayWithLana} />
             )}
             {activeView === "cash" && (
-              <CashTab selectedWallet={selectedWallet} onClearWallet={() => setSelectedWallet(null)} unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} />
+              <CashTab selectedWallet={selectedWallet} onClearWallet={() => setSelectedWallet(null)} unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} noCompany={noCompanyUnit} />
             )}
-            {activeView === "lana" && (
+            {/* A LANA view opened for a shop without a company shows only the
+                reason. Decided when the view is opened (see openLanaView): a tab
+                already open stays, even if the flag arrives meanwhile, because
+                a LANA payment it has sent may still be answered, and that answer
+                is the only place the seller learns whether the customer paid.
+                The server refuses its next step anyway, in plain words. */}
+            {(activeView === "lana" || activeView === "lana-online") && lanaViewClosed && (
+              <div data-testid="no-company-lana-closed" className="mx-6 my-4 rounded-2xl bg-primary/5 border border-primary/20 p-6 text-center space-y-3">
+                <Info className="w-8 h-8 text-primary mx-auto" />
+                <p className="text-base font-medium text-foreground leading-relaxed">{t('purchase.unitNoPayoutAccount')}</p>
+              </div>
+            )}
+            {activeView === "lana" && !lanaViewClosed && (
               <LanaTab paymentRequest={lanaPaymentRequest} onClearRequest={() => setLanaPaymentRequest(null)} unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} />
             )}
-            {activeView === "lana-online" && (
+            {activeView === "lana-online" && !lanaViewClosed && (
               <LanaOnlineTab unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} merchantHex={session?.nostrHexId} />
             )}
             {activeView === "orders" && (

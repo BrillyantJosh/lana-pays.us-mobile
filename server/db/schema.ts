@@ -350,6 +350,19 @@ export function initializeSchema(db: Database.Database): void {
   // Default validity of a payment request link: 168h = 7 days (0 = never expires).
   db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('payment_request_expiry_hours', '168')").run();
 
+  // ── Automatic sale numbers of shops without a company (23 Nov 2026) ───────
+  // Such a shop issues no invoices: the seller says what was sold and the till
+  // adds this unit's next number, so two sales described the same way are not
+  // refused by the brain as one invoice used twice (server/saleNumbers.ts).
+  // One row per unit, holding the last number handed out.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS unit_sale_numbers (
+      unit_id TEXT PRIMARY KEY,
+      last_number INTEGER NOT NULL CHECK (last_number > 0),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
   // ── Lana Online Shop orders (KIND 36520/36521/36522 + 30933 mirror) ───────
   // Relay mirror for the merchant's "Orders" button. NO PII anywhere in here:
   // the buyer's name/address exist only as NIP-44 ciphertext inside the raw

@@ -34,6 +34,7 @@ import {
 } from '@/lib/blockWait';
 import { currencySymbol, formatLana, formatLanoshis } from '@/lib/format';
 import { isMerchantUnavailable, exclusionFromRefusal } from '@/lib/exclusion';
+import { isUnitNoPayoutAccount, payoutRefusalKey } from '@/lib/payoutAccount';
 import { changeLanguage } from '@/i18n';
 import { LANGUAGES } from '@/i18n/languages';
 import lanaIcon from '@/assets/lana-icon.png';
@@ -47,7 +48,14 @@ interface RequestView {
   receiptDescription: string | null;
   /** The seller's own note on the request (what it is for / who it is for). */
   note?: string | null;
-  status: 'pending' | 'paid' | 'cancelled' | 'expired';
+  /**
+   * 'closed': the request is still open, but the shop has no bank account now
+   * (KIND 30901 payout_account "none"), so it cannot be paid in LANA. The
+   * server says so from the first load; nothing is asked of the customer.
+   */
+  status: 'pending' | 'paid' | 'cancelled' | 'expired' | 'closed';
+  /** Why a 'closed' request is closed (UNIT_NO_PAYOUT_ACCOUNT). */
+  closedReason?: string;
   createdAt: string;
   expiresAt: string | null;
   paidAt: string | null;
@@ -127,6 +135,13 @@ const PublicPay = () => {
       if (r && r.status === 'pending') setPhase('ready');
     })();
   }, [loadRequest]);
+
+  /** The server refused this link because the shop has no bank account: show it closed. */
+  const closeForShop = () => {
+    wifRef.current = '';
+    setRequest(prev => (prev ? { ...prev, status: 'closed' } : prev));
+    setPhase('closed');
+  };
 
   const sym = request ? currencySymbol(request.currency) : '';
 
@@ -241,6 +256,18 @@ const PublicPay = () => {
       if (res.status === 409 && json?.error === 'REQUEST_NOT_PAYABLE') {
         await loadRequest();
         setPhase('closed');
+        return false;
+      }
+      // The shop has no bank account now: this link cannot be paid in LANA.
+      if (!res.ok && isUnitNoPayoutAccount(json)) {
+        closeForShop();
+        return false;
+      }
+      // The brain refused because of the shop's payout settings. The buyer can
+      // do nothing about them: the shop cannot take this payment now.
+      if (!res.ok && payoutRefusalKey(json)) {
+        setError(t('purchase.merchantUnavailable'));
+        setPhase('ready');
         return false;
       }
       // The SELLER carries a commission decision. The person reading this page
@@ -370,8 +397,18 @@ const PublicPay = () => {
       return;
     }
 
+    // Refused before the claim: nothing was sent, and the link is closed.
+    if (isUnitNoPayoutAccount(json)) {
+      closeForShop();
+      return;
+    }
+
     // Same error mapping as LanaTab.
-    if (res.status === 403 && isMerchantUnavailable(json)) {
+    if (payoutRefusalKey(json)) {
+      // The brain refused because of the shop's payout settings, before any
+      // LANA moved. The buyer can do nothing about them.
+      setError(t('purchase.merchantUnavailable'));
+    } else if (res.status === 403 && isMerchantUnavailable(json)) {
       setError(t('purchase.merchantUnavailable'));
     } else if (res.status === 403 && exclusionFromRefusal(json)) {
       const said = (exclusionFromRefusal(json)!.ground || '').trim();
@@ -520,6 +557,11 @@ const PublicPay = () => {
             <>
               <Clock className="w-10 h-10 text-muted-foreground mx-auto" />
               <p className="text-base font-semibold text-foreground">{t('pay.expiredInfo')}</p>
+            </>
+          ) : request.status === 'closed' ? (
+            <>
+              <XCircle className="w-10 h-10 text-muted-foreground mx-auto" />
+              <p className="text-base font-semibold text-foreground">{t('pay.closedNoPayoutAccount')}</p>
             </>
           ) : (
             <>

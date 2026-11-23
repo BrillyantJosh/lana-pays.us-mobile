@@ -18,6 +18,7 @@ import { sendPurchase, sellerRefusalKey } from "@/lib/purchaseRequest";
 import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
 import { freshReceiptFields, duplicateRefusal, checkDedup, canContinueAfterHit, type DedupHit } from "@/lib/receiptDedup";
 import { DuplicateNumberFix, RefusedNumberHint } from "@/components/DuplicateNumberFix";
+import { payoutRefusalKey } from "@/lib/payoutAccount";
 import lanaIcon from "@/assets/lana-icon.png";
 
 /**
@@ -392,7 +393,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         });
         const previewData = await previewRes.json();
         if (!previewRes.ok || !previewData.success) {
-          setPurchaseError(excludedMessage(previewRes.status, previewData, t) || previewData.error || t('lana.purchaseFailed'));
+          // A refusal about the shop's payout settings (no bank account, no
+          // valid reward wallet) is said in the seller's words, not printed raw.
+          const payoutKey = payoutRefusalKey(previewData);
+          setPurchaseError(excludedMessage(previewRes.status, previewData, t) || (payoutKey ? t(payoutKey) : null) || previewData.error || t('lana.purchaseFailed'));
           setStep("display");
           return;
         }
@@ -479,6 +483,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
           } else if (sellerRefusalKey(purchaseRes.status, brainData)) {
             // Refused before it reached the brain, so the signed payment never left.
             setPurchaseError(t(sellerRefusalKey(purchaseRes.status, brainData)!));
+          } else if (payoutRefusalKey(brainData)) {
+            // The shop's payout settings refused the sale before any LANA was
+            // sent: no bank account, or no valid wallet for the reward.
+            setPurchaseError(t(payoutRefusalKey(brainData)!));
           } else {
             setPurchaseError(excludedMessage(purchaseRes.status, brainData, t) || brainData.error || t('lana.purchaseFailed'));
           }

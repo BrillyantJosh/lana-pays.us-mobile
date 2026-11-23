@@ -17,7 +17,7 @@ import { ordersSchemaStatus } from './db/schema.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { fetchSingleBalance, fetchBalancesBatch, electrumCall, type ElectrumServer } from './lib/electrum.js';
 import { SIMPLE_UNIT_SQL } from './lib/unitOrigin.js';
-import { isOnlineShopUnit } from './lib/unitFlags.js';
+import { tillUnitView } from './lib/tillUnitView.js';
 import { fetchKind0Profile, fetchKind0Full, fetchKind0Status, broadcastEvent, SUPPORTED_LANGUAGES } from './lib/nostr.js';
 import { ensureExclusionTables, exclusionRefusal, exclusionKnown } from './lib/personExclusion.js';
 import { gate, gateNames, excludedNow, logGateState, refreshPersonExclusions, type RequestNames } from './lib/exclusionGate.js';
@@ -25,6 +25,8 @@ import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js
 import { registerPaymentRequestRoutes } from './paymentRequests.js';
 import { registerOrderRoutes } from './orders.js';
 import { brainPurchaseHandler } from './brainPurchase.js';
+import { brainPreviewHandler } from './brainPreview.js';
+import { registerSaleNumberRoutes } from './saleNumbers.js';
 import { purchaseSellerCheck, logPurchaseCheckState } from './purchaseSeller.js';
 import { keepRawBody } from './lib/nip98.js';
 import { devRelays } from './lib/devOverrides.js';
@@ -46,7 +48,6 @@ const LANA_RELAYS = devRelays.length
 // our lanatrace.us server; the /functions/v1/* path shape is preserved.
 const LANA_REGISTRAR_URL = process.env.LANA_REGISTRAR_URL || 'https://lanatrace.us';
 import rateLimit from 'express-rate-limit';
-import { checkPayoutData } from './lib/payoutDataCheck.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -583,46 +584,10 @@ app.get('/api/business-units/:hexId', gate(db, req => req.params.hexId), (req, r
     }
   });
 
-  // Whether the merchant has entered payout data (IBAN/account). A LANA purchase
-  // wires the merchant invoice to their bank (brain orchestrator merchant_payment
-  // destination_type='bank'); with no IBAN it cannot be paid out — so the mobile
-  // greys out "Pay with LANA". Cash needs no bank, so it stays enabled.
-  // The IBAN lives in the KIND 30901 `payment_scheme_fields` tag (modern), with the
-  // legacy `bank_account` column as a fallback. Read it from raw_event so no schema
-  // change / re-ingestion is needed; the raw IBAN is never returned to the client.
-  const hasPayout = (u: any): boolean => {
-    try {
-      const ev = JSON.parse(u.raw_event || '{}');
-      const tag = (ev.tags || []).find((t: any[]) => t[0] === 'payment_scheme_fields');
-      if (tag && tag[1]) {
-        const f = JSON.parse(tag[1]);
-        if (f && typeof f === 'object' && Object.values(f).some(v => String(v ?? '').trim() !== '')) {
-          return true;
-        }
-      }
-    } catch { /* fall through to legacy / false */ }
-    return !!(u.bank_account && String(u.bank_account).trim() !== '');
-  };
-
-  const result = filtered.map((u) => {
-    // Strip the raw payout fields; expose only the computed booleans.
-    const { raw_event, bank_account, ...rest } = u;
-    // What the bank would refuse / what will likely stop a payout, by
-    // direct.lana.fund's bank-file rules (lib/payoutDataCheck.ts, Brilly
-    // 21 Nov 2026), and where the owner fixes it. Codes only, no IBAN.
-    let tags: any[] = [];
-    try { tags = JSON.parse(raw_event || '{}').tags || []; } catch { tags = []; }
-    const payout = checkPayoutData(tags);
-    const simple = tags.some((t: any[]) => Array.isArray(t) && t[0] === 'unit_type' && t[1] === 'simple.lanapays.us');
-    return {
-      ...rest,
-      payout_configured: hasPayout({ raw_event, bank_account }),
-      online_shop: isOnlineShopUnit(raw_event),
-      payout_problems: payout.problems,
-      payout_advice: payout.advice,
-      payout_fix_url: simple ? 'https://simple.lanapays.us' : 'https://shop.lanapays.us',
-    };
-  });
+  // Each unit as the till sees it: the payout flags computed from the stored
+  // KIND 30901, raw_event and bank_account stripped (lib/tillUnitView.ts). A unit
+  // without a company also carries payout_account, margin_percent and its wallet.
+  const result = filtered.map(u => tillUnitView(u));
 
   res.json({ units: result });
 });
@@ -1221,36 +1186,10 @@ const purchaseNames = (req: any): RequestNames => ({
 /**
  * POST /api/brain/purchase/preview
  * Proxy to Brain's read-only preview endpoint — returns LANA recipients
- * for client-side signing, without committing the purchase.
+ * for client-side signing, without committing the purchase. The handler is
+ * in brainPreview.ts; a unit without a bank account is refused there.
  */
-app.post('/api/brain/purchase/preview', purchaseLimiter, gateNames(db, purchaseNames), async (req, res) => {
-  if (!BRAIN_API_URL) {
-    return res.status(503).json({ success: false, error: 'Brain service not configured' });
-  }
-  try {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (BRAIN_PURCHASE_KEY) headers['Authorization'] = `Bearer ${BRAIN_PURCHASE_KEY}`;
-
-    const response = await fetch(`${BRAIN_API_URL}/api/purchase/preview-lana-recipients`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(req.body),
-    });
-    const data = await response.json();
-    // DIAGNOSTIC: pinpoint which required field is empty when Brain rejects a
-    // preview with "Missing required fields" (the field names + safe prefixes,
-    // never full secrets). Lets us tell the seller exactly what didn't resolve.
-    if (response.status === 400 && data?.error === 'Missing required fields') {
-      const b = req.body || {};
-      const missing = ['unit_id', 'customer_hex', 'customer_wallet', 'amount', 'currency'].filter(f => !b[f]);
-      console.warn(`[mobile] PREVIEW 400 Missing required fields → EMPTY: [${missing.join(', ') || 'none?'}] | unit_id=${b.unit_id || '∅'} hex=${(b.customer_hex || '∅').slice(0, 12)} wallet=${(b.customer_wallet || '∅').slice(0, 16)} amount=${b.amount ?? '∅'} currency=${b.currency || '∅'}`);
-    }
-    res.status(response.status).json(data);
-  } catch (error: any) {
-    console.error('[mobile] Brain preview proxy error:', error.message);
-    res.status(502).json({ success: false, error: 'Failed to reach Brain service' });
-  }
-});
+app.post('/api/brain/purchase/preview', purchaseLimiter, gateNames(db, purchaseNames), brainPreviewHandler(db, BRAIN_API_URL, BRAIN_PURCHASE_KEY));
 
 /**
  * POST /api/brain/purchase/check-dedup
@@ -1541,6 +1480,10 @@ app.put('/api/admin/settings', (req, res) => {
 // ─── Lana-online payment requests (merchant + public /api/pay/:token) ─────
 
 registerPaymentRequestRoutes(app, db);
+
+// ─── Automatic sale numbers of shops without a company (cash till) ────────
+
+registerSaleNumberRoutes(app, db);
 
 // ─── Lana Online Shop orders (merchant "Orders" button) ───────────────────
 

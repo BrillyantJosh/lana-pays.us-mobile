@@ -24,6 +24,7 @@ const read = (rel: string) => fs.readFileSync(path.resolve(here, '..', rel), 'ut
 const indexTs = read('index.ts');
 const ordersTs = read('orders.ts');
 const paymentsTs = read('paymentRequests.ts');
+const saleNumbersTs = read('saleNumbers.ts');
 const requestLogTs = read('shared/requestLogging.ts');
 const heartbeatTs = read('heartbeat.ts');
 
@@ -41,6 +42,15 @@ describe('the answer route lives above the SPA catch-all', () => {
     const catchAll = registrationLine(indexTs, "app.get('/{*path}'");
     expect(route).toBeGreaterThan(0);
     expect(catchAll).toBeGreaterThan(0);
+    expect(route).toBeLessThan(catchAll);
+  });
+
+  it('the automatic sale numbers of shops without a company are registered above it too', () => {
+    // Below the catch-all, POST /api/cash-sale-number would never be reached and
+    // a no-company till could not get a number (its cash sales would stop).
+    const route = registrationLine(indexTs, 'registerSaleNumberRoutes(app, db);');
+    const catchAll = registrationLine(indexTs, "app.get('/{*path}'");
+    expect(route).toBeGreaterThan(0);
     expect(route).toBeLessThan(catchAll);
   });
 
@@ -83,6 +93,7 @@ describe('every route that acts in a person\'s name asks the gate', () => {
     ['paymentRequests.ts', paymentsTs, "app.get('/api/payment-requests/overview'"],
     ['paymentRequests.ts', paymentsTs, "app.post('/api/pay/:token/preview'"],
     ['paymentRequests.ts', paymentsTs, "app.post('/api/pay/:token/submit'"],
+    ['saleNumbers.ts', saleNumbersTs, "app.post('/api/cash-sale-number'"],
   ];
 
   for (const [label, source, prefix] of gated) {

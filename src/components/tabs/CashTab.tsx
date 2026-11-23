@@ -17,6 +17,7 @@ import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
 import { localNameFor, registeredCardStep, newCardMode, regularCustomerStep, type ProfileStatus } from "@/lib/customerName";
 import { freshReceiptFields, duplicateRefusal, checkDedup, canContinueAfterHit, type DedupHit } from "@/lib/receiptDedup";
 import { DuplicateNumberFix, RefusedNumberHint } from "@/components/DuplicateNumberFix";
+import { payoutRefusalKey, saleInvoiceNumber, readSaleNumber, SALE_DESCRIPTION_MAX, type SaleNumber } from "@/lib/payoutAccount";
 
 const currencyIcons: Record<string, typeof PoundSterling> = {
   GBP: PoundSterling, USD: DollarSign, EUR: Euro,
@@ -48,6 +49,12 @@ interface CashTabProps {
   onClearWallet?: () => void;
   unitCurrency?: string;
   unitId?: string;
+  /**
+   * The shop of a seller without a company (KIND 30901 payout_account "none").
+   * It issues no invoices: the seller says what was sold, and the till adds the
+   * unit's next sale number (server/saleNumbers.ts). No text sends them to LANA.
+   */
+  noCompany?: boolean;
 }
 
 /** Purchase data snapshot — captured BEFORE scanner opens to avoid stale closures */
@@ -60,6 +67,8 @@ interface PurchaseSnapshot {
   receiptHash: string | null;          // SHA-256 of receipt bytes — used by Brain to dedup
   receiptType: 'receipt' | 'photo';
   receiptDescription: string | null;
+  /** A shop without a company: what was sold, and the sale number it got. */
+  sale?: { description: string; number: SaleNumber };
 }
 
 type Step = "receipt" | "invoice" | "scan" | "register" | "confirmed";
@@ -91,7 +100,7 @@ function looksLikePriorDedupError(text: string | null | undefined): boolean {
   return OWN_DEDUP_PHRASES.some(p => lowered.includes(p));
 }
 
-const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTabProps) => {
+const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompany = false }: CashTabProps) => {
   const { t, i18n } = useTranslation();
   const { session } = useAuth();
   const currency = unitCurrency || session?.currency || 'GBP';
@@ -192,11 +201,92 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   const [countryCode, setCountryCode] = useState("+386");
   const [mobile, setMobile] = useState("");
 
-  // Invoice form
+  // Invoice form. For a shop without a company the same field holds what was
+  // sold, and the sale number is added when the sale is sent.
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [amount, setAmount] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // ══════ SALE NUMBER (shop without a company) ══════
+  // Asked from the server ONCE per sale and kept for every retry of it: "Scan
+  // again", the regular-customer path, "Start over" after a failed try. A retry
+  // after a lost answer then sends the same text, and the brain's rule (one
+  // invoice number once per unit) still refuses the same sale recorded twice.
+  // Only a confirmed sale lets the next sale get a new number.
+  const saleNumberRef = useRef<SaleNumber | null>(null);
+  // The request for a number while it is under way: a second tap waits for the
+  // same answer, so one sale never holds two numbers.
+  const saleNumberPending = useRef<Promise<SaleNumber | null> | null>(null);
+  const [saleNumber, setSaleNumber] = useState<SaleNumber | null>(null);
+  const [gettingSaleNumber, setGettingSaleNumber] = useState(false);
+
+  /** This sale's number: the one it has, or a new one from the server; null when none could be had. */
+  const ensureSaleNumber = (): Promise<SaleNumber | null> => {
+    if (saleNumberRef.current) return Promise.resolve(saleNumberRef.current);
+    if (saleNumberPending.current) return saleNumberPending.current;
+    const asked = (async (): Promise<SaleNumber | null> => {
+      // One tick first, so `saleNumberPending` below is set before anything here
+      // can finish (and clear it).
+      await null;
+      setGettingSaleNumber(true);
+      try {
+        const res = await fetch('/api/cash-sale-number', {
+          method: 'POST',
+          headers: withCallerHex({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ unit_id: unitId || '', staff_hex: session?.nostrHexId || undefined }),
+        });
+        const sale = res.ok ? readSaleNumber(await res.json()) : null;
+        if (!sale) {
+          setSubmitError(t('cash.saleNumberFailed'));
+          return null;
+        }
+        saleNumberRef.current = sale;
+        setSaleNumber(sale);
+        setSubmitError(null);
+        return sale;
+      } catch {
+        setSubmitError(t('cash.saleNumberFailed'));
+        return null;
+      } finally {
+        saleNumberPending.current = null;
+        setGettingSaleNumber(false);
+      }
+    })();
+    saleNumberPending.current = asked;
+    return asked;
+  };
+
+  /** A confirmed sale used its number: the next sale gets a new one. */
+  const confirmSale = () => {
+    saleNumberRef.current = null;
+    setSaleNumber(null);
+    setStep("confirmed");
+  };
+
+  /**
+   * The purchase data as it will be sent, taken BEFORE the scanner opens. For a
+   * shop without a company the invoice number is what was sold plus the sale
+   * number; null when no sale number could be had (nothing is sent then).
+   */
+  const takeSnapshot = async (): Promise<PurchaseSnapshot | null> => {
+    const base: PurchaseSnapshot = {
+      unitId: unitId || '',
+      invoiceNumber,
+      amount,
+      currency,
+      receiptUrl,
+      receiptHash,           // ← MUST snapshot, otherwise the purchase body sends undefined and Brain can't dedup by image
+      receiptType,
+      receiptDescription: analysisDescription,
+    };
+    if (!noCompany) return base;
+    const description = invoiceNumber.trim();
+    if (!description) return base; // the button is disabled without one; nothing is sent
+    const sale = await ensureSaleNumber();
+    if (!sale) return null;
+    return { ...base, invoiceNumber: saleInvoiceNumber(description, sale), sale: { description, number: sale } };
+  };
 
   // Regular customers
   const [regularCustomers, setRegularCustomers] = useState<{ customer_hex_id: string; customer_wallet: string; customer_npub?: string; display_name?: string; picture?: string; note?: string }[]>([]);
@@ -245,6 +335,11 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   const formatPurchaseError = (status: number, data: any): string => {
     const sellerKey = sellerRefusalKey(status, data);
     if (sellerKey) return t(sellerKey);
+    // The shop's payout settings stopped the sale before anything was recorded:
+    // most often a reward that must be paid in LANA and has no valid wallet
+    // (brain REWARD_WALLET_INVALID). The seller is told where to fix it.
+    const payoutKey = payoutRefusalKey(data);
+    if (payoutKey) return t(payoutKey);
     // A commission decision (KIND 87058) standing against SOMEBODY on this sale
     // — the shopper, the shop, or the person holding the phone. Without this
     // branch the till showed the raw English refusal body, so the money was
@@ -286,16 +381,19 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     }
     // CASH-only monthly limit — the brain returns 409, the mobile proxy
     // pre-flight returns 403. Either way LANA is never gated, so this only
-    // reaches the cash flow — point the seller to LANA.
+    // reaches the cash flow — point the seller to LANA. A shop without a
+    // company has no LANA at this till: it is told when cash opens again.
     if ((status === 409 || status === 403) && data?.error === 'MERCHANT_QUOTA_EXCEEDED') {
-      return t('cash.monthlyCashLimitReached');
+      return t(noCompany ? 'cash.monthlyCashLimitReachedNoCompany' : 'cash.monthlyCashLimitReached');
     }
     // Per-customer cash window (proxy pre-flight, CASH only): this
     // customer's purchases at this shop within the window already used up
-    // the limit. LANA remains available — the message says so.
+    // the limit. LANA remains available — the message says so (not to a shop
+    // without a company, which has no LANA here).
     if (status === 403 && data?.error === 'CUSTOMER_WINDOW_EXCEEDED') {
       const days = Number(data?.days ?? 1);
-      return t(days > 1 ? 'cash.customerWindowExceeded' : 'cash.customerWindowExceededToday', {
+      const key = days > 1 ? 'cash.customerWindowExceeded' : 'cash.customerWindowExceededToday';
+      return t(noCompany ? `${key}NoCompany` : key, {
         spent: Number(data?.spent ?? 0).toFixed(2),
         limit: Number(data?.limit ?? 0).toFixed(2),
         days,
@@ -312,9 +410,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
     if (status === 404 && data?.error === 'UNIT_NOT_FOUND') {
       return t('cash.purchaseFailed');
     }
-    // Split in progress — cash is disabled, LANA still works.
+    // Split in progress — cash is disabled, LANA still works (not through this
+    // till for a shop without a company: it is told cash comes back).
     if (status === 403 && data?.error === 'SPLIT_HAPPENING') {
-      return t('split.happening.body');
+      return t(noCompany ? 'split.happening.bodyNoCompany' : 'split.happening.body');
     }
     return data?.error || t('cash.purchaseFailed');
   };
@@ -405,7 +504,9 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             }), { duration: 8000 });
           }
         }
-        if (analysis.invoiceNumber) {
+        // A shop without a company issues no invoices: the field is what was
+        // sold, typed by the seller, never a number read off a photo.
+        if (analysis.invoiceNumber && !noCompany) {
           setInvoiceNumber(analysis.invoiceNumber);
           localInvoiceNumber = String(analysis.invoiceNumber);
         }
@@ -721,7 +822,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
 
           notifyServerAdjustment(purchaseData);
           if (customerName) backfillRegularName(resolvedHexId, resolvedWalletId, customerName);
-          setStep("confirmed");
+          confirmSale();
         } else if (hasNostrKeys) {
           // Check if wallet has balance — only virgin (empty) wallets can be registered
           const walletBalance = balanceRes?.ok ? balanceRes.json.lana : 0;
@@ -755,17 +856,10 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
 
   // Select a regular customer — skip scanner, submit purchase directly
   const handleSelectRegularCustomer = async (customer: { customer_hex_id: string; customer_wallet: string; display_name?: string }) => {
-    // Snapshot purchase data
-    purchaseDataRef.current = {
-      unitId: unitId || '',
-      invoiceNumber,
-      amount,
-      currency,
-      receiptUrl,
-      receiptHash,
-      receiptType,
-      receiptDescription: analysisDescription,
-    };
+    // Snapshot purchase data (with the sale number, for a shop without a company)
+    const snapshot = await takeSnapshot();
+    if (!snapshot) return;
+    purchaseDataRef.current = snapshot;
 
     const pd = purchaseDataRef.current;
     // This path used to skip the limit entirely — the clamp closes that hole.
@@ -828,7 +922,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
       if (regularName) backfillRegularName(customer.customer_hex_id, customer.customer_wallet, regularName);
       setWalletId(customer.customer_wallet);
       setNostrHexId(customer.customer_hex_id);
-      setStep("confirmed");
+      confirmSale();
     } catch {
       setSubmitError(t('cash.networkError'));
     } finally {
@@ -955,7 +1049,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
 
           notifyServerAdjustment(purchaseData);
           backfillRegularName(nostrHexId, walletId, fullName.trim());
-          setStep("confirmed");
+          confirmSale();
           return;
         }
       }
@@ -1002,12 +1096,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           </div>
           <div>
             <h2 className="font-display text-xl font-bold text-foreground">{t('cash.title')}</h2>
-            <p className="text-muted-foreground text-sm">{t('cash.receiptSubtitle')}</p>
+            <p className="text-muted-foreground text-sm">{t(noCompany ? 'cash.noCompanyReceiptSubtitle' : 'cash.receiptSubtitle')}</p>
           </div>
         </div>
         <div className="glass-card rounded-2xl p-4">
           <p className="text-sm text-muted-foreground">
-            {t('cash.receiptInstruction')}
+            {t(noCompany ? 'cash.noCompanyReceiptInstruction' : 'cash.receiptInstruction')}
           </p>
         </div>
         {receiptPreview && (
@@ -1079,7 +1173,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             </>
           )}
           {!dedupHit && (
-            <button onClick={() => setStep("invoice")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">{t('cash.skipNoReceipt')}</button>
+            <button onClick={() => setStep("invoice")} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors mt-1">{t(noCompany ? 'cash.noCompanySkipPhoto' : 'cash.skipNoReceipt')}</button>
           )}
         </div>
       </div>
@@ -1150,7 +1244,14 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
           <CheckCircle2 className="w-16 h-16 text-primary" />
           <h2 className="text-3xl font-black text-foreground">{t('cash.confirmedTitle')}</h2>
           <p className="text-2xl font-bold text-primary text-center">{currencySymbol}{pd ? parseAmountInput(pd.amount).toFixed(2) : '0.00'}</p>
-          <p className="text-lg text-muted-foreground text-center">{t('cash.invoiceLabel', { number: pd?.invoiceNumber || invoiceNumber })}</p>
+          {pd?.sale ? (
+            <>
+              <p className="text-lg text-muted-foreground text-center">{t('cash.saleNumberLabel', { number: pd.sale.number.number })}</p>
+              <p className="text-base text-foreground text-center break-words max-w-full">{pd.sale.description}</p>
+            </>
+          ) : (
+            <p className="text-lg text-muted-foreground text-center">{t('cash.invoiceLabel', { number: pd?.invoiceNumber || invoiceNumber })}</p>
+          )}
           <p className="text-xs text-muted-foreground truncate max-w-full">{t('cash.walletLabel', { address: walletId })}</p>
         </div>
 
@@ -1225,13 +1326,15 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
   // INVOICE STEP (default)
   // ═══════════════════════════════════════════════════════════════
   // The brain refused this number at payment; the same number would be
-  // refused again, so the wallet is not scanned until it changes.
-  const numberStillRefused = refusedNumber !== null && invoiceNumber.trim() === refusedNumber.trim();
+  // refused again, so the wallet is not scanned until it changes. For a shop
+  // without a company the text sent is what was sold plus this sale's number.
+  const textToSend = noCompany && saleNumber ? saleInvoiceNumber(invoiceNumber, saleNumber) : invoiceNumber;
+  const numberStillRefused = refusedNumber !== null && textToSend.trim() === refusedNumber.trim();
   return (
     <div className="flex flex-col gap-5 px-6 py-4">
       <div className="flex items-center gap-4">
         <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0"><CurrencyIcon className="w-7 h-7 text-primary" /></div>
-        <div><h2 className="font-display text-xl font-bold text-foreground">{t('cash.invoiceTitle')}</h2><p className="text-muted-foreground text-sm">{t('cash.invoiceSubtitle')}</p></div>
+        <div><h2 className="font-display text-xl font-bold text-foreground">{t(noCompany ? 'cash.noCompanyInvoiceTitle' : 'cash.invoiceTitle')}</h2><p className="text-muted-foreground text-sm">{t(noCompany ? 'cash.noCompanyInvoiceSubtitle' : 'cash.invoiceSubtitle')}</p></div>
       </div>
       {receiptPreview && (
         <div className="flex items-center gap-3 glass-card rounded-xl p-3">
@@ -1241,6 +1344,28 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
         </div>
       )}
       <div className="glass-card rounded-2xl p-5 space-y-4">
+        {noCompany ? (
+          /* A shop without a company issues no invoices: the seller says what
+             was sold, and the till adds the sale number when the sale is sent. */
+          <div className="space-y-2">
+            <Label htmlFor="cash-sale-description" className="text-sm font-medium text-foreground">
+              {t('cash.whatDidYouSell')} <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="cash-sale-description"
+              placeholder={t('cash.whatDidYouSellPlaceholder')}
+              value={invoiceNumber}
+              maxLength={SALE_DESCRIPTION_MAX}
+              onChange={(e) => {
+                setInvoiceNumber(e.target.value);
+                if (refusedNumber) setSubmitError(null);
+              }}
+              className="h-12 rounded-xl bg-background border-input"
+            />
+            <RefusedNumberHint refused={refusedNumber} current={textToSend} />
+            <p className="text-[11px] text-muted-foreground">{t('cash.saleNumberHint')}</p>
+          </div>
+        ) : (
         <div className="space-y-2">
           <Label className="text-sm font-medium text-foreground">
             {receiptType === 'receipt' ? t('cash.invoiceNumber') : t('cash.transactionDescription')} <span className="text-destructive">*</span>
@@ -1259,6 +1384,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             <p className="text-[11px] text-muted-foreground">{t('cash.noReceiptDescription')}</p>
           )}
         </div>
+        )}
         <div className="space-y-2">
           <Label className="text-sm font-medium text-foreground">{t('cash.amount', { symbol: currencySymbol })} <span className="text-destructive">*</span></Label>
           <Input type="text" inputMode="decimal" placeholder={t('cash.amountPlaceholder')} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ''))} className="h-12 rounded-xl bg-background border-input" />
@@ -1267,7 +1393,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
             const parsed = parseAmountInput(amount);
             const blocked = cashBlockReason((window as any).__selectedUnit, maxTx);
             if (blocked === 'month') {
-              return <p className="text-xs text-destructive mt-1">{t('cash.monthlyCashLimitReached')}</p>;
+              return <p className="text-xs text-destructive mt-1">{t(noCompany ? 'cash.monthlyCashLimitReachedNoCompany' : 'cash.monthlyCashLimitReached')}</p>;
             }
             if (blocked === 'funds') {
               return <p className="text-xs text-destructive mt-1">{t('cash.noFunds')}</p>;
@@ -1289,22 +1415,17 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
 
       {/* ══════ KEY FIX: Snapshot purchase data BEFORE opening scanner ══════ */}
       <Button
-        onClick={() => {
-          // Snapshot ALL purchase data right now — before scanner captures the closure
-          purchaseDataRef.current = {
-            unitId: unitId || '',
-            invoiceNumber,
-            amount,
-            currency,
-            receiptUrl,
-            receiptHash,           // ← MUST snapshot, otherwise the purchase body sends undefined and Brain can't dedup by image
-            receiptType,
-            receiptDescription: analysisDescription,
-          };
+        onClick={async () => {
+          // Snapshot ALL purchase data right now — before scanner captures the
+          // closure (takeSnapshot; with the sale number for a shop without a
+          // company, and nothing opens when no number could be had).
+          const snapshot = await takeSnapshot();
+          if (!snapshot) return;
+          purchaseDataRef.current = snapshot;
           setStep("scan");
           setScannerOpen(true);
         }}
-        disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || cashBlocked() || numberStillRefused}
+        disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || gettingSaleNumber || cashBlocked() || numberStillRefused}
         className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
       >
         <Camera className="w-5 h-5" />{t('cash.scanCustomerWallet')}
@@ -1343,7 +1464,7 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId }: CashTa
                 <button
                   key={c.customer_hex_id}
                   onClick={() => handleSelectRegularCustomer(c)}
-                  disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || cashBlocked() || numberStillRefused}
+                  disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || gettingSaleNumber || cashBlocked() || numberStillRefused}
                   className="rounded-xl bg-card border border-border p-3 flex items-center gap-3 active:scale-[0.98] transition-all hover:border-primary/30 disabled:opacity-40 disabled:pointer-events-none text-left"
                 >
                   {c.picture ? (

@@ -28,6 +28,7 @@ import { requireSignedMerchant } from './lib/nip98.js';
 import { brainPayoutReader, type InvestorStatus } from './lib/brainPayouts.js';
 import { isBrainDuplicate, verifyBrainDuplicate, duplicateMismatchMessage } from './lib/brainDuplicate.js';
 import { cleanRequestNote } from './lib/requestNote.js';
+import { UNIT_NO_PAYOUT_ACCOUNT, unitHasNoPayoutAccount, noPayoutAccountRefusal } from './lib/noPayoutAccount.js';
 import rateLimit from 'express-rate-limit';
 import type Database from 'better-sqlite3';
 import type { Express } from 'express';
@@ -192,6 +193,13 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
           ? 'Merchant is awaiting admin approval — payments paused'
           : `Cannot create payment request: merchant is ${unit.suspension_status}`,
       });
+    }
+
+    // A link is paid in LANA through the brain, and a shop without a bank
+    // account (KIND 30901 payout_account "none") takes no LANA that way.
+    // Refused before anything is stored: no link exists to be sent.
+    if (unitHasNoPayoutAccount(db, unit.unit_id)) {
+      return res.status(409).json(noPayoutAccountRefusal());
     }
 
     const amt = Number(amount);
@@ -405,6 +413,13 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
     const rate = rates[row.currency] || null;
     const indicativeLana = rate && rate > 0 ? Math.round((row.amount_fiat / rate) * 1e8) : null;
 
+    // The shop has no bank account now (KIND 30901 payout_account "none"), so
+    // a link still open cannot be paid: say it is closed, from the first page
+    // load, before the customer is asked for a key. Only what is shown changes;
+    // the row stays as it is. A paid, cancelled or expired link shows as it was.
+    const open = row.status === 'pending' || row.status === 'paying';
+    const closedForShop = open && unitHasNoPayoutAccount(db, row.unit_id);
+
     res.json({
       success: true,
       request: {
@@ -415,7 +430,9 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
         receiptUrl: row.receipt_url,
         receiptDescription: row.receipt_description,
         note: row.note ?? null,
-        status: row.status === 'paying' ? 'pending' : row.status,
+        status: closedForShop ? 'closed' : (row.status === 'paying' ? 'pending' : row.status),
+        // Why it is closed; absent (dropped from the JSON) for every other link.
+        closedReason: closedForShop ? UNIT_NO_PAYOUT_ACCOUNT : undefined,
         createdAt: row.created_at,
         expiresAt: row.expires_at,
         paidAt: row.paid_at,
@@ -459,6 +476,13 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
     // ground, no event id, nothing that says they are the excluded one.
     const sellerPreview = excludedMerchant(db, [row.unit_id]);
     if (sellerPreview) return res.status(403).json(merchantRefusal());
+
+    // The shop has no bank account (KIND 30901 payout_account "none"): this
+    // link cannot be paid in LANA. Before the brain is asked, so the customer
+    // never gets as far as signing.
+    if (unitHasNoPayoutAccount(db, row.unit_id)) {
+      return res.status(409).json(noPayoutAccountRefusal());
+    }
 
     try {
       const response = await fetch(`${BRAIN_API_URL}/api/purchase/preview-lana-recipients`, {
@@ -533,6 +557,9 @@ export function registerPaymentRequestRoutes(app: Express, db: Database.Database
     if (preRow) {
       const seller = excludedMerchant(db, [preRow.unit_id]);
       if (seller) return res.status(403).json(merchantRefusal());
+      // A shop without a bank account takes no LANA through the brain. Also
+      // read BEFORE the claim: the request stays 'pending', nothing is sent.
+      if (unitHasNoPayoutAccount(db, preRow.unit_id)) return res.status(409).json(noPayoutAccountRefusal());
     }
 
     // 1) Atomic claim — the double-pay mutex. better-sqlite3 is synchronous on a
