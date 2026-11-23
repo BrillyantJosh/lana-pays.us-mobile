@@ -136,3 +136,43 @@ docker logs lana-pays-mobile-web 2>&1 | grep 'purchase-auth. mode=' | tail -1
 ```
 
 The last line must say `mode=refusing`. To turn it off, do the same with `=off`, and it must say `mode=logging`. The value goes in `.env`, not `.env.local`, because compose reads it from there. Deploys leave that line alone. Nothing is rebuilt, and the container is recreated in seconds.
+
+## LANA direct (LANA neposredno): shops without a company
+
+A shop without a company and without a bank account (KIND 30901 `payout_account` = `none`) can take LANA straight from the customer's card into its owner's Main Wallet, with the shop's margin (0 to 20 %) on top. It does not go through the brain: no reward, no quota, no Direct Fund, no Lana.Discount. The customer's card key signs the payment and its public KIND 9350 record in the till's browser. This server checks everything again, keeps the exact bytes, sends them to two Electrum servers, and publishes the record once the payment is in a block (`server/directLana.ts`). A shop with a company can never use this path.
+
+### The switch
+
+`app_settings.direct_lana_units`, off until it is set:
+
+- empty: off for every shop (the default);
+- `*`: on for every shop without a company;
+- unit ids separated by commas: on for exactly those shops.
+
+Set it on the admin page, in the section "LANA direct". The server writes it only with the admin's own signature. A request with the admin header alone is refused with `SIGNATURE_REQUIRED`, and nothing in it is written. Every change leaves a `[direct-lana] switch set by admin` line in the container log. The plan: off, then one shop, then a first real payment by Brilly, then every shop without a company.
+
+### Before turning it on
+
+- KIND 38888 names at least two Electrum servers (port 5097), the relays, and an `fx` price for the shop's currency (EUR, GBP or USD). With fewer than two Electrum servers every direct sale is refused.
+- The registrar key of this app has room: each direct sale asks the registrar four times (the card and the shop's wallet, at the quote and at the submit), and once more after the payment is in a block.
+- The shop's KIND 30901 has `payout_account` `none`, a readable `margin_percent`, and a `lanapays_payout_wallet` that is the owner's registered, unfrozen Main Wallet. The owner signed the event.
+
+### Reading the journal
+
+Table `direct_lana_sales` holds one row per attempt. It never holds a key. Its `status`:
+
+- `quoted`: planned, nothing signed. `expired`: nobody signed it in time.
+- `validating`, `broadcasting`: signed bytes kept, on their way.
+- `sent`: a server answered with exactly its txid. `paid`: in a block.
+- `unknown`: handed over, and no server confirmed it. Only the chain resolves it, never time: in a block it is `paid`; a coin it spends, spent by another transaction 6 blocks deep, makes it `failed`.
+- `refused`: with `sent` = 0 nothing went out; with `sent` = 1 every server refused it.
+- `superseded`: replaced by a payment that spends one of the same coins, so at most one of them can ever be in a block.
+
+The record is published only for `paid` rows. Read it the way the checks above are read, for example:
+
+```sql
+SELECT status, sent, COUNT(*) AS n FROM direct_lana_sales GROUP BY status, sent;
+SELECT id, unit_id, status, reason, txid, record_published FROM direct_lana_sales WHERE status IN ('unknown', 'refused', 'superseded') ORDER BY created_at DESC LIMIT 20;
+```
+
+Lines to look for in the container log: `[direct-lana] ALERT shop wallet frozen` (that shop's button stays off until the registrar says otherwise), and `[direct-lana] ALERT attempt … cannot be marked paid` (check that sale by hand).

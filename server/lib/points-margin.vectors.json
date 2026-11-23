@@ -1,0 +1,62 @@
+{
+  "note": "Točka obilja margin (Brilly, 17. 11. 2026). Shared by letsbalance-world apps/universal/tests/points-margin.vectors.json and mejmosefajnver3 scripts/pointsMargin.vectors.json — keep both copies byte-identical. Amounts in whole cents; each unit price gets the margin on its own, half a cent up, then the quantity, half a cent up.",
+  "maxPercent": 20,
+  "marginPercent": [
+    [null, 0], ["", 0], ["  ", 0], ["0", 0], ["1", 1], ["5", 5], ["15", 15], ["20", 20], [" 20 ", 20],
+    ["21", null], ["50", null], ["100", null], ["05", null], ["00", null], ["5.0", null], ["20.5", null],
+    ["-5", null], ["+5", null], ["abc", null], ["20%", null], ["1e1", null], ["٢٠", null]
+  ],
+  "unitPrice": [
+    { "why": "the example: apples", "cents": 235, "margin": 20, "pay": 282 },
+    { "why": "the example: bread", "cents": 390, "margin": 20, "pay": 468 },
+    { "why": "the example: honey, 9.588 → 9.59", "cents": 799, "margin": 20, "pay": 959 },
+    { "why": "0.1725 → 0.17", "cents": 15, "margin": 15, "pay": 17 },
+    { "why": "2.388 → 2.39", "cents": 199, "margin": 20, "pay": 239 },
+    { "why": "exactly half a cent goes up: 1.375 → 1.38", "cents": 125, "margin": 10, "pay": 138 },
+    { "why": "exactly half a cent goes up: 0.055 → 0.06", "cents": 5, "margin": 10, "pay": 6 },
+    { "why": "one cent stays one cent", "cents": 1, "margin": 20, "pay": 1 },
+    { "why": "0.036 → 0.04", "cents": 3, "margin": 20, "pay": 4 },
+    { "why": "no margin is the supplier's price", "cents": 250, "margin": 0, "pay": 250 },
+    { "why": "a large price", "cents": 99999999, "margin": 20, "pay": 119999999 }
+  ],
+  "line": [
+    { "why": "2.5 kg × 2.82", "unitPay": 282, "qty": "2.5", "pay": 705 },
+    { "why": "2 × 4.68", "unitPay": 468, "qty": "2", "pay": 936 },
+    { "why": "1 × 9.59", "unitPay": 959, "qty": "1", "pay": 959 },
+    { "why": "half a cent goes up: 0.5 × 0.17 = 0.085", "unitPay": 17, "qty": "0.5", "pay": 9 },
+    { "why": "1.5 × 1.38 = 2.07", "unitPay": 138, "qty": "1.5", "pay": 207 },
+    { "why": "0.3 × 2.39 = 0.717", "unitPay": 239, "qty": "0.3", "pay": 72 }
+  ],
+  "orders": [
+    {
+      "why": "the example: 20 % on 21.67 € of three products is 26.00 €",
+      "margin": 20, "currency": "EUR",
+      "items": [["2.35", "2.5"], ["3.90", "2"], ["7.99", "1"]],
+      "payTotal": "26.00"
+    },
+    {
+      "why": "rounding on each unit price, then on each line",
+      "margin": 15, "currency": "EUR",
+      "items": [["0.15", "3"], ["1.25", "1.5"]],
+      "payTotal": "2.67"
+    },
+    {
+      "why": "one cent per unit, no margin left after rounding",
+      "margin": 20, "currency": "EUR",
+      "items": [["0.01", "7"]],
+      "payTotal": "0.07"
+    },
+    {
+      "why": "the largest margin",
+      "margin": 20, "currency": "EUR",
+      "items": [["10.00", "1"]],
+      "payTotal": "12.00"
+    },
+    {
+      "why": "the smallest margin",
+      "margin": 1, "currency": "EUR",
+      "items": [["10.00", "1"], ["0.49", "1"]],
+      "payTotal": "10.59"
+    }
+  ]
+}

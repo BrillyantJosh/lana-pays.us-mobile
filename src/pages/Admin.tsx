@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Shield, Save, Loader2, ShieldAlert, Lock, Unlock } from 'lucide-react';
+import { signedAuthHeaders } from '@/lib/signedRequest';
 
 /** ISO instant → the value a datetime-local input wants, in local time. */
 function toLocalInput(iso: string | null | undefined): string {
@@ -30,6 +31,10 @@ const Admin = () => {
   const [untilSaving, setUntilSaving] = useState(false);
   const [untilSaved, setUntilSaved] = useState(false);
   const [splitSaving, setSplitSaving] = useState(false);
+  // LANA neposredno's switch: '' off, '*' every shop without a company, or unit ids.
+  const [directUnits, setDirectUnits] = useState('');
+  const [directSaving, setDirectSaving] = useState(false);
+  const [directResult, setDirectResult] = useState<'' | 'saved' | 'refused'>('');
 
   // Check admin status
   useEffect(() => {
@@ -54,9 +59,44 @@ const Admin = () => {
         setSplitHappening(d.settings?.split_happening === 'true');
         // The stored instant is UTC; the input speaks local wall clock.
         setSplitUntil(toLocalInput(d.settings?.split_happening_until));
+        setDirectUnits(d.settings?.direct_lana_units || '');
       })
       .catch(() => {});
   }, [isAdmin, session?.nostrHexId]);
+
+  /**
+   * Save LANA neposredno's switch, SIGNED with this admin's key (NIP-98 bound to
+   * the exact body): the server writes this one setting only with a signature.
+   * Only this key is sent, so nothing else changes with it.
+   */
+  const saveDirectUnits = async () => {
+    if (!session?.nostrHexId) return;
+    setDirectSaving(true);
+    setDirectResult('');
+    const body = JSON.stringify({ settings: { direct_lana_units: directUnits.trim() } });
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-hex-id': session.nostrHexId,
+          ...signedAuthHeaders(session.privateKeyHex, 'PUT', '/api/admin/settings', { body }),
+        },
+        body,
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        if (typeof data.direct_lana_units === 'string') setDirectUnits(data.direct_lana_units);
+        setDirectResult('saved');
+      } else {
+        setDirectResult('refused');
+      }
+    } catch {
+      setDirectResult('refused');
+    } finally {
+      setDirectSaving(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!session?.nostrHexId) return;
@@ -300,6 +340,44 @@ const Admin = () => {
               it off above.
             </p>
           </div>
+        </div>
+
+        {/* LANA neposredno: direct LANA of shops without a company, past the brain */}
+        <div className="rounded-2xl bg-card border border-border p-5 space-y-4" data-testid="admin-direct-lana">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">LANA direct (shops without a company)</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Off by default. When on, a shop without a company takes LANA from the customer's card straight into
+              its owner's Main Wallet, with the shop's margin on top. It does not go through the brain: no reward,
+              no quota, no Direct Fund. Leave empty to switch it off for every shop. Enter * for every shop without
+              a company, or unit ids separated by commas to start with one shop.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              data-testid="admin-direct-lana-units"
+              type="text"
+              value={directUnits}
+              onChange={(e) => { setDirectUnits(e.target.value); setDirectResult(''); }}
+              placeholder="off"
+              className="flex-1 h-11 rounded-xl bg-background border border-input px-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+            <button
+              data-testid="admin-direct-lana-save"
+              onClick={saveDirectUnits}
+              disabled={directSaving}
+              className="h-11 px-4 rounded-xl bg-muted text-foreground text-sm font-semibold hover:bg-muted/80 disabled:opacity-50"
+            >
+              {directSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
+            </button>
+          </div>
+          <p className="text-[11px] text-muted-foreground" data-testid="admin-direct-lana-state">
+            {directResult === 'saved'
+              ? (directUnits === '' ? 'Saved: off for every shop.' : directUnits === '*' ? 'Saved: on for every shop without a company.' : `Saved: on for ${directUnits}.`)
+              : directResult === 'refused'
+                ? 'Not saved: the server did not accept your signature. Reload the page and sign in again.'
+                : 'Saved with your signature: the server takes this switch from no one else.'}
+          </p>
         </div>
 
         {/* Current limits info */}

@@ -1,0 +1,191 @@
+/**
+ * Which shops may take LANA neposredno, and the switch that turns it on.
+ *
+ * ONLY a shop without a company and without a bank account (KIND 30901
+ * payout_account "none", shop.lanapays.us option (c)). Every other shop sells
+ * LANA through the brain, as before, and can never reach this path: the
+ * server refuses it here, whatever a till sends. On top of that the shop's
+ * stored, owner-signed KIND 30901 must name:
+ *   - a margin that reads (margin_percent "0".."20", or none = 0);
+ *   - one valid mainnet wallet in lanapays_payout_wallet: for such a shop it
+ *     is the owner's Main Wallet, for its reward and for its direct sales
+ *     (Brilly, 23 Nov 2026). Whether the registrar agrees is asked when money
+ *     is about to move, fresh;
+ *   - its own owner as the author: the event's pubkey is owner_hex. The
+ *     registrar owner of the wallet must later be the same person;
+ * and the shop must not be pending, suspended or rejected (KIND 30903), in one
+ * of the three currencies KIND 38888 prices LANA in.
+ *
+ * THE SWITCH (app_settings.direct_lana_units, OFF by default) so it can go
+ * live for one shop first:
+ *   ''        off for every shop (the default)
+ *   '*'       on for every shop without a company
+ *   'a,b,c'   on for exactly these unit ids
+ * Anything else reads as off.
+ */
+import type Database from 'better-sqlite3';
+import type { Request } from 'express';
+import { SIMPLE_UNIT_SQL } from './unitOrigin.js';
+import { isNoPayoutAccountUnit, unitMarginPercent, unitPayoutWallet } from './unitFlags.js';
+import { DIRECT_CURRENCIES, isAddress, clip, MAX_RECIPIENT_NAME } from './directLanaCore.js';
+import { readDirectParams } from './directLanaParams.js';
+import { verifyRequestSignature } from './nip98.js';
+
+export const DIRECT_LANA_SETTING = 'direct_lana_units';
+const BLOCKED = ['pending', 'suspended', 'rejected'];
+
+/**
+ * May this admin request write the switch? Only with that admin's own NIP-98
+ * signature, bound to the exact body. The switch opens a path that moves money
+ * past the brain, and the admin header the other settings still take is a
+ * public hex that anybody can send (Brilly, 2 Oct 2026: admin = signature). A
+ * request that carries the switch without such a signature writes nothing at
+ * all, not even its other settings. Null when it may.
+ *
+ * `adminHex` is the admin requireAdmin found for the request's header; the
+ * signature must be that same person's.
+ */
+export function directSwitchWriteRefusal(req: Request, adminHex: string): { status: number; body: Record<string, unknown> } | null {
+  const signed = verifyRequestSignature(req, { body: (req as any).rawBody ?? null });
+  if (!signed.ok) {
+    // (strictNullChecks is off in this tsconfig, which disables narrowing on `ok`.)
+    const { reason } = signed as { ok: false; reason: string };
+    return {
+      status: 401,
+      body: {
+        success: false,
+        code: 'SIGNATURE_REQUIRED',
+        reason,
+        error: 'LANA direct is switched only with your signature. Reload the admin page and try again.',
+      },
+    };
+  }
+  if (signed.hex !== String(adminHex || '').toLowerCase()) {
+    return { status: 403, body: { success: false, code: 'NOT_ADMIN', error: 'This signature is not the signed-in admin\'s.' } };
+  }
+  return null;
+}
+
+/** The setting as stored: '' (off), '*' (all) or unit ids joined by commas. Unreadable = off. */
+export function normalizeDirectLanaUnits(value: unknown): string {
+  const tokens = String(value ?? '').split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+  if (tokens.includes('*')) return '*';
+  const ids = tokens.filter(s => /^[A-Za-z0-9_.:-]{1,100}$/.test(s));
+  return [...new Set(ids)].join(',');
+}
+
+/** Is the switch on for this unit? */
+export function directLanaSwitchedOn(db: Database.Database, unitId: string): boolean {
+  let value = '';
+  try {
+    value = String((db.prepare('SELECT value FROM app_settings WHERE key = ?').get(DIRECT_LANA_SETTING) as any)?.value ?? '');
+  } catch {
+    return false;
+  }
+  const setting = normalizeDirectLanaUnits(value);
+  if (setting === '*') return true;
+  return setting !== '' && setting.split(',').includes(unitId);
+}
+
+export interface DirectUnit {
+  unit_id: string;
+  /** The shop's name as the record shows it: at most 200 characters. */
+  name: string;
+  owner_hex: string;
+  authorized_hex: string;
+  currency: string;
+  suspension_status: string;
+  wallet: string;
+  margin: number;
+}
+
+/**
+ * `unit` when ok, `code` when not. One shape rather than a union: the server's
+ * tsconfig has strictNullChecks off, which turns off narrowing on `ok`.
+ */
+export type DirectUnitState = { ok: boolean; unit?: DirectUnit; code?: string };
+
+/** The stored row of an active unit of this app (never a simple.lanapays.us unit), or undefined. */
+export function unitRow(db: Database.Database, unitId: unknown): any | undefined {
+  if (typeof unitId !== 'string' || !unitId || unitId.length > 200) return undefined;
+  return db.prepare(`
+    SELECT unit_id, name, owner_hex, authorized_hex, currency, suspension_status, pubkey, raw_event
+    FROM business_units
+    WHERE unit_id = ? AND status = 'active' AND NOT ${SIMPLE_UNIT_SQL}
+  `).get(unitId);
+}
+
+/** Has this payee wallet of this unit been found frozen after a sale (and not cleared since)? */
+export function payeeMarkedFrozen(db: Database.Database, unitId: string, wallet: string): boolean {
+  try {
+    const row = db.prepare('SELECT frozen FROM direct_lana_payees WHERE unit_id = ? AND wallet = ?').get(unitId, wallet) as any;
+    return row?.frozen === 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether this unit may take a direct sale right now, by what this server has
+ * stored, or why not. The switch is asked unless `ignoreSwitch` (the till's
+ * view needs to know what the shop lacks even while the switch is off).
+ */
+export function directUnitState(db: Database.Database, row: any, opts: { ignoreSwitch?: boolean } = {}): DirectUnitState {
+  if (!row) return { ok: false, code: 'UNKNOWN_UNIT' };
+  if (isNoPayoutAccountUnit(row.raw_event) !== true) return { ok: false, code: 'UNIT_NOT_DIRECT' };
+  if (!opts.ignoreSwitch && !directLanaSwitchedOn(db, row.unit_id)) return { ok: false, code: 'DIRECT_LANA_OFF' };
+  if (BLOCKED.includes(String(row.suspension_status || 'active'))) return { ok: false, code: 'UNIT_BLOCKED' };
+  let author = '';
+  try {
+    author = String(JSON.parse(row.raw_event)?.pubkey || '');
+  } catch {
+    author = '';
+  }
+  const owner = String(row.owner_hex || '');
+  if (!/^[0-9a-f]{64}$/.test(owner) || author !== owner || String(row.pubkey || '') !== owner) {
+    return { ok: false, code: 'UNIT_AUTHOR_MISMATCH' };
+  }
+  const margin = unitMarginPercent(row.raw_event);
+  if (typeof margin !== 'number') return { ok: false, code: 'MARGIN_INVALID' };
+  const wallet = unitPayoutWallet(row.raw_event);
+  if (typeof wallet !== 'string' || !isAddress(wallet)) return { ok: false, code: 'WALLET_INVALID' };
+  const currency = String(row.currency || '').toUpperCase();
+  if (!DIRECT_CURRENCIES.includes(currency)) return { ok: false, code: 'CURRENCY_UNSUPPORTED' };
+  if (payeeMarkedFrozen(db, row.unit_id, wallet)) return { ok: false, code: 'PAYEE_FROZEN' };
+  return {
+    ok: true,
+    unit: {
+      unit_id: row.unit_id,
+      name: clip(row.name, MAX_RECIPIENT_NAME),
+      owner_hex: owner,
+      authorized_hex: String(row.authorized_hex || '[]'),
+      currency,
+      suspension_status: String(row.suspension_status || 'active'),
+      wallet,
+      margin,
+    },
+  };
+}
+
+/**
+ * What the till shows for a shop without a company (GET /api/business-units):
+ * whether its "LANA neposredno" button is on, and if not, why. Only for such a
+ * shop; every other shop's answer has no such key. The button is never shown
+ * for a reason the till cannot know: every payment is checked again from
+ * scratch when it is quoted and when it is sent.
+ *   enabled true   the switch is on and nothing stored says no
+ *   reason         DIRECT_LANA_OFF (no notice), or what the shop lacks:
+ *                  WALLET_INVALID, MARGIN_INVALID, PAYEE_FROZEN,
+ *                  RATE_UNAVAILABLE / CURRENCY_UNSUPPORTED, UNIT_AUTHOR_MISMATCH
+ */
+export function directLanaView(
+  db: Database.Database,
+  row: any,
+  opts: { pubkey?: string; nowSec?: number } = {},
+): { enabled: boolean; reason: string | null } {
+  if (!row || !directLanaSwitchedOn(db, row.unit_id)) return { enabled: false, reason: 'DIRECT_LANA_OFF' };
+  const state = directUnitState(db, row);
+  if (!state.ok) return { enabled: false, reason: state.code };
+  if (!readDirectParams(db, state.unit.currency, opts)?.rate) return { enabled: false, reason: 'RATE_UNAVAILABLE' };
+  return { enabled: true, reason: null };
+}

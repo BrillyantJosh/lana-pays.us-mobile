@@ -27,6 +27,8 @@ import { registerOrderRoutes } from './orders.js';
 import { brainPurchaseHandler } from './brainPurchase.js';
 import { brainPreviewHandler } from './brainPreview.js';
 import { registerSaleNumberRoutes } from './saleNumbers.js';
+import { registerDirectLanaRoutes } from './directLana.js';
+import { directLanaView, unitRow, normalizeDirectLanaUnits, directSwitchWriteRefusal, DIRECT_LANA_SETTING } from './lib/directLanaUnit.js';
 import { purchaseSellerCheck, logPurchaseCheckState } from './purchaseSeller.js';
 import { keepRawBody } from './lib/nip98.js';
 import { devRelays } from './lib/devOverrides.js';
@@ -586,8 +588,14 @@ app.get('/api/business-units/:hexId', gate(db, req => req.params.hexId), (req, r
 
   // Each unit as the till sees it: the payout flags computed from the stored
   // KIND 30901, raw_event and bank_account stripped (lib/tillUnitView.ts). A unit
-  // without a company also carries payout_account, margin_percent and its wallet.
-  const result = filtered.map(u => tillUnitView(u));
+  // without a company also carries payout_account, margin_percent and its wallet,
+  // and whether its "LANA neposredno" button is on (lib/directLanaUnit.ts). Every
+  // other unit's answer is exactly what it was.
+  const result = filtered.map(u => {
+    const view = tillUnitView(u);
+    if (view.payout_account !== 'none') return view;
+    return { ...view, direct_lana: directLanaView(db, unitRow(db, u.unit_id)) };
+  });
 
   res.json({ units: result });
 });
@@ -1458,6 +1466,15 @@ app.put('/api/admin/settings', (req, res) => {
   if (!settings || typeof settings !== 'object') {
     return res.status(400).json({ error: 'settings object required' });
   }
+  // LANA neposredno's switch opens a path that moves money past the brain: it
+  // is written only with this admin's own signature, and a request carrying it
+  // without one writes nothing (lib/directLanaUnit.ts). Every other setting
+  // takes the same path as before.
+  const switchesDirectLana = Object.prototype.hasOwnProperty.call(settings, DIRECT_LANA_SETTING);
+  if (switchesDirectLana) {
+    const refused = directSwitchWriteRefusal(req, adminHex);
+    if (refused) return res.status(refused.status).json(refused.body);
+  }
   const upsert = db.prepare(`
     INSERT INTO app_settings (key, value, updated_at, updated_by)
     VALUES (?, ?, datetime('now'), ?)
@@ -1471,8 +1488,19 @@ app.put('/api/admin/settings', (req, res) => {
     if (key === 'customer_window_days') {
       stored = String(Math.min(90, Math.max(1, parseInt(stored, 10) || 1)));
     }
+    // LANA neposredno's switch: '' (off), '*' (every shop without a company) or
+    // unit ids joined by commas. Anything else is stored as off.
+    if (key === DIRECT_LANA_SETTING) {
+      stored = normalizeDirectLanaUnits(stored);
+    }
     upsert.run(key, stored, adminHex);
     updated++;
+  }
+  if (switchesDirectLana) {
+    // What the switch now says, as stored ('' off, '*' all, or unit ids).
+    const now = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(DIRECT_LANA_SETTING) as any;
+    console.log(`[direct-lana] switch set by admin ${adminHex.slice(0, 12)}…: ${now?.value === '' ? 'off' : now?.value === '*' ? 'every shop without a company' : `units ${now?.value}`}`);
+    return res.json({ success: true, updated, [DIRECT_LANA_SETTING]: String(now?.value ?? '') });
   }
   res.json({ success: true, updated });
 });
@@ -1484,6 +1512,10 @@ registerPaymentRequestRoutes(app, db);
 // ─── Automatic sale numbers of shops without a company (cash till) ────────
 
 registerSaleNumberRoutes(app, db);
+
+// ─── LANA neposredno: direct LANA of shops without a company, NOT via brain ──
+
+registerDirectLanaRoutes(app, db);
 
 // ─── Lana Online Shop orders (merchant "Orders" button) ───────────────────
 

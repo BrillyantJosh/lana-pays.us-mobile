@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from 'react-i18next';
-import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark, Globe, Package } from "lucide-react";
+import { Banknote, ArrowLeft, Store, MapPin, ShieldAlert, Info, Leaf, X, ChevronDown, ChevronUp, ChevronRight, UserCog, Landmark, Globe, Package, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 // Mitosis / cell-division glyph (one cell splitting into two) — represents the Split.
@@ -17,6 +17,7 @@ import { untilMessage } from "@/lib/splitBlock";
 import WalletsTab from "@/components/tabs/WalletsTab";
 import LanaTab from "@/components/tabs/LanaTab";
 import LanaOnlineTab from "@/components/tabs/LanaOnlineTab";
+import DirectLanaTab from "@/components/tabs/DirectLanaTab";
 import OrdersTab from "@/components/tabs/OrdersTab";
 import EditProfile from "@/components/EditProfile";
 import RegularCustomersTab from "@/components/tabs/RegularCustomersTab";
@@ -62,6 +63,10 @@ interface BusinessUnit {
   // reward and its direct LANA go to.
   margin_percent?: number | null;
   lanapays_payout_wallet?: string | null;
+  // Only with payout_account 'none': is its "LANA neposredno" button on (direct
+  // LANA to the owner's wallet, not through the brain), and if not, why
+  // (server/lib/directLanaUnit.ts directLanaView). Absent = no such button.
+  direct_lana?: { enabled: boolean; reason: string | null };
   // suspension_status now carries the Merchant Registration Gateway status:
   //   'pending' | 'active' | 'quota_warning_80' | 'quota_blocked' | 'suspended' | 'rejected'
   suspension_status: string;
@@ -248,7 +253,7 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   EUR: '€',
 };
 
-type View = "home" | "cash" | "wallets" | "lana" | "lana-online" | "orders" | "profile" | "regulars" | "register" | "caretaker";
+type View = "home" | "cash" | "wallets" | "lana" | "lana-online" | "direct-lana" | "orders" | "profile" | "regulars" | "register" | "caretaker";
 
 const Index = () => {
   const { t } = useTranslation();
@@ -341,6 +346,7 @@ const Index = () => {
         || fresh.payout_configured !== selectedUnit.payout_configured
         || list(fresh.payout_problems) !== list(selectedUnit.payout_problems)
         || list(fresh.payout_advice) !== list(selectedUnit.payout_advice)
+        || JSON.stringify(fresh.direct_lana ?? null) !== JSON.stringify(selectedUnit.direct_lana ?? null)
       );
       if (changed) setSelectedUnit(fresh);
     }
@@ -1103,6 +1109,39 @@ const Index = () => {
                     </div>
                   )}
 
+                  {/* LANA neposredno: the customer's card pays the owner's wallet,
+                      with the shop's margin, NOT through the brain (server/
+                      directLana.ts). Only for a shop without a company, only when
+                      the server says its button is on. Never beside the brain's
+                      LANA tile: that one is not shown for such a shop. Not gated
+                      by Direct Fund capacity or a bank account: neither is used. */}
+                  {noCompanyUnit && effectiveUnit?.direct_lana?.enabled === true && (
+                    <button
+                      data-testid="direct-lana-tile"
+                      onClick={() => setActiveView("direct-lana")}
+                      disabled={noShopSelected}
+                      className="relative overflow-hidden rounded-3xl bg-card border-2 border-primary/40 shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                    >
+                      <img src={mandalaMesh} alt="" aria-hidden="true" className="absolute inset-0 w-full h-full object-cover opacity-[0.12] dark:opacity-[0.2] pointer-events-none" />
+                      <div className="relative z-10 w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+                        <img src={lanaIcon} alt="" className="w-9 h-9 object-contain dark:invert" />
+                      </div>
+                      <span className="relative z-10 text-xl font-bold text-foreground text-center leading-tight">{t('directLana.tileTitle')}</span>
+                      <span className="relative z-10 text-xs text-muted-foreground text-center leading-snug">{t('directLana.tileSubtitle')}</span>
+                    </button>
+                  )}
+                  {noCompanyUnit && effectiveUnit?.direct_lana && effectiveUnit.direct_lana.enabled !== true
+                    && effectiveUnit.direct_lana.reason !== 'DIRECT_LANA_OFF' && (
+                    <div data-testid="direct-lana-notice" className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-4 flex items-start gap-3">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <p className="text-sm font-medium text-foreground leading-snug">
+                        {t(['WALLET_INVALID', 'PAYEE_FROZEN', 'RATE_UNAVAILABLE', 'MARGIN_INVALID'].includes(effectiveUnit.direct_lana.reason || '')
+                          ? `directLana.notice.${effectiveUnit.direct_lana.reason}`
+                          : 'directLana.notice.OTHER')}
+                      </p>
+                    </div>
+                  )}
+
                   {!noCompanyUnit && (
                   <button
                     onClick={() => openLanaView("lana")}
@@ -1350,6 +1389,11 @@ const Index = () => {
             )}
             {activeView === "lana-online" && !lanaViewClosed && (
               <LanaOnlineTab unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} merchantHex={session?.nostrHexId} />
+            )}
+            {/* Keyed by the shop: another shop starts from nothing, and the
+                card key of an unfinished sale is zeroed as the tab closes. */}
+            {activeView === "direct-lana" && effectiveUnit && (
+              <DirectLanaTab key={effectiveUnit.unit_id} unit={effectiveUnit} />
             )}
             {activeView === "orders" && (
               <OrdersTab unitId={effectiveUnit?.unit_id} merchantHex={session?.nostrHexId} businessUnits={businessUnits} />

@@ -9,6 +9,7 @@ import { fetchKind38888, fetchKind30901, fetchKind30902, fetchKind30903, fetchKi
 import { readUnitOrigin } from './lib/unitOrigin.js';
 import { syncShopOrders } from './lib/orderSync.js';
 import { refreshPersonExclusions } from './lib/exclusionGate.js';
+import { startDirectLanaWorker, stopDirectLanaWorker } from './directLana.js';
 
 const HEARTBEAT_INTERVAL = 1 * 60 * 1000; // 1 minute
 
@@ -669,9 +670,16 @@ export function startHeartbeat(db: Database.Database): void {
   heartbeatTimer = setInterval(() => {
     runHeartbeat(db);
   }, HEARTBEAT_INTERVAL);
+
+  // LANA neposredno: settle direct payments against the chain and publish the
+  // records of paid ones (server/directLana.ts). On its own 30 s timer with its
+  // own lock, so a slow Electrum or relay never holds up this beat, and it reads
+  // the cached KIND 38888, so it does not depend on this tick's fetch either.
+  startDirectLanaWorker(db);
 }
 
 export function stopHeartbeat(): void {
+  stopDirectLanaWorker();
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;

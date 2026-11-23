@@ -29,8 +29,10 @@ export function isNoPayoutAccountUnit(unit: { payout_account?: unknown } | null 
 }
 
 /**
- * The code of a refusal, wherever the answer carries it. This server puts it
- * in `code` and words in `error`; the brain puts it in both.
+ * The code of a refusal, wherever the answer carries it. This server and the
+ * brain both put the code in `code` and the plain words in `error` (and in
+ * `message`), so `code` is read first. A code in `error` is read only when
+ * there is no `code`: an older answer that carried the code there.
  */
 function refusalCode(data: any): string | null {
   if (typeof data?.code === 'string' && data.code) return data.code;

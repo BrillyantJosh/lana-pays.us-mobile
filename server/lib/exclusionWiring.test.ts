@@ -25,6 +25,7 @@ const indexTs = read('index.ts');
 const ordersTs = read('orders.ts');
 const paymentsTs = read('paymentRequests.ts');
 const saleNumbersTs = read('saleNumbers.ts');
+const directLanaTs = read('directLana.ts');
 const requestLogTs = read('shared/requestLogging.ts');
 const heartbeatTs = read('heartbeat.ts');
 
@@ -49,6 +50,15 @@ describe('the answer route lives above the SPA catch-all', () => {
     // Below the catch-all, POST /api/cash-sale-number would never be reached and
     // a no-company till could not get a number (its cash sales would stop).
     const route = registrationLine(indexTs, 'registerSaleNumberRoutes(app, db);');
+    const catchAll = registrationLine(indexTs, "app.get('/{*path}'");
+    expect(route).toBeGreaterThan(0);
+    expect(route).toBeLessThan(catchAll);
+  });
+
+  it('LANA neposredno (direct LANA, not through the brain) is registered above it too', () => {
+    // Below the catch-all every direct-LANA route would answer index.html with
+    // HTTP 200: a till would read a page as a quote, and a submit as accepted.
+    const route = registrationLine(indexTs, 'registerDirectLanaRoutes(app, db);');
     const catchAll = registrationLine(indexTs, "app.get('/{*path}'");
     expect(route).toBeGreaterThan(0);
     expect(route).toBeLessThan(catchAll);
@@ -94,6 +104,12 @@ describe('every route that acts in a person\'s name asks the gate', () => {
     ['paymentRequests.ts', paymentsTs, "app.post('/api/pay/:token/preview'"],
     ['paymentRequests.ts', paymentsTs, "app.post('/api/pay/:token/submit'"],
     ['saleNumbers.ts', saleNumbersTs, "app.post('/api/cash-sale-number'"],
+    ['directLana.ts', directLanaTs, "app.get('/api/direct-lana/price'"],
+    ['directLana.ts', directLanaTs, "app.post('/api/direct-lana/quote'"],
+    ['directLana.ts', directLanaTs, "app.post('/api/direct-lana/submit'"],
+    ['directLana.ts', directLanaTs, "app.get('/api/direct-lana/sales'"],
+    ['directLana.ts', directLanaTs, "app.get('/api/direct-lana/sales/:id'"],
+    ['directLana.ts', directLanaTs, "app.post('/api/direct-lana/sales/:id/resend'"],
   ];
 
   for (const [label, source, prefix] of gated) {
@@ -414,7 +430,7 @@ describe('no route lands ungated by accident', () => {
     const out: Array<{ file: string; path: string; line: string }> = [];
     for (const [file, src] of [
       ['index.ts', indexTs], ['orders.ts', ordersTs], ['paymentRequests.ts', paymentsTs],
-      ['shared/requestLogging.ts', requestLogTs],
+      ['shared/requestLogging.ts', requestLogTs], ['directLana.ts', directLanaTs], ['saleNumbers.ts', saleNumbersTs],
     ] as const) {
       for (const line of src.split('\n')) {
         const m = ROUTE_RE.exec(line);

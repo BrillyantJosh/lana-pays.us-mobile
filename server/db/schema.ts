@@ -363,6 +363,8 @@ export function initializeSchema(db: Database.Database): void {
     );
   `);
 
+  ensureDirectLanaTables(db);
+
   // ── Lana Online Shop orders (KIND 36520/36521/36522 + 30933 mirror) ───────
   // Relay mirror for the merchant's "Orders" button. NO PII anywhere in here:
   // the buyer's name/address exist only as NIP-44 ciphertext inside the raw
@@ -617,6 +619,109 @@ export function initializeSchema(db: Database.Database): void {
   assertOrdersSchema(db);
 
   console.log('Database schema initialized');
+}
+
+/**
+ * LANA neposredno: the journal of direct LANA sales of shops without a company
+ * (23 Nov 2026, server/directLana.ts). One row per ATTEMPT: one quote, and at
+ * most one signed payment for it. Attempts of the same sale at the till share a
+ * sale_id (a second quote after a price change, or a replacement).
+ *
+ * The exact signed bytes and the signed record are written here BEFORE the
+ * payment is sent. No key of any kind is ever stored: not a WIF, not a private
+ * key, only public keys, addresses and signed bytes.
+ *
+ * status:
+ *   quoted        planned, nothing signed yet
+ *   validating    signed bytes kept; the last checks run; nothing sent
+ *   broadcasting  being handed to the Electrum servers
+ *   sent          a server answered with exactly its txid
+ *   paid          in a block, read from two agreeing servers
+ *   unknown       handed over, no server confirmed it: only the chain resolves it
+ *   refused       not sent (sent = 0), or every server refused it (sent = 1)
+ *   superseded    replaced by a payment that spends one of the same coins
+ *   failed        a coin it spends was spent by another transaction 6 blocks deep
+ *   expired       a quote nobody signed in time
+ * A payment is never resolved by time alone.
+ *
+ * The unique indexes hold the rules even against two requests at once:
+ *   one live attempt per sale, one unresolved payment per card address, one
+ *   row per txid, one paid attempt per sale, a paid invoice number once per unit.
+ */
+export function ensureDirectLanaTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS direct_lana_sales (
+      id TEXT PRIMARY KEY,
+      sale_id TEXT NOT NULL,
+      unit_id TEXT NOT NULL,
+      owner_hex TEXT NOT NULL,
+      seller_hex TEXT NOT NULL,
+      payer_address TEXT NOT NULL,
+      payer_public_key TEXT NOT NULL,
+      card_hex TEXT NOT NULL,
+      payer_owner_hex TEXT NOT NULL,
+      payer_wallet_type TEXT NOT NULL,
+      recipient_wallet TEXT NOT NULL,
+      recipient_hex TEXT NOT NULL,
+      recipient_name TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      invoice_cents TEXT NOT NULL,
+      margin_percent INTEGER NOT NULL,
+      pay_cents TEXT NOT NULL,
+      rate TEXT NOT NULL,
+      rate_event_id TEXT NOT NULL,
+      amount_lanoshi TEXT NOT NULL,
+      fee_lanoshi TEXT NOT NULL,
+      invoice_number TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL,
+      plan_json TEXT NOT NULL,
+      replaces_json TEXT NOT NULL DEFAULT '[]',
+      txid TEXT UNIQUE,
+      raw_tx TEXT,
+      record_json TEXT,
+      record_id TEXT,
+      status TEXT NOT NULL DEFAULT 'quoted'
+        CHECK (status IN ('quoted','validating','broadcasting','sent','paid','unknown','refused','superseded','failed','expired')),
+      sent INTEGER NOT NULL DEFAULT 0 CHECK (sent IN (0, 1)),
+      reason TEXT,
+      broadcast_results TEXT,
+      paid_height INTEGER,
+      record_published INTEGER NOT NULL DEFAULT 0,
+      record_published_at TEXT,
+      record_relays TEXT NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      status_at INTEGER NOT NULL,
+      checked_at INTEGER,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_dls_unit_created ON direct_lana_sales(unit_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_dls_status ON direct_lana_sales(status);
+    CREATE INDEX IF NOT EXISTS idx_dls_sale ON direct_lana_sales(sale_id);
+    CREATE INDEX IF NOT EXISTS idx_dls_payer ON direct_lana_sales(payer_address);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_dls_live_attempt_per_sale ON direct_lana_sales(sale_id)
+      WHERE status IN ('validating','broadcasting','sent','unknown');
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_dls_unresolved_per_card ON direct_lana_sales(payer_address)
+      WHERE status IN ('validating','broadcasting','sent','unknown');
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_dls_paid_per_sale ON direct_lana_sales(sale_id)
+      WHERE status = 'paid';
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_dls_paid_invoice_per_unit ON direct_lana_sales(unit_id, invoice_number)
+      WHERE status = 'paid' AND invoice_number <> '';
+
+    -- A shop wallet found frozen after a direct sale. Its direct button stays off
+    -- until a fresh registrar answer says the wallet is no longer frozen.
+    CREATE TABLE IF NOT EXISTS direct_lana_payees (
+      unit_id TEXT NOT NULL,
+      wallet TEXT NOT NULL,
+      frozen INTEGER NOT NULL DEFAULT 0 CHECK (frozen IN (0, 1)),
+      freeze_reason TEXT,
+      checked_at INTEGER NOT NULL,
+      PRIMARY KEY (unit_id, wallet)
+    );
+  `);
+  // The switch, OFF for every shop until set (server/lib/directLanaUnit.ts):
+  // '' off, '*' every shop without a company, or unit ids joined by commas.
+  db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('direct_lana_units', '')").run();
 }
 
 /**
