@@ -613,5 +613,11 @@
   "directLana.unknownNoSecond": "Не принимайте наличные и не сканируйте другую карту.",
   "directLana.previousStillChecked": "Предыдущий платёж за эту покупку ещё проверяется и может ещё пройти. Не принимайте второй платёж.",
   "directLana.newSaleWarning": "Платёж на {{amount}} ещё проверяется и может ещё пройти. Начинайте новый платёж только для другой покупки, никогда для этой.",
-  "directLana.newSaleConfirm": "Новый платёж за другую покупку"
+  "directLana.newSaleConfirm": "Новый платёж за другую покупку",
+  "cash.orSearchProfile": "или найдите покупателя по имени",
+  "cash.searchProfileButton": "Найти покупателя по имени",
+  "cash.searchProfilePlaceholder": "Введите имя (не менее 2 букв)...",
+  "cash.searchProfileNoResults": "Никто не подходит под этот поиск.",
+  "cash.searchProfileNotRegistered": "Кошелёк в этом профиле не зарегистрирован на этого человека. Отсканируйте карту покупателя.",
+  "cash.searchProfileClose": "Закрыть поиск"
 }

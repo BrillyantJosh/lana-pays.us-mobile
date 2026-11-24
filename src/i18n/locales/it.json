@@ -613,5 +613,11 @@
   "directLana.unknownNoSecond": "Non accettare contanti e non scansionare un'altra carta.",
   "directLana.previousStillChecked": "Il pagamento precedente per questo acquisto è ancora in verifica e può ancora andare a buon fine. Non accettare un secondo pagamento.",
   "directLana.newSaleWarning": "Il pagamento di {{amount}} è ancora in verifica e può ancora andare a buon fine. Avvia un nuovo pagamento solo per un altro acquisto, mai per questo.",
-  "directLana.newSaleConfirm": "Nuovo pagamento per un altro acquisto"
+  "directLana.newSaleConfirm": "Nuovo pagamento per un altro acquisto",
+  "cash.orSearchProfile": "oppure cerca un cliente per nome",
+  "cash.searchProfileButton": "Cerca un cliente per nome",
+  "cash.searchProfilePlaceholder": "Scrivi un nome (almeno 2 lettere)...",
+  "cash.searchProfileNoResults": "Nessuno corrisponde alla ricerca.",
+  "cash.searchProfileNotRegistered": "Il portafoglio di questo profilo non è registrato a questa persona. Scansiona invece la carta del cliente.",
+  "cash.searchProfileClose": "Chiudi la ricerca"
 }

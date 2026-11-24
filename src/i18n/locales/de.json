@@ -613,5 +613,11 @@
   "directLana.unknownNoSecond": "Nehmen Sie kein Bargeld an und scannen Sie keine andere Karte.",
   "directLana.previousStillChecked": "Die vorige Zahlung für diesen Kauf wird noch überprüft und kann noch durchgehen. Nehmen Sie keine zweite Zahlung an.",
   "directLana.newSaleWarning": "Die Zahlung über {{amount}} wird noch überprüft und kann noch durchgehen. Beginnen Sie eine neue Zahlung nur für einen anderen Kauf, nie für diesen.",
-  "directLana.newSaleConfirm": "Neue Zahlung für einen anderen Kauf"
+  "directLana.newSaleConfirm": "Neue Zahlung für einen anderen Kauf",
+  "cash.orSearchProfile": "oder Kunden nach Namen suchen",
+  "cash.searchProfileButton": "Kunden nach Namen suchen",
+  "cash.searchProfilePlaceholder": "Namen eingeben (mindestens 2 Buchstaben)...",
+  "cash.searchProfileNoResults": "Niemand passt zu dieser Suche.",
+  "cash.searchProfileNotRegistered": "Die Wallet dieses Profils ist nicht auf diese Person registriert. Scanne stattdessen die Karte des Kunden.",
+  "cash.searchProfileClose": "Suche schließen"
 }

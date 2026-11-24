@@ -613,5 +613,11 @@
   "directLana.unknownNoSecond": "Nie przyjmuj gotówki i nie skanuj innej karty.",
   "directLana.previousStillChecked": "Poprzednia płatność za ten zakup jest nadal weryfikowana i może jeszcze przejść. Nie przyjmuj drugiej płatności.",
   "directLana.newSaleWarning": "Płatność {{amount}} jest nadal weryfikowana i może jeszcze przejść. Nową płatność rozpocznij tylko dla innego zakupu, nigdy dla tego.",
-  "directLana.newSaleConfirm": "Nowa płatność za inny zakup"
+  "directLana.newSaleConfirm": "Nowa płatność za inny zakup",
+  "cash.orSearchProfile": "lub wyszukaj klienta po imieniu",
+  "cash.searchProfileButton": "Wyszukaj klienta po imieniu",
+  "cash.searchProfilePlaceholder": "Wpisz imię (co najmniej 2 litery)...",
+  "cash.searchProfileNoResults": "Nikt nie pasuje do wyszukiwania.",
+  "cash.searchProfileNotRegistered": "Portfel z tego profilu nie jest zarejestrowany na tę osobę. Zeskanuj kartę klienta.",
+  "cash.searchProfileClose": "Zamknij wyszukiwanie"
 }

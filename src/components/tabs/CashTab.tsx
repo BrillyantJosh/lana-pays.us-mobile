@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from 'react-i18next';
-import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2, UserPlus, Receipt, Users, Search, ImagePlus } from "lucide-react";
+import { Camera, PoundSterling, DollarSign, Euro, Loader2, CheckCircle2, UserPlus, Receipt, Users, Search, ImagePlus, X } from "lucide-react";
 import { compressImage } from "@/lib/compress-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -377,6 +377,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
   // Regular customers
   const [regularCustomers, setRegularCustomers] = useState<{ customer_hex_id: string; customer_wallet: string; customer_npub?: string; display_name?: string; picture?: string; note?: string }[]>([]);
   const [regularSearch, setRegularSearch] = useState('');
+  // Search any customer by name (the same directory search as the Regular
+  // customers tab), for a cash sale without scanning the card.
+  const [profileSearchOpen, setProfileSearchOpen] = useState(false);
+  const [profileQuery, setProfileQuery] = useState('');
+  const [profileResults, setProfileResults] = useState<{ pubkey: string; name?: string; display_name?: string; picture?: string; lanaWalletID?: string }[]>([]);
+  const [profileSearching, setProfileSearching] = useState(false);
   const [savingAsRegular, setSavingAsRegular] = useState(false);
   const [savedAsRegular, setSavedAsRegular] = useState(false);
 
@@ -957,6 +963,74 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
       setIsChecking(false);
       setIsSubmitting(false);
     }
+  };
+
+  // Debounced directory search, exactly as on the Regular customers tab.
+  useEffect(() => {
+    if (!profileSearchOpen) return;
+    const q = profileQuery.trim();
+    if (q.length < 2) {
+      setProfileResults([]);
+      setProfileSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setProfileSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/profile-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ search: q }),
+        });
+        const data = await r.json();
+        if (!cancelled) setProfileResults((data.profiles || []).filter((p: { pubkey?: string; lanaWalletID?: string }) => p.pubkey && p.lanaWalletID));
+      } catch {
+        if (!cancelled) setProfileResults([]);
+      } finally {
+        if (!cancelled) setProfileSearching(false);
+      }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [profileQuery, profileSearchOpen]);
+
+  /**
+   * A customer found by name. The wallet on a profile is the person's own word,
+   * so it is trusted only when the registrar says that wallet is registered to
+   * this very person — the same registrar check a scanned wallet goes through.
+   * Then the sale goes exactly like a regular customer's.
+   */
+  const handlePickSearchedProfile = async (profile: { pubkey: string; name?: string; display_name?: string; lanaWalletID?: string }) => {
+    const wallet = (profile.lanaWalletID || '').trim();
+    if (!wallet || !profile.pubkey) return;
+    setSubmitError(null);
+    setIsSubmitting(true);
+    let registrarHex = '';
+    try {
+      const reg = await fetch('/api/check-wallet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet_id: wallet }),
+      }).then(r => r.json());
+      registrarHex = reg?.success && reg?.registered ? String(reg?.wallet?.nostr_hex_id || '').toLowerCase() : '';
+    } catch {
+      setIsSubmitting(false);
+      setSubmitError(t('cash.networkError'));
+      return;
+    }
+    setIsSubmitting(false);
+    if (!registrarHex || registrarHex !== profile.pubkey.toLowerCase()) {
+      setSubmitError(t('cash.searchProfileNotRegistered'));
+      return;
+    }
+    setProfileSearchOpen(false);
+    setProfileQuery('');
+    setProfileResults([]);
+    await handleSelectRegularCustomer({
+      customer_hex_id: registrarHex,
+      customer_wallet: wallet,
+      display_name: (profile.name || profile.display_name || '').trim(),
+    });
   };
 
   // Select a regular customer — skip scanner, submit purchase directly
@@ -1588,13 +1662,13 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
         <Camera className="w-5 h-5" />{t('cash.scanCustomerWallet')}
       </Button>
       {/* ══════ Regular Customers quick-select ══════ */}
+      <div className="flex items-center gap-3 px-2">
+        <div className="flex-1 h-px bg-border" />
+        <span className="text-xs text-muted-foreground whitespace-nowrap">{t(regularCustomers.length > 0 ? 'cash.orSelectRegular' : 'cash.orSearchProfile')}</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
       {regularCustomers.length > 0 && (
         <>
-          <div className="flex items-center gap-3 px-2">
-            <div className="flex-1 h-px bg-border" />
-            <span className="text-xs text-muted-foreground whitespace-nowrap">{t('cash.orSelectRegular')}</span>
-            <div className="flex-1 h-px bg-border" />
-          </div>
 
           {regularCustomers.length >= 3 && (
             <div className="relative">
@@ -1641,6 +1715,66 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
             })()}
           </div>
         </>
+      )}
+
+      {/* ══════ Search any customer by name (as on the Regular customers tab) ══════ */}
+      {!profileSearchOpen ? (
+        <button
+          onClick={() => { setProfileQuery(''); setProfileResults([]); setProfileSearchOpen(true); }}
+          disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || gettingSaleNumber || checkingPending || cashBlocked() || numberStillRefused}
+          className="rounded-xl border-2 border-primary text-primary bg-primary/5 py-3 font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+        >
+          <Search className="w-4 h-4" />
+          {t('cash.searchProfileButton')}
+        </button>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              autoFocus
+              value={profileQuery}
+              onChange={e => setProfileQuery(e.target.value)}
+              placeholder={t('cash.searchProfilePlaceholder')}
+              className="w-full rounded-xl border border-border bg-background pl-9 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+            />
+            <button
+              onClick={() => { setProfileSearchOpen(false); setProfileQuery(''); setProfileResults([]); }}
+              aria-label={t('cash.searchProfileClose')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          {profileSearching ? (
+            <div className="flex justify-center py-3"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+          ) : profileQuery.trim().length >= 2 && profileResults.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-2">{t('cash.searchProfileNoResults')}</p>
+          ) : (
+            <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
+              {profileResults.map(p => (
+                <button
+                  key={p.pubkey}
+                  onClick={() => handlePickSearchedProfile(p)}
+                  disabled={!invoiceNumber.trim() || !amount.trim() || isSubmitting || gettingSaleNumber || checkingPending || cashBlocked() || numberStillRefused}
+                  className="rounded-xl bg-card border border-border p-3 flex items-center gap-3 active:scale-[0.98] transition-all hover:border-primary/30 disabled:opacity-40 disabled:pointer-events-none text-left"
+                >
+                  {p.picture ? (
+                    <img src={p.picture} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <Users className="w-5 h-5 text-primary" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{p.name || p.display_name || (p.lanaWalletID || '').slice(0, 12) + '...'}</p>
+                    <p className="text-xs text-muted-foreground font-mono truncate">{p.lanaWalletID}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       <button onClick={resetAll} className="text-xs text-muted-foreground text-center hover:text-foreground transition-colors">{t('common.startOver')}</button>

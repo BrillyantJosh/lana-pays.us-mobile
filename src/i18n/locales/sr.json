@@ -613,5 +613,11 @@
   "directLana.unknownNoSecond": "Ne primajte gotovinu i ne skenirajte drugu karticu.",
   "directLana.previousStillChecked": "Prethodno plaćanje za ovu kupovinu se još proverava i još može da se izvrši. Ne primajte drugo plaćanje.",
   "directLana.newSaleWarning": "Plaćanje {{amount}} se još proverava i još može da se izvrši. Novo plaćanje započnite samo za drugu kupovinu, nikada za ovu.",
-  "directLana.newSaleConfirm": "Novo plaćanje za drugu kupovinu"
+  "directLana.newSaleConfirm": "Novo plaćanje za drugu kupovinu",
+  "cash.orSearchProfile": "ili potraži kupca po imenu",
+  "cash.searchProfileButton": "Potraži kupca po imenu",
+  "cash.searchProfilePlaceholder": "Upiši ime (najmanje 2 slova)...",
+  "cash.searchProfileNoResults": "Niko ne odgovara pretrazi.",
+  "cash.searchProfileNotRegistered": "Novčanik sa ovog profila nije registrovan na ovu osobu. Umesto toga skeniraj kupčevu karticu.",
+  "cash.searchProfileClose": "Zatvori pretragu"
 }

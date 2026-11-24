@@ -613,5 +613,11 @@
   "directLana.unknownNoSecond": "No acepte efectivo ni escanee otra tarjeta.",
   "directLana.previousStillChecked": "El pago anterior de esta compra todavía se está verificando y aún puede realizarse. No acepte un segundo pago.",
   "directLana.newSaleWarning": "El pago de {{amount}} todavía se está verificando y aún puede realizarse. Empiece un nuevo pago solo para otra compra, nunca para esta.",
-  "directLana.newSaleConfirm": "Nuevo pago para otra compra"
+  "directLana.newSaleConfirm": "Nuevo pago para otra compra",
+  "cash.orSearchProfile": "o busca un cliente por nombre",
+  "cash.searchProfileButton": "Buscar un cliente por nombre",
+  "cash.searchProfilePlaceholder": "Escribe un nombre (al menos 2 letras)...",
+  "cash.searchProfileNoResults": "Nadie coincide con la búsqueda.",
+  "cash.searchProfileNotRegistered": "La billetera de este perfil no está registrada a nombre de esta persona. Escanea la tarjeta del cliente.",
+  "cash.searchProfileClose": "Cerrar la búsqueda"
 }

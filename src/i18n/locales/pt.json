@@ -613,5 +613,11 @@
   "directLana.unknownNoSecond": "Não aceite dinheiro nem leia outro cartão.",
   "directLana.previousStillChecked": "O pagamento anterior desta compra ainda está a ser verificado e ainda pode ser concluído. Não aceite um segundo pagamento.",
   "directLana.newSaleWarning": "O pagamento de {{amount}} ainda está a ser verificado e ainda pode ser concluído. Comece um novo pagamento só para outra compra, nunca para esta.",
-  "directLana.newSaleConfirm": "Novo pagamento para outra compra"
+  "directLana.newSaleConfirm": "Novo pagamento para outra compra",
+  "cash.orSearchProfile": "ou procure um cliente pelo nome",
+  "cash.searchProfileButton": "Procurar um cliente pelo nome",
+  "cash.searchProfilePlaceholder": "Escreva um nome (pelo menos 2 letras)...",
+  "cash.searchProfileNoResults": "Ninguém corresponde à pesquisa.",
+  "cash.searchProfileNotRegistered": "A carteira deste perfil não está registada em nome desta pessoa. Digitalize o cartão do cliente.",
+  "cash.searchProfileClose": "Fechar a pesquisa"
 }

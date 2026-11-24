@@ -613,5 +613,11 @@
   "directLana.unknownNoSecond": "Ne fogadjon el készpénzt, és ne olvasson be másik kártyát.",
   "directLana.previousStillChecked": "A vásárlás előző fizetése még ellenőrzés alatt áll, és még végbemehet. Ne fogadjon el második fizetést.",
   "directLana.newSaleWarning": "A(z) {{amount}} összegű fizetés még ellenőrzés alatt áll, és még végbemehet. Új fizetést csak másik vásárláshoz indítson, soha ehhez.",
-  "directLana.newSaleConfirm": "Új fizetés másik vásárláshoz"
+  "directLana.newSaleConfirm": "Új fizetés másik vásárláshoz",
+  "cash.orSearchProfile": "vagy keress vásárlót név szerint",
+  "cash.searchProfileButton": "Vásárló keresése név szerint",
+  "cash.searchProfilePlaceholder": "Írj be egy nevet (legalább 2 betű)...",
+  "cash.searchProfileNoResults": "Senki sem felel meg a keresésnek.",
+  "cash.searchProfileNotRegistered": "A profilon szereplő pénztárca nincs erre a személyre regisztrálva. Szkenneld be inkább a vásárló kártyáját.",
+  "cash.searchProfileClose": "Keresés bezárása"
 }

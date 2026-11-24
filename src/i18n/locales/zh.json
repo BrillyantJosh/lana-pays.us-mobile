@@ -613,5 +613,11 @@
   "directLana.unknownNoSecond": "请不要收取现金，也不要扫描另一张卡。",
   "directLana.previousStillChecked": "这次购买的上一笔付款仍在核实中，仍可能完成。请不要收取第二笔付款。",
   "directLana.newSaleWarning": "{{amount}} 的付款仍在核实中，仍可能完成。只能为另一次购买开始新付款，绝不能为这一次。",
-  "directLana.newSaleConfirm": "为另一次购买新建付款"
+  "directLana.newSaleConfirm": "为另一次购买新建付款",
+  "cash.orSearchProfile": "或按姓名查找顾客",
+  "cash.searchProfileButton": "按姓名查找顾客",
+  "cash.searchProfilePlaceholder": "输入姓名（至少 2 个字）...",
+  "cash.searchProfileNoResults": "没有符合搜索的人。",
+  "cash.searchProfileNotRegistered": "此资料上的钱包未登记在此人名下。请改为扫描顾客的卡。",
+  "cash.searchProfileClose": "关闭搜索"
 }
