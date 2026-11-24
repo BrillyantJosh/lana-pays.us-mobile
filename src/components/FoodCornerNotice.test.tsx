@@ -39,7 +39,7 @@ import zh from '@/i18n/locales/zh.json';
 import { FoodCornerNotice, FOOD_CORNER_SUPPLIER_URL, type FoodCornerOpen } from './FoodCornerNotice';
 
 const LOCALES: Record<string, Record<string, string>> = { en, sl, hu, it: it_, es, pl, pt, de, hr, sr, ru, zh };
-const KEYS = ['home.foodCornerTitle', 'home.foodCornerDeliverBy', 'home.foodCornerOpen'];
+const KEYS = ['home.foodCornerTitle', 'home.foodCornerOpen'];
 const placeholders = (s: string) => (s.match(/\{\{\w+\}\}/g) || []).sort();
 
 const one: FoodCornerOpen = {
@@ -69,12 +69,12 @@ describe('Točka obilja notice — what it shows', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('says how many orders, the delivery day, and opens the supplier page in a new tab', async () => {
+  it('says how many orders and opens the supplier page in a new tab — no day, no buyer, no amount', async () => {
     await i18n.changeLanguage('sl');
     render(<FoodCornerNotice data={one} />);
     const link = screen.getByTestId('food-corner-notice');
     expect(link.textContent).toContain('Naročila na Točki obilja: 3');
-    expect(link.textContent).toContain('Dostavi do');
+    expect(link.textContent).not.toMatch(/26|Dostavi/);
     expect(link.textContent).toContain('MejmoSeFajn.org');
     expect(link.getAttribute('href')).toBe('https://mejmosefajn.org/food-corner/supplier');
     expect(link.getAttribute('target')).toBe('_blank');

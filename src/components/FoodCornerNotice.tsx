@@ -5,8 +5,13 @@
  * Display only: the count comes from GET /api/food-corner/open-count (signed
  * public orders on the relays, see server/lib/foodCornerOpen.ts) and the button
  * opens the supplier page on mejmosefajn.org, where the orders are handled.
- * Nothing about the buyer and no amount is shown — the number, the shop and the
- * delivery day are enough to know there is something to prepare.
+ * Nothing about the buyer and no amount is shown — the number and the shop are
+ * enough to know there is something to prepare.
+ *
+ * No delivery day either, on purpose: mejmosefajn.org itself names two different
+ * days for the same order when it came in after the Monday cutoff (the buyer is
+ * told next week's pickup, the supplier and Točka lists put it in this week's),
+ * so any day shown here would contradict one of them. The supplier page says it.
  */
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, Truck } from 'lucide-react';
@@ -21,21 +26,9 @@ export interface FoodCornerOpen {
 /** Only ever this page: the server sends the link, but the notice must not become a way to open anything else. */
 export const FOOD_CORNER_SUPPLIER_URL = 'https://mejmosefajn.org/food-corner/supplier';
 
-function deliveryLabel(isoDay: string, lang: string): string | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDay || '');
-  if (!m) return null;
-  const day = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  try {
-    return day.toLocaleDateString(lang, { weekday: 'short', day: 'numeric', month: 'numeric' });
-  } catch {
-    return isoDay;
-  }
-}
-
 export function FoodCornerNotice({ data }: { data: FoodCornerOpen | null }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   if (!data || !(data.count > 0)) return null;
-  const date = data.next_delivery ? deliveryLabel(data.next_delivery, i18n.language) : null;
 
   return (
     <a
@@ -56,9 +49,6 @@ export function FoodCornerNotice({ data }: { data: FoodCornerOpen | null }) {
           <p className="text-xs text-foreground/80 mt-0.5">
             {data.units.map(u => `${u.name}: ${u.count}`).join(' · ')}
           </p>
-        )}
-        {date && (
-          <p className="text-xs text-foreground/80 mt-0.5">{t('home.foodCornerDeliverBy', { date })}</p>
         )}
         <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 underline mt-1">
           {t('home.foodCornerOpen')}

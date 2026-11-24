@@ -396,7 +396,6 @@
   "home.orders": "订单",
   "home.ordersSubtitle": "待发货的网店订单",
   "home.foodCornerTitle": "Točka obilja 订单：{{count}}",
-  "home.foodCornerDeliverBy": "请在 {{date}} 前送达",
   "home.foodCornerOpen": "在 MejmoSeFajn.org 打开 → Supplier",
   "orders.title": "订单",
   "orders.pending": "待发货",

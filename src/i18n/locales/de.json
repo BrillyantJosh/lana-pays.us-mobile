@@ -396,7 +396,6 @@
   "home.orders": "Bestellungen",
   "home.ordersSubtitle": "Onlineshop-Bestellungen zum Versand",
   "home.foodCornerTitle": "Bestellungen auf Točka obilja: {{count}}",
-  "home.foodCornerDeliverBy": "Liefern bis {{date}}",
   "home.foodCornerOpen": "Auf MejmoSeFajn.org öffnen → Supplier",
   "orders.title": "Bestellungen",
   "orders.pending": "Zu versenden",

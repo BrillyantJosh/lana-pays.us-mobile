@@ -396,7 +396,6 @@
   "home.orders": "Porudžbine",
   "home.ordersSubtitle": "Porudžbine iz online prodavnice za slanje",
   "home.foodCornerTitle": "Porudžbine na Točki obilja: {{count}}",
-  "home.foodCornerDeliverBy": "Dostavi do {{date}}",
   "home.foodCornerOpen": "Otvori na MejmoSeFajn.org → Supplier",
   "orders.title": "Porudžbine",
   "orders.pending": "Za slanje",

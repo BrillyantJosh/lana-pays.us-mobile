@@ -535,7 +535,6 @@
   "home.orders": "Orders",
   "home.ordersSubtitle": "Online shop orders to ship",
   "home.foodCornerTitle": "Točka obilja orders: {{count}}",
-  "home.foodCornerDeliverBy": "Deliver by {{date}}",
   "home.foodCornerOpen": "Open on MejmoSeFajn.org → Supplier",
   "orders.title": "Orders",
   "orders.pending": "To ship",

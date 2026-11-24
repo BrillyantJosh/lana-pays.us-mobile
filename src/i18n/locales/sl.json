@@ -535,7 +535,6 @@
   "home.orders": "Naročila",
   "home.ordersSubtitle": "Naročila iz spletne trgovine za odpremo",
   "home.foodCornerTitle": "Naročila na Točki obilja: {{count}}",
-  "home.foodCornerDeliverBy": "Dostavi do {{date}}",
   "home.foodCornerOpen": "Odpri na MejmoSeFajn.org → Dobavitelj",
   "orders.title": "Naročila",
   "orders.pending": "Za odpremo",

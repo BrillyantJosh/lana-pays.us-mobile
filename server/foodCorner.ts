@@ -42,6 +42,11 @@ export interface FoodCornerOpenCount {
   success: true;
   count: number;
   units: { unit_id: string; name: string; count: number }[];
+  /**
+   * The soonest cycle's pickup day, as the supplier and Točka lists count it.
+   * The till does not show it: for an order placed after the Monday cutoff the
+   * buyer on mejmosefajn.org is told the NEXT pickup, so the two disagree.
+   */
   next_delivery: string | null;
   link: string;
 }
