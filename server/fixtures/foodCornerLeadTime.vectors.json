@@ -1,0 +1,30 @@
+{
+  "note": "Shared by mejmosefajnver3 scripts/testFoodCornerLeadTime.ts and being3 test/foodcorner-lead-time.test.js. Keep both copies byte-identical. Times are read in Europe/Ljubljana.",
+  "parseLeadTimeWeeks": [
+    ["", 0], [null, 0], ["0", 0], ["1", 1], ["2", 2], [" 3 ", 3], ["02", 2], [3, 3],
+    ["12", 12], ["13", 12], ["99", 12], ["-1", 0], ["1.5", 0], ["two", 0], ["2 tedna", 0]
+  ],
+  "addWeeks": [
+    { "from": "2026-09-24T18:00:00+02:00", "weeks": 0, "local": "2026-09-24 18:00" },
+    { "from": "2026-09-24T18:00:00+02:00", "weeks": 2, "local": "2026-10-08 18:00" },
+    { "from": "2026-10-15T18:00:00+02:00", "weeks": 2, "local": "2026-10-29 18:00" },
+    { "from": "2026-03-19T18:00:00+01:00", "weeks": 2, "local": "2026-04-02 18:00" }
+  ],
+  "cycleOffset": [
+    { "why": "ordered this week, usual pickup", "now": "2026-09-15T10:00:00+02:00", "anchor": "thursday", "placed": "2026-09-15T10:00:00+02:00", "lead": 0, "offset": 0 },
+    { "why": "same order, two-week lead time", "now": "2026-09-15T10:00:00+02:00", "anchor": "thursday", "placed": "2026-09-15T10:00:00+02:00", "lead": 2, "offset": -2 },
+    { "why": "last minute of the previous cycle", "now": "2026-09-15T10:00:00+02:00", "anchor": "thursday", "placed": "2026-09-09T23:30:00+02:00", "lead": 0, "offset": 1 },
+    { "why": "first second of this cycle", "now": "2026-09-15T10:00:00+02:00", "anchor": "thursday", "placed": "2026-09-10T00:00:00+02:00", "lead": 0, "offset": 0 },
+    { "why": "last second of this cycle", "now": "2026-09-15T10:00:00+02:00", "anchor": "thursday", "placed": "2026-09-16T23:59:59+02:00", "lead": 0, "offset": 0 },
+    { "why": "first second of the next cycle", "now": "2026-09-15T10:00:00+02:00", "anchor": "thursday", "placed": "2026-09-17T00:00:00+02:00", "lead": 0, "offset": -1 },
+    { "why": "late Monday order stays where lists put it today", "now": "2026-09-15T10:00:00+02:00", "anchor": "thursday", "placed": "2026-09-07T14:21:00+02:00", "lead": 0, "offset": 1 },
+    { "why": "late Monday order with a two-week lead time", "now": "2026-09-15T10:00:00+02:00", "anchor": "thursday", "placed": "2026-09-07T14:21:00+02:00", "lead": 2, "offset": -1 },
+    { "why": "longest lead time", "now": "2026-09-15T10:00:00+02:00", "anchor": "thursday", "placed": "2026-09-15T10:00:00+02:00", "lead": 12, "offset": -12 },
+    { "why": "autumn DST: Wednesday 23:30 plus a week is still Wednesday", "now": "2026-10-20T10:00:00+02:00", "anchor": "thursday", "placed": "2026-10-21T23:30:00+02:00", "lead": 1, "offset": -1 },
+    { "why": "autumn DST: Thursday 00:30 plus a week is Thursday, not Wednesday", "now": "2026-10-20T10:00:00+02:00", "anchor": "thursday", "placed": "2026-10-22T00:30:00+02:00", "lead": 1, "offset": -2 },
+    { "why": "spring DST: Wednesday 23:30 plus a week is Wednesday, not Thursday", "now": "2026-03-24T10:00:00+01:00", "anchor": "thursday", "placed": "2026-03-25T23:30:00+01:00", "lead": 1, "offset": -1 },
+    { "why": "Friday point, Thursday evening order", "now": "2026-09-15T10:00:00+02:00", "anchor": "friday", "placed": "2026-09-17T20:00:00+02:00", "lead": 0, "offset": 0 },
+    { "why": "Friday point, Friday morning order", "now": "2026-09-15T10:00:00+02:00", "anchor": "friday", "placed": "2026-09-18T08:00:00+02:00", "lead": 0, "offset": -1 },
+    { "why": "Friday point, three-week lead time", "now": "2026-09-15T10:00:00+02:00", "anchor": "friday", "placed": "2026-09-11T00:00:00+02:00", "lead": 3, "offset": -3 }
+  ]
+}

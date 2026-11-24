@@ -24,6 +24,7 @@ import { gate, gateNames, excludedNow, logGateState, refreshPersonExclusions, ty
 import { fetchDmEvents, publishToRelays as publishDmToRelays } from './lib/dm.js';
 import { registerPaymentRequestRoutes } from './paymentRequests.js';
 import { registerOrderRoutes } from './orders.js';
+import { registerFoodCornerRoutes } from './foodCorner.js';
 import { brainPurchaseHandler } from './brainPurchase.js';
 import { brainPreviewHandler } from './brainPreview.js';
 import { registerSaleNumberRoutes } from './saleNumbers.js';
@@ -1520,6 +1521,10 @@ registerDirectLanaRoutes(app, db);
 // ─── Lana Online Shop orders (merchant "Orders" button) ───────────────────
 
 registerOrderRoutes(app, db);
+
+// ─── Točka obilja (mejmosefajn.org): orders a supplier still has to bring ──
+
+registerFoodCornerRoutes(app, db);
 
 // ─── Static Frontend (MUST be after all API routes) ───────────────────────
 

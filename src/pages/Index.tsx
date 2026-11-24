@@ -24,6 +24,7 @@ import RegularCustomersTab from "@/components/tabs/RegularCustomersTab";
 import RegisterCustomerTab from "@/components/tabs/RegisterCustomerTab";
 import CaretakerTab from "@/components/tabs/CaretakerTab";
 import MobileQuotaPanel from "@/components/MobileQuotaPanel";
+import FoodCornerNotice, { type FoodCornerOpen } from "@/components/FoodCornerNotice";
 import { useAuth } from "@/contexts/AuthContext";
 import { isNoPayoutAccountUnit } from "@/lib/payoutAccount";
 import lanaIcon from "@/assets/lana-icon.png";
@@ -495,6 +496,32 @@ const Index = () => {
     const interval = setInterval(fetchPendingOrders, 30_000);
     return () => clearInterval(interval);
   }, [session?.nostrHexId, t]);
+
+  // ── Točka obilja (mejmosefajn.org) orders still to bring (60s poll) ─────
+  // Merchant-wide like the Orders badge, but only the units this hex OWNS (the
+  // supplier page there answers the owner's key only). Display only; a failed
+  // read keeps what was shown, a successful 0 hides the notice.
+  const [foodCorner, setFoodCorner] = useState<FoodCornerOpen | null>(null);
+  useEffect(() => {
+    if (!session?.nostrHexId) { setFoodCorner(null); return; }
+    const fetchFoodCorner = async () => {
+      try {
+        const res = await fetch(`/api/food-corner/open-count?hex=${encodeURIComponent(session.nostrHexId)}`);
+        const json = await res.json();
+        if (!json?.success) return;
+        const next: FoodCornerOpen = {
+          count: Number(json.count) || 0,
+          units: Array.isArray(json.units) ? json.units : [],
+          next_delivery: typeof json.next_delivery === 'string' ? json.next_delivery : null,
+          link: String(json.link || ''),
+        };
+        setFoodCorner(prev => JSON.stringify(prev) === JSON.stringify(next) ? prev : next);
+      } catch { /* keep previous state */ }
+    };
+    fetchFoodCorner();
+    const interval = setInterval(fetchFoodCorner, 60_000);
+    return () => clearInterval(interval);
+  }, [session?.nostrHexId]);
 
   const openOrders = () => {
     setSelectedWallet(null);
@@ -971,6 +998,9 @@ const Index = () => {
                 <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
               </button>
             )}
+
+            {/* ─── Točka obilja: orders on mejmosefajn.org still to bring ─── */}
+            <FoodCornerNotice data={foodCorner} />
 
             {/* ─── Action column, ONE tile per row (Brilly, 3.9.2026): Orders (only
                     for online sellers) + payment buttons OR blocked-status panel ─── */}
