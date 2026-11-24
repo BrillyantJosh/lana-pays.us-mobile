@@ -19,6 +19,7 @@ import { freshReceiptFields, duplicateRefusal, checkDedup, canContinueAfterHit, 
 import { DuplicateNumberFix, RefusedNumberHint } from "@/components/DuplicateNumberFix";
 import { payoutRefusalKey, saleInvoiceNumber, readSaleNumber, SALE_DESCRIPTION_MAX, type SaleNumber } from "@/lib/payoutAccount";
 import { readPendingSale, keepPendingSale, forgetPendingSale, saleRecorded, type PendingSale } from "@/lib/pendingSale";
+import { fundRefusalKey } from "@/lib/fundRefusal";
 
 const currencyIcons: Record<string, typeof PoundSterling> = {
   GBP: PoundSterling, USD: DollarSign, EUR: Euro,
@@ -490,6 +491,12 @@ const CashTab = ({ selectedWallet, onClearWallet, unitCurrency, unitId, noCompan
     if (status === 403 && data?.error === 'NO_FUND_CAPACITY') {
       return t('cash.noFunds');
     }
+    // The brain's own answer when no investor can fund this sale
+    // (NO_INVESTOR_BUDGET) or their money could not be checked
+    // (FUND_UNREACHABLE). Nothing was recorded. Until 24 Nov 2026 both came as
+    // "Purchase processing failed" (GBP, 23 Nov 2026).
+    const fundKey = fundRefusalKey(data);
+    if (fundKey) return t(fundKey);
     // The proxy does not know the unit. The till only offers units it knows, so
     // this is a stale page: trying again is the honest thing to ask for.
     if (status === 404 && data?.error === 'UNIT_NOT_FOUND') {

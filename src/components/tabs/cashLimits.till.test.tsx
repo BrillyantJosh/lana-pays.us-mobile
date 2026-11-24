@@ -201,4 +201,50 @@ describe('refused by the server', () => {
     await screen.findByText(i18n.t('cash.purchaseFailed'));
     expect(screen.queryByText('UNIT_NOT_FOUND')).not.toBeInTheDocument();
   });
+
+  // The brain's answer when no investor can fund the sale (23 Nov 2026: seven
+  // GBP cash sales in a row read only "Purchase processing failed").
+  const BRAIN_NO_BUDGET = {
+    status: 409,
+    body: {
+      success: false, error: 'No investor can fund this sale in GBP right now.', code: 'NO_INVESTOR_BUDGET',
+      currency: 'GBP', message: 'No investor can fund this sale in GBP right now.',
+    },
+  };
+  const BRAIN_UNREACHABLE_WORDS = 'Investor funds cannot be checked right now. Nothing was recorded; try again in a moment.';
+
+  it('the brain\'s NO_INVESTOR_BUDGET reads as the no-funds wording, not as "Purchase processing failed"', async () => {
+    purchase = BRAIN_NO_BUDGET;
+    await toInvoiceStep();
+    await pay();
+    await screen.findByText(i18n.t('cash.noFunds'));
+    expect(screen.queryByText('Purchase processing failed')).not.toBeInTheDocument();
+    expect(screen.queryByText(BRAIN_NO_BUDGET.body.error)).not.toBeInTheDocument();
+    expect(screen.queryByText('NO_INVESTOR_BUDGET')).not.toBeInTheDocument();
+  });
+
+  it('the same in the seller\'s language', async () => {
+    purchase = BRAIN_NO_BUDGET;
+    await i18n.changeLanguage('sl');
+    await toInvoiceStep();
+    await pay();
+    await screen.findByText('Ni razpoložljivih investitorskih sredstev');
+  });
+
+  it('the brain\'s FUND_UNREACHABLE reads as a failed purchase to try again, not as its English words', async () => {
+    purchase = { status: 503, body: { success: false, error: BRAIN_UNREACHABLE_WORDS, code: 'FUND_UNREACHABLE', message: BRAIN_UNREACHABLE_WORDS } };
+    await toInvoiceStep();
+    await pay();
+    await screen.findByText(i18n.t('cash.purchaseFailed'));
+    expect(screen.queryByText(BRAIN_UNREACHABLE_WORDS)).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('cash.noFunds'))).not.toBeInTheDocument();
+  });
+
+  it('an older brain\'s answer still prints as before', async () => {
+    purchase = { status: 400, body: { success: false, error: 'Purchase processing failed' } };
+    await toInvoiceStep();
+    await pay();
+    await screen.findByText('Purchase processing failed');
+    expect(screen.queryByText(i18n.t('cash.noFunds'))).not.toBeInTheDocument();
+  });
 });

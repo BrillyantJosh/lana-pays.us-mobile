@@ -19,6 +19,7 @@ import { exclusionFromRefusal, isMerchantUnavailable } from "@/lib/exclusion";
 import { freshReceiptFields, duplicateRefusal, checkDedup, canContinueAfterHit, type DedupHit } from "@/lib/receiptDedup";
 import { DuplicateNumberFix, RefusedNumberHint } from "@/components/DuplicateNumberFix";
 import { payoutRefusalKey } from "@/lib/payoutAccount";
+import { fundRefusalKey } from "@/lib/fundRefusal";
 import lanaIcon from "@/assets/lana-icon.png";
 
 /**
@@ -394,9 +395,11 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
         const previewData = await previewRes.json();
         if (!previewRes.ok || !previewData.success) {
           // A refusal about the shop's payout settings (no bank account, no
-          // valid reward wallet) is said in the seller's words, not printed raw.
+          // valid reward wallet) is said in the seller's words, not printed raw;
+          // so is no investor to fund the sale, or their money not checkable.
           const payoutKey = payoutRefusalKey(previewData);
-          setPurchaseError(excludedMessage(previewRes.status, previewData, t) || (payoutKey ? t(payoutKey) : null) || previewData.error || t('lana.purchaseFailed'));
+          const fundKey = fundRefusalKey(previewData);
+          setPurchaseError(excludedMessage(previewRes.status, previewData, t) || (payoutKey ? t(payoutKey) : null) || (fundKey ? t(fundKey) : null) || previewData.error || t('lana.purchaseFailed'));
           setStep("display");
           return;
         }
@@ -487,6 +490,10 @@ const LanaTab = ({ paymentRequest, onClearRequest, unitCurrency, unitId }: LanaT
             // The shop's payout settings refused the sale before any LANA was
             // sent: no bank account, or no valid wallet for the reward.
             setPurchaseError(t(payoutRefusalKey(brainData)!));
+          } else if (fundRefusalKey(brainData)) {
+            // No investor can fund the sale, or their money could not be
+            // checked: refused at the allocation, before any LANA was sent.
+            setPurchaseError(t(fundRefusalKey(brainData)!));
           } else {
             setPurchaseError(excludedMessage(purchaseRes.status, brainData, t) || brainData.error || t('lana.purchaseFailed'));
           }
