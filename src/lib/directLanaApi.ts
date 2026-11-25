@@ -164,7 +164,9 @@ async function publicCall(method: 'GET' | 'POST', url: string, body?: unknown): 
   return { status: res.status, data };
 }
 
-export const fetchPayLink = (token: string) => publicCall('GET', `/api/direct-pay/${q(token)}`);
+/** The link's page; with `attemptId`, also that payment of it as it is now (`link.asked`). */
+export const fetchPayLink = (token: string, attemptId?: string) =>
+  publicCall('GET', `/api/direct-pay/${q(token)}${attemptId ? `?attempt=${q(attemptId)}` : ''}`);
 
 export const quotePayLink = (token: string, publicKey: string) =>
   publicCall('POST', `/api/direct-pay/${q(token)}/quote`, { public_key: publicKey });
@@ -186,7 +188,7 @@ const PAY_OWN_REASONS = [
   'PAYER_NOT_REGISTERED', 'PAYER_FROZEN', 'PAYER_OWNER_UNKNOWN', 'PAYER_TYPE_NOT_ALLOWED', 'SELF_PAYMENT',
   'CHAIN_UNAVAILABLE', 'CHAIN_PENDING', 'CARD_PAYMENT_PENDING', 'SALE_PAYMENT_PENDING', 'SALE_ALREADY_PAID',
   'INSUFFICIENT_FUNDS', 'INPUT_LIMIT', 'WALLET_STATE_CHANGED', 'WALLET_CHANGED', 'QUOTE_EXPIRED', 'DEVICE_CLOCK',
-  'BROADCAST_REFUSED', 'NETWORK', 'NOT_RECEIVED', 'RESEND_TOO_LATE',
+  'BROADCAST_REFUSED', 'NETWORK', 'NOT_RECEIVED', 'RESEND_TOO_LATE', 'TOO_MANY_TRIES',
 ];
 const PAY_GROUPS: Record<string, string> = {
   UNKNOWN_UNIT: 'UNIT', UNIT_NOT_DIRECT: 'UNIT', DIRECT_LANA_OFF: 'UNIT', UNIT_BLOCKED: 'UNIT', UNIT_AUTHOR_MISMATCH: 'UNIT',

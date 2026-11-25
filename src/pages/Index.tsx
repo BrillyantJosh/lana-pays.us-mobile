@@ -449,11 +449,12 @@ const Index = () => {
   // tile; opening the shop's links in the tab marks them seen.
   const { i18n } = useTranslation();
   const hasDirectLinks = businessUnits.some(u => u.payout_account === 'none' && u.direct_lana?.enabled === true);
-  const [unseenLinks, setUnseenLinks] = useState(0);
+  // Paid links not seen yet, per shop: the tile shows the selected shop's.
+  const [unseenLinksByUnit, setUnseenLinksByUnit] = useState<Record<string, number>>({});
   const prevUnseenLinksRef = useRef<number | null>(null);
   const notifiedLinksRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!session?.privateKeyHex || !hasDirectLinks) { setUnseenLinks(0); return; }
+    if (!session?.privateKeyHex || !hasDirectLinks) { setUnseenLinksByUnit({}); return; }
     const readUnseen = async () => {
       try {
         const { status, data } = await fetchDirectLinksUnseen(session);
@@ -470,13 +471,28 @@ const Index = () => {
           }
         }
         prevUnseenLinksRef.current = count;
-        setUnseenLinks(count);
+        const byUnit: Record<string, number> = {};
+        if (data.by_unit && typeof data.by_unit === 'object') {
+          for (const [unitId, n] of Object.entries(data.by_unit)) if (Number(n) > 0) byUnit[unitId] = Number(n);
+        }
+        setUnseenLinksByUnit(byUnit);
       } catch { /* keep previous state */ }
     };
     readUnseen();
     const interval = setInterval(readUnseen, 30_000);
     return () => clearInterval(interval);
   }, [session?.privateKeyHex, hasDirectLinks, t]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const unseenLinks = (effectiveUnit && unseenLinksByUnit[effectiveUnit.unit_id]) || 0;
+  /** The shop's links were opened in the tab: its badge goes now, not at the next poll. */
+  const linksSeen = useCallback((unitId: string) => {
+    setUnseenLinksByUnit(prev => {
+      if (!prev[unitId]) return prev;
+      const next = { ...prev };
+      prevUnseenLinksRef.current = Math.max(0, (prevUnseenLinksRef.current ?? 0) - next[unitId]);
+      delete next[unitId];
+      return next;
+    });
+  }, []);
 
   /** Open a LANA view, deciding once whether this shop may sell for LANA here. */
   const openLanaView = (view: "lana" | "lana-online") => {
@@ -1467,7 +1483,7 @@ const Index = () => {
             {/* Keyed by the shop: another shop starts from nothing, and the
                 card key of an unfinished sale is zeroed as the tab closes. */}
             {activeView === "direct-lana" && effectiveUnit && (
-              <DirectLanaTab key={effectiveUnit.unit_id} unit={effectiveUnit} />
+              <DirectLanaTab key={effectiveUnit.unit_id} unit={effectiveUnit} onLinksSeen={linksSeen} />
             )}
             {activeView === "orders" && (
               <OrdersTab unitId={effectiveUnit?.unit_id} merchantHex={session?.nostrHexId} businessUnits={businessUnits} />

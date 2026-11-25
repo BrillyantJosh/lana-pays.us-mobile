@@ -368,7 +368,8 @@ describe('the customer pays a link', () => {
     const till = await post('/api/direct-lana/quote', {
       unit_id: UNIT, amount: '10.00', currency: 'EUR', public_key: readCardKey(wifOf(CARD2)).publicKey, sale_id: link.sale_id,
     }, OWNER);
-    expect(till.data.code).toBe('SALE_ALREADY_PAID');
+    // The link says why: it is paid (the journal would refuse it too: SALE_ALREADY_PAID).
+    expect(till.data.code).toBe('LINK_PAID');
     expect(chain.broadcasts).toEqual([first.s.raw]);
   });
 
@@ -526,5 +527,129 @@ describe('cancelling and expiry', () => {
     expect(list.data.links[0].payment.status).toBe('sent');
     expect(list.data.links[1].id).toBe(a.id);
     expect((await get(`/api/direct-lana/links?unit_id=${UNIT}`, STRANGER)).data.code).toBe('NOT_ENTITLED');
+  });
+});
+
+describe('review fixes (25 Nov 2026): nobody holding the link can block it, fill the database or learn about others', () => {
+  it('a stranger\'s quote with another card never takes the customer\'s quote away; the first one sent wins', async () => {
+    const link = await newLink();
+    const mine = await quote(link.token, CARD);
+    for (let i = 0; i < 3; i++) expect((await quote(link.token, CARD2)).status).toBe(200);
+    expect(getAttempt(db, mine.data.plan.attempt_id)!.status).toBe('quoted');
+    const r = await submit(link.token, mine.data.plan, sign(mine.data.plan));
+    expect(r.data.status).toBe('sent');
+    // The stranger's quotes cannot be sent beside it.
+    const theirs = (db.prepare("SELECT plan_json FROM direct_lana_sales WHERE sale_id = ? AND payer_address = ? AND status = 'quoted'").get(link.sale_id, CARD2_ADDRESS) as any);
+    const late = JSON.parse(theirs.plan_json) as DirectLanaPlan;
+    expect((await submit(link.token, late, sign(late, CARD2))).status).toBe(409);
+    expect(chain.broadcasts.length).toBe(1);
+    // The same card asking again replaces its own quote only.
+    const again = await quote(link.token, CARD2);
+    expect(again.status).toBe(409);
+  });
+
+  it('at most 30 quotes per link in ten minutes; then "too many tries" (429), nothing stored', async () => {
+    const link = await newLink();
+    for (let i = 0; i < 30; i++) expect((await quote(link.token, i % 2 ? CARD : CARD2)).status).toBe(200);
+    const n = (db.prepare('SELECT COUNT(*) AS n FROM direct_lana_sales').get() as any).n;
+    const r = await quote(link.token, CARD);
+    expect(r.status).toBe(429);
+    expect(r.data.code).toBe('TOO_MANY_TRIES');
+    expect((db.prepare('SELECT COUNT(*) AS n FROM direct_lana_sales').get() as any).n).toBe(n);
+    nowMs += 11 * 60 * 1000;
+    expect((await quote(link.token, CARD)).status).toBe(200);
+  });
+
+  it('an expired quote keeps no coin\'s raw bytes after the sweep; a sent payment keeps all of them', async () => {
+    const link = await newLink();
+    const unsent = await quote(link.token, CARD2);
+    const { plan } = await pay(link.token, CARD);
+    nowMs += 130 * 1000;
+    await worker();
+    const gone = getAttempt(db, unsent.data.plan.attempt_id)!;
+    expect(gone.status).toBe('expired');
+    expect(JSON.parse(gone.plan_json).inputs.every((c: any) => c.raw === '')).toBe(true);
+    const kept = getAttempt(db, plan.attempt_id)!;
+    expect(JSON.parse(kept.plan_json).inputs.every((c: any) => /^[0-9a-f]+$/.test(c.raw))).toBe(true);
+  });
+
+  it('a card\'s exclusion is never said with its ground to whoever holds a link, not even with a made-up token', async () => {
+    const link = await newLink();
+    exclude(hexOfKey(CARD));
+    for (const token of [link.token, 'y'.repeat(32)]) {
+      const r = await quote(token, CARD);
+      expect(r.status).toBe(403);
+      expect(r.data.code).toBe('PERSON_EXCLUDED');
+      for (const leak of ['ground', 'eventId', 'since', 'untilSplit', 'excluded']) expect(r.data[leak], leak).toBeUndefined();
+    }
+    // The card's registrar owner, found by the quote itself.
+    db.prepare('DELETE FROM person_exclusions').run();
+    exclude(CUSTOMER_HEX);
+    const r = await quote(link.token, CARD);
+    expect(r.data.code).toBe('PERSON_EXCLUDED');
+    expect(JSON.stringify(r.data)).not.toContain('a ground');
+  });
+
+  it('a quote never says what else the card is paying at this shop', async () => {
+    const till = await post('/api/direct-lana/quote', { unit_id: UNIT, amount: '5.00', currency: 'EUR', public_key: readCardKey(wifOf(CARD)).publicKey }, OWNER);
+    const s = sign(till.data.plan);
+    expect((await post('/api/direct-lana/submit', { attempt_id: till.data.plan.attempt_id, raw: s.raw, record: s.record }, OWNER)).data.status).toBe('sent');
+    const link = await newLink();
+    const r = await quote(link.token, CARD);
+    expect(r.data.code).toBe('CARD_PAYMENT_PENDING');
+    expect(r.data.pending_attempt_id).toBeUndefined();
+    expect(r.data.pending_sale_id).toBeUndefined();
+  });
+
+  it('past its time a quote of the link is never sent, and an expired link can still be cancelled', async () => {
+    const link = await newLink();
+    nowMs += (168 * 3600 - 10) * 1000;
+    const q = await quote(link.token);
+    expect(q.status).toBe(200);
+    nowMs += 20 * 1000;
+    const r = await submit(link.token, q.data.plan, sign(q.data.plan));
+    expect(r.status).toBe(409);
+    expect(r.data.code).toBe('LINK_EXPIRED');
+    expect(chain.broadcasts).toEqual([]);
+    const c = await cancel(link.id);
+    expect(c.status).toBe(200);
+    expect(c.data.link.status).toBe('cancelled');
+  });
+
+  it('cancelled while the customer looks at the confirm screen: the page is told "cancelled", not "the offer ran out"', async () => {
+    const link = await newLink();
+    const q = await quote(link.token);
+    await cancel(link.id);
+    const r = await submit(link.token, q.data.plan, sign(q.data.plan));
+    expect(r.status).toBe(409);
+    expect(r.data.code).toBe('LINK_CANCELLED');
+    expect(chain.broadcasts).toEqual([]);
+  });
+
+  it('the till cannot pay a cancelled link\'s sale either', async () => {
+    const link = await newLink();
+    chain.mode = 'refuse';
+    await pay(link.token, CARD);
+    // Every server refused it after it was sent; once the chain shows it can never be mined, cancel.
+    db.prepare("UPDATE direct_lana_sales SET status = 'failed' WHERE sale_id = ?").run(link.sale_id);
+    expect((await cancel(link.id)).data.link.status).toBe('cancelled');
+    chain.mode = 'accept';
+    const till = await post('/api/direct-lana/quote', {
+      unit_id: UNIT, amount: '10.00', currency: 'EUR', public_key: readCardKey(wifOf(CARD2)).publicKey, sale_id: link.sale_id,
+    }, OWNER);
+    expect(till.status).toBe(409);
+    expect(till.data.code).toBe('LINK_CANCELLED');
+  });
+
+  it('the page can ask about its own payment by id; the seller\'s notice counts paid links per shop', async () => {
+    const link = await newLink();
+    const { plan, s } = await pay(link.token);
+    const v = await get(`/api/direct-pay/${link.token}?attempt=${plan.attempt_id}`, null);
+    expect(v.data.link.asked).toMatchObject({ attempt_id: plan.attempt_id, status: 'sent' });
+    const other = await newLink();
+    expect((await get(`/api/direct-pay/${other.token}?attempt=${plan.attempt_id}`, null)).data.link.asked).toBeNull();
+    await mineAndSweep(s.raw);
+    const unseen = await get('/api/direct-lana/links/unseen', OWNER);
+    expect(unseen.data.by_unit).toEqual({ [UNIT]: 1 });
   });
 });

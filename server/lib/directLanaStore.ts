@@ -125,13 +125,22 @@ export interface NewAttempt {
 
 /**
  * Store a new quote. Older quotes of the same sale that were never signed
- * expire with it: one sale shows one quote at a time.
+ * expire with it: one sale shows one quote at a time. `sameCardOnly` (a
+ * payment link's sale, whose quotes anybody holding the link may ask for):
+ * only this card's older quotes expire, so a stranger's quote never takes
+ * the customer's away. An unsigned quote holds nothing: whichever of them is
+ * signed and sent first is the one beginValidating lets through.
  */
-export function insertQuote(db: Database.Database, a: NewAttempt, nowSec: number): void {
+export function insertQuote(db: Database.Database, a: NewAttempt, nowSec: number, opts: { sameCardOnly?: boolean } = {}): void {
   const p = a.plan;
   db.transaction(() => {
-    db.prepare(`UPDATE direct_lana_sales SET status = 'expired', reason = 'REQUOTED', status_at = ?, updated_at = datetime('now')
-      WHERE sale_id = ? AND status = 'quoted'`).run(nowSec, p.sale_id);
+    if (opts.sameCardOnly) {
+      db.prepare(`UPDATE direct_lana_sales SET status = 'expired', reason = 'REQUOTED', status_at = ?, updated_at = datetime('now')
+        WHERE sale_id = ? AND status = 'quoted' AND payer_address = ?`).run(nowSec, p.sale_id, p.sender);
+    } else {
+      db.prepare(`UPDATE direct_lana_sales SET status = 'expired', reason = 'REQUOTED', status_at = ?, updated_at = datetime('now')
+        WHERE sale_id = ? AND status = 'quoted'`).run(nowSec, p.sale_id);
+    }
     db.prepare(`
       INSERT INTO direct_lana_sales (
         id, sale_id, unit_id, owner_hex, seller_hex, payer_address, payer_public_key, card_hex,
@@ -148,6 +157,33 @@ export function insertQuote(db: Database.Database, a: NewAttempt, nowSec: number
       p.created_at, p.expires, nowSec,
     );
   })();
+}
+
+/**
+ * A quote nobody signed holds nothing, yet its plan carries every coin's whole
+ * previous transaction (up to 250,000 characters). Once it has expired that is
+ * dead weight, and anybody holding a payment link could pile it up, so the
+ * coins' raw bytes are dropped. The plan of an expired quote is never read
+ * again (it is read only for a quote, a payment that may still be mined, or
+ * one that may be sent again). Returns how many plans were made small.
+ */
+export function compactExpiredQuotes(db: Database.Database, limit = 200): number {
+  const rows = db.prepare(`
+    SELECT id, plan_json FROM direct_lana_sales
+    WHERE status = 'expired' AND txid IS NULL AND plan_json GLOB '*"raw":"[0-9a-f]*'
+    LIMIT ?
+  `).all(limit) as Array<{ id: string; plan_json: string }>;
+  const write = db.prepare(`UPDATE direct_lana_sales SET plan_json = ?, updated_at = datetime('now') WHERE id = ? AND status = 'expired' AND txid IS NULL`);
+  let n = 0;
+  for (const r of rows) {
+    try {
+      const plan = JSON.parse(r.plan_json);
+      if (!Array.isArray(plan?.inputs)) continue;
+      plan.inputs = plan.inputs.map((c: Record<string, unknown>) => ({ ...c, raw: '' }));
+      n += write.run(JSON.stringify(plan), r.id).changes;
+    } catch { /* an unreadable plan stays as it is */ }
+  }
+  return n;
 }
 
 /** The attempt was no longer 'quoted' when it was to move: the whole move is undone. */

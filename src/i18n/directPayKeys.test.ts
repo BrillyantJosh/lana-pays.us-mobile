@@ -72,7 +72,7 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
   const keys = Object.keys(EN).filter(k => k.startsWith('directPay.'));
 
   it('has every directPay key, translated, with the placeholders of English', () => {
-    expect(keys.length).toBe(56);
+    expect(keys.length).toBe(57);
     for (const key of keys) {
       expect(typeof strings[key], `${name} is missing ${key}`).toBe('string');
       expect(strings[key].trim().length, `${name}:${key} is empty`).toBeGreaterThan(0);
@@ -88,16 +88,22 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
 
 describe('Slovenian, to the person who pays', () => {
   it('the confirm screen says it cannot be undone', () => {
-    expect(SL['directPay.confirmText']).toBe('Plačali boste {{lana}} LANA in omrežnino {{fee}} LANA trgovini {{name}} ({{wallet}}). Plačila ni mogoče preklicati.');
+    // The shop is paid the LANA; the fee is the network's (review, 25 Nov 2026).
+    expect(SL['directPay.confirmText']).toBe('Trgovini {{name}} ({{wallet}}) boste plačali {{lana}} LANA. Omrežnina je {{fee}} LANA. Plačila ni mogoče preklicati.');
   });
-  it('a payment being checked: do not pay again, not with another card either', () => {
-    expect(SL['directPay.unknownText']).toBe('Plačilo se preverja (običajno nekaj minut). Ne plačajte znova in ne plačajte z drugo kartico.');
+  it('a payment being checked: not with another card or in another way (the same card again is offered below it)', () => {
+    expect(SL['directPay.unknownText']).toBe('Plačilo se preverja (običajno nekaj minut). Ne plačajte z drugo kartico ali na drug način.');
+    expect(SL['directPay.payAgain']).toBe('Plačajte znova z isto kartico');
     expect(SL['directPay.payAgainHint']).toBe('To ni drugo plačilo: porabi isti denar s kartice kot prejšnje, zato se lahko izvede samo eno od obeh.');
   });
   it('refused before anything was sent, and a refusal after it was sent is never "not made"', () => {
     expect(SL['directPay.refused']).toBe('Plačilo ni bilo izvedeno: {{reason}}');
     expect(SL['directPay.refusedSentText']).not.toContain('ni bilo izvedeno');
     expect(SL['directPay.resendRefusedByNetwork']).not.toContain('ni bilo izvedeno');
+  });
+  it('the seller is not said to be "notified": they see it at their till', () => {
+    expect(SL['directPay.paidText']).toBe('Plačilo je potrjeno. Prodajalec ga vidi na svoji blagajni.');
+    expect(SL['directPay.sentText']).not.toContain('lahko zaprete');
   });
   it('the key never leaves the device; the payment goes straight to the shop', () => {
     expect(SL['directPay.enterKey']).toContain('Ključ nikoli ne zapusti te naprave.');

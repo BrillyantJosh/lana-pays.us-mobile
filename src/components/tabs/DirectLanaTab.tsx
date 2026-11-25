@@ -166,7 +166,7 @@ const replacedBy = (a: Pick<DirectAttempt, 'status' | 'reason'>): string | null 
  * `pollMs`: how often a payment that may still change is asked about (8 s at
  * the till; a test asks faster).
  */
-const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?: number }) => {
+const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaUnit; pollMs?: number; onLinksSeen?: (unitId: string) => void }) => {
   const { t, i18n } = useTranslation();
   const { session } = useAuth();
   const locale = i18n.language || 'en';
@@ -321,8 +321,8 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
     try {
       const { status, data } = await fetchDirectLinks(session, unit.unit_id);
       setLinks(status === 200 && Array.isArray(data?.links) ? data.links : []);
-      // Seen: the home screen's notice of paid links goes away.
-      void markDirectLinksSeen(session, unit.unit_id).catch(() => {});
+      // Seen: the home screen's notice of paid links of this shop goes away.
+      void markDirectLinksSeen(session, unit.unit_id).then(() => onLinksSeen?.(unit.unit_id)).catch(() => {});
     } catch {
       setLinks([]);
     }
@@ -862,16 +862,23 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
               <img src={lanaIcon} alt="" className="w-5 h-5 object-contain dark:invert" />
               {t('directLana.scanCard')}
             </Button>
-            {/* The customer is not here: a link they pay at home, from their own card. */}
-            <Button
-              data-testid="direct-send-link"
-              variant="outline"
-              onClick={() => { setRefusal(null); setStep('linkForm'); }}
-              className="w-full h-12 rounded-2xl gap-2 border-2 border-primary text-primary bg-primary/5"
-            >
-              <Link2 className="w-4 h-4" /> {t('directLana.sendLink')}
-            </Button>
-            <p className="text-xs text-muted-foreground text-center -mt-2">{t('directLana.sendLinkHint')}</p>
+            {/* The customer is not here: a link they pay at home, from their own
+                card. Only for a NEW sale: a link is a sale of its own, so offered
+                while a payment of this one may still be mined (paying it again,
+                or a lost answer) the customer could pay twice. */}
+            {!saleId && !attempt && (
+              <>
+                <Button
+                  data-testid="direct-send-link"
+                  variant="outline"
+                  onClick={() => { setRefusal(null); setStep('linkForm'); }}
+                  className="w-full h-12 rounded-2xl gap-2 border-2 border-primary text-primary bg-primary/5"
+                >
+                  <Link2 className="w-4 h-4" /> {t('directLana.sendLink')}
+                </Button>
+                <p className="text-xs text-muted-foreground text-center -mt-2">{t('directLana.sendLinkHint')}</p>
+              </>
+            )}
             <Button variant="outline" className="w-full h-12 rounded-2xl" onClick={newSale}>{t('common.back')}</Button>
           </>
         )}

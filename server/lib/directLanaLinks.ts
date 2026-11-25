@@ -126,6 +126,20 @@ export function syncAllLinks(db: Database.Database, nowSec: number): { paid: num
 }
 
 /**
+ * Why this link takes no NEW payment now (a quote, or sending a quote nobody
+ * has sent yet), or null. Past its time it is still open while a payment of it
+ * may still be mined, but then only for a payment that replaces that one (the
+ * same card, the same coins): quoteSale and beginValidating hold to that.
+ */
+export function linkClosedFor(db: Database.Database, link: LinkRow, nowSec: number): 'LINK_PAID' | 'LINK_CANCELLED' | 'LINK_EXPIRED' | null {
+  if (link.status === 'paid') return 'LINK_PAID';
+  if (link.status === 'cancelled') return 'LINK_CANCELLED';
+  if (link.status === 'expired') return 'LINK_EXPIRED';
+  if (link.expires_at !== null && link.expires_at < nowSec && !saleInFlight(attemptsOfSale(db, link.sale_id))) return 'LINK_EXPIRED';
+  return null;
+}
+
+/**
  * The payment a link shows: the paid one; otherwise the newest that may still
  * be mined; otherwise the newest that failed for good (a page that was waiting
  * on it learns how it ended; the link is open for a new try); otherwise none.
@@ -199,11 +213,23 @@ export function publicAttemptView(row: DirectRow) {
   };
 }
 
-/** An answer about an attempt, made fit for the customer's page: the card's address is taken out. */
-export function forCustomer<T extends Record<string, unknown>>(body: T): T {
+/**
+ * An answer about an attempt, made fit for the customer's page: the card's
+ * address is taken out, and so is any other sale of the card (a quote with
+ * somebody else's public key would otherwise say that card is paying elsewhere
+ * at this shop). `pending_attempt_id` stays only when it is of this same sale:
+ * the payment a refused replacement was to replace.
+ */
+export function forCustomer<T extends Record<string, unknown>>(body: T, saleId?: string, db?: Database.Database): T {
   if (!body || typeof body !== 'object') return body;
-  const { payer_address: _hidden, ...rest } = body as any;
-  void _hidden;
+  const { payer_address: _address, pending_sale_id: _sale, ...rest } = body as any;
+  void _address; void _sale;
+  if (typeof rest.pending_attempt_id === 'string') {
+    const own = db && saleId
+      ? (db.prepare('SELECT sale_id FROM direct_lana_sales WHERE id = ?').get(rest.pending_attempt_id) as { sale_id?: string } | undefined)?.sale_id === saleId
+      : false;
+    if (!own) delete rest.pending_attempt_id;
+  }
   return rest as T;
 }
 

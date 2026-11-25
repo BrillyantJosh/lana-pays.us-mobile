@@ -65,6 +65,7 @@ export interface LinkPayment {
   recipient_name: string;
   record_published: boolean;
   created_at: number;
+  expires_at?: number;
 }
 
 /** GET /api/direct-pay/:token, as the server writes it. */
@@ -92,6 +93,8 @@ export interface LinkView {
 type Phase = 'loading' | 'not_found' | 'closed' | 'ready' | 'quoting' | 'confirm' | 'sending' | 'status';
 
 const DIGITS = /^\d+$/;
+/** Refusals after which what the page shows of the shop may be old: it reads the link again. */
+const STALE_VIEW = ['PLAN_RECIPIENT_CHANGED', 'PLAN_INVALID', 'WALLET_CHANGED', 'CURRENCY_MISMATCH', 'SALE_MISMATCH'];
 /** Is this answer the whole payment (attemptView) of this attempt? Only then is it shown. */
 const isPaymentOf = (data: any, attemptId?: string): data is LinkPayment =>
   !!data && typeof data.attempt_id === 'string' && (!attemptId || data.attempt_id === attemptId)
@@ -133,19 +136,22 @@ const PublicDirectPay = ({ pollMs = 10_000 }: { pollMs?: number }) => {
   // The page closes: the card's key goes with it.
   useEffect(() => () => forgetCard(), []);
 
-  // A public page: the browser's language, unless the customer chose one.
-  useEffect(() => {
-    try {
-      if (!localStorage.getItem('lang') && navigator.language) changeLanguage(navigator.language);
-    } catch { /* no storage: the default language */ }
-  }, []);
+  // The language: the one the customer chose, else the browser's own list of
+  // languages (src/i18n initialLocale). Nothing is saved until they choose.
 
   /** Read the link; show its payment if one is on its way or made. */
   const load = useCallback(async (): Promise<LinkView | null> => {
     try {
       const { status, data } = await fetchPayLink(token);
-      if (status === 404 || !data?.success || !data.link) {
+      if (status === 404) {
         setPhase('not_found');
+        return null;
+      }
+      // Anything else that is not the link (a server being restarted, too many
+      // requests from one address) is not "no such link": the page can ask again.
+      if (status !== 200 || !data?.success || !data.link) {
+        setRefusal({ code: 'NETWORK' });
+        setPhase(p => (p === 'loading' || p === 'not_found' ? 'not_found' : p));
         return null;
       }
       const view = data.link as LinkView;
@@ -188,17 +194,24 @@ const PublicDirectPay = ({ pollMs = 10_000 }: { pollMs?: number }) => {
     if (phase !== 'status' || !payment || !mayStillChange(payment)) return;
     const timer = setTimeout(async () => {
       try {
-        const { status, data } = await fetchPayLink(token);
-        const view = data?.link as LinkView | undefined;
+        const { status, data } = await fetchPayLink(token, payment.attempt_id);
+        const view = data?.link as (LinkView & { asked?: LinkPayment | null }) | undefined;
         if (status === 200 && view) {
           setLink(view);
           const next = view.payment;
-          // The same payment as it is now, or the one that replaced it, or the paid one.
-          if (next && isPaymentOf(next) && (next.attempt_id === payment.attempt_id || next.status === 'paid' || payment.status === 'superseded')) {
+          const own = view.asked && isPaymentOf(view.asked, payment.attempt_id) ? view.asked : null;
+          if (next && isPaymentOf(next) && next.attempt_id !== payment.attempt_id && (next.status === 'paid' || mayStillChange(next))) {
+            // The link is paid, or another payment of it is on its way (the one
+            // that replaced this one, from another tab or at the till): that one.
             setPayment(next);
-          } else if (!next && payment.status === 'quoted' && lostSubmit.current === payment.attempt_id) {
-            // A submit that never arrived: the server holds no payment of it, and its quote ran out.
-            if (Date.now() / 1000 > payment.created_at + 130) setPayment({ ...payment, status: 'expired' });
+          } else if (own && own.status !== 'quoted') {
+            // This page's own payment, as it is now (in a block, failed, replaced, refused).
+            setPayment(own);
+          } else if (payment.status === 'quoted' && lostSubmit.current === payment.attempt_id) {
+            // A submit that never arrived: the server holds the quote unsent, and it ran out.
+            if ((own && own.status === 'quoted' && Date.now() / 1000 > own.expires_at + 5) || (!own && Date.now() / 1000 > payment.created_at + 130)) {
+              setPayment({ ...payment, status: 'expired' });
+            }
           }
         }
       } catch { /* asked again next time */ }
@@ -242,6 +255,8 @@ const PublicDirectPay = ({ pollMs = 10_000 }: { pollMs?: number }) => {
         }
         setRefusal(r);
         setPhase('ready');
+        // The shop's wallet or the link changed meanwhile: the page reads it again.
+        if (STALE_VIEW.includes(r.code)) void load();
         return;
       }
       const p = data.plan as DirectLanaPlan;
@@ -251,8 +266,11 @@ const PublicDirectPay = ({ pollMs = 10_000 }: { pollMs?: number }) => {
       setPhase('confirm');
     } catch (e) {
       forgetCard();
-      setRefusal({ code: codeOfError(e) });
+      const code = codeOfError(e);
+      setRefusal({ code });
       setPhase('ready');
+      // What this page showed is not what the shop is now (another wallet): read it again.
+      if (STALE_VIEW.includes(code)) void load();
     }
   };
 
@@ -498,6 +516,12 @@ const PublicDirectPay = ({ pollMs = 10_000 }: { pollMs?: number }) => {
           {t(paid ? 'directPay.alreadyPaid' : link.status === 'expired' ? 'directPay.expiredInfo' : link.status === 'cancelled' ? 'directPay.cancelledInfo' : 'directPay.closedInfo')}
         </p>
       </div>
+      {/* Closed for now only (the shop, or no price at the moment): it can be asked again. */}
+      {link.status === 'closed' && (
+        <Button data-testid="pay-direct-reload" variant="outline" className="w-full h-12 rounded-2xl" onClick={() => { setRefusal(null); void load(); }}>
+          {t('directPay.tryAgain')}
+        </Button>
+      )}
     </>);
   }
 

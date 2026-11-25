@@ -149,6 +149,8 @@ function seedUnit() {
 // ── what each side sent ─────────────────────────────────────────────────────
 type Sent = { url: string; method: string; headers: string; body: string };
 let requests: Sent[] = [];
+/** The customer's next read of the link gets a 502 (a server being restarted). */
+let failNextView = false;
 const flat = (s: string | null | undefined) => String(s ?? '').replace(/[\u00a0\u202f]/g, ' ');
 const zeroed = (c: CardKey) => c.key.every(b => b === 0);
 
@@ -186,6 +188,7 @@ beforeEach(async () => {
   registrar.set(SHOP_WALLET, wallet('Main Wallet', OWNER_HEX));
   published.length = 0;
   requests = [];
+  failNextView = false;
   globalThis.__cards = [];
   globalThis.__scanValue = CARD_WIF;
   globalThis.__session = { nostrHexId: OWNER_HEX, privateKeyHex: bytesToHex(OWNER), currency: 'EUR' };
@@ -197,6 +200,10 @@ beforeEach(async () => {
       body: typeof init.body === 'string' ? init.body : '',
     });
     if (!String(url).startsWith('/api/direct-lana/') && !String(url).startsWith('/api/direct-pay/')) return new Response('{}', { status: 404 });
+    if (failNextView && String(url).startsWith('/api/direct-pay/') && (init.method || 'GET') === 'GET') {
+      failNextView = false;
+      return new Response('Bad Gateway', { status: 502 });
+    }
     return realFetch(base + url, init);
   }) as any);
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn(async () => {}) } });
@@ -270,7 +277,7 @@ describe('a payment link, from the till to the customer\'s card to a block', () 
     await customerEntersKey();
     // The exact LANA and the fee from the server's plan, checked on this page.
     expect(flat((await screen.findByTestId('pay-direct-exact')).textContent)).toBe('42,96875 LANA');
-    expect(flat(screen.getByTestId('pay-direct-confirm-text').textContent)).toMatch(/^Plačali boste 42,96875 LANA in omrežnino 0,0003945 LANA trgovini Kmetija Novak \(L\w{5}…\w{4}\)\. Plačila ni mogoče preklicati\.$/);
+    expect(flat(screen.getByTestId('pay-direct-confirm-text').textContent)).toMatch(/^Trgovini Kmetija Novak \(L\w{5}…\w{4}\) boste plačali 42,96875 LANA\. Omrežnina je 0,0003945 LANA\. Plačila ni mogoče preklicati\.$/);
     // What the page sent to be quoted: the card's PUBLIC key, nothing else.
     const asked = requests.find(r => r.url.endsWith('/quote'))!;
     expect(Object.keys(JSON.parse(asked.body))).toEqual(['public_key']);
@@ -368,7 +375,7 @@ describe('a payment link, from the till to the customer\'s card to a block', () 
     await customerEntersKey();
     fireEvent.click(await screen.findByTestId('pay-direct-confirm'));
     await screen.findByTestId('pay-direct-status-unknown');
-    expect(screen.getByText('Plačilo se preverja (običajno nekaj minut). Ne plačajte znova in ne plačajte z drugo kartico.')).toBeTruthy();
+    expect(screen.getByText('Plačilo se preverja (običajno nekaj minut). Ne plačajte z drugo kartico ali na drug način.')).toBeTruthy();
     // The page keeps asking and signs nothing new.
     await new Promise(r => setTimeout(r, 200));
     expect(requests.filter(r => r.url.endsWith('/submit')).length).toBe(1);
@@ -378,4 +385,49 @@ describe('a payment link, from the till to the customer\'s card to a block', () 
     await screen.findByTestId('pay-direct-status-sent');
     expect(new Set(chain.broadcasts).size).toBe(1);
   });
+
+  it('review fix: while a payment of the sale may still be mined, the till offers no link (it would be a second sale)', async () => {
+    chain.mode = 'odd';
+    render(<DirectLanaTab unit={UNIT_VIEW} pollMs={40} />);
+    fireEvent.change(screen.getByTestId('direct-amount'), { target: { value: '10,00' } });
+    fireEvent.click(screen.getByTestId('direct-continue'));
+    await screen.findByTestId('direct-breakdown');
+    // A fresh sale: the link is offered.
+    expect(screen.getByTestId('direct-send-link')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('direct-scan'));
+    fireEvent.click(await screen.findByText('SCAN-NOW'));
+    fireEvent.click(await screen.findByTestId('direct-confirm'));
+    await screen.findByTestId('direct-status-unknown');
+    // "Pay again": the same sale, the same card. No link beside it.
+    fireEvent.click(screen.getByTestId('direct-pay-again'));
+    await screen.findByTestId('direct-breakdown');
+    expect(screen.queryByTestId('direct-send-link')).toBeNull();
+  });
+
+  it('review fix: cancelled while the customer looks at the confirm screen: "cancelled", no key asked again', async () => {
+    const { view, token } = await sellerMakesLink();
+    view.unmount();
+    customerOpens(token);
+    await customerEntersKey();
+    await screen.findByTestId('pay-direct-confirm');
+    const id = (db.prepare('SELECT id FROM direct_lana_links WHERE token = ?').get(token) as any).id;
+    db.prepare("UPDATE direct_lana_sales SET status = 'expired', reason = 'LINK_CANCELLED' WHERE status = 'quoted'").run();
+    db.prepare("UPDATE direct_lana_links SET status = 'cancelled' WHERE id = ?").run(id);
+    fireEvent.click(screen.getByTestId('pay-direct-confirm'));
+    await screen.findByTestId('pay-direct-closed-cancelled');
+    expect(screen.queryByTestId('pay-direct-key')).toBeNull();
+    expect(chain.broadcasts).toEqual([]);
+  });
+
+  it('review fix: a server error on the first read is "try again", not "no such link"', async () => {
+    const { view, token } = await sellerMakesLink();
+    view.unmount();
+    failNextView = true;
+    customerOpens(token);
+    const again = await screen.findByTestId('pay-direct-reload');
+    expect(screen.queryByText('Povezave za plačilo ni mogoče najti. Preverite povezavo.')).toBeNull();
+    fireEvent.click(again);
+    expect(flat((await screen.findByTestId('pay-direct-total')).textContent)).toBe('11,00 €');
+  });
 });
+

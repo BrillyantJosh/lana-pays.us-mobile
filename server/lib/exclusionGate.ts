@@ -459,7 +459,26 @@ export function merchantRefusal() {
  * staff member is excluded still trades; a clean buyer is never told they are
  * excluded.
  */
-export function gateNames(db: Database.Database, read: (req: any) => RequestNames) {
+/**
+ * A refusal about a PERSON for a reader who has not proved to be that person:
+ * the code and a plain sentence, never the ground, the date or the event of the
+ * decision. On a route where anybody may name a card or a hex (a payment link's
+ * page, or a till request before its signature is checked), the full refusal
+ * would tell a stranger who is excluded and why.
+ */
+export function quietExclusionRefusal() {
+  return {
+    success: false,
+    error: 'This payment cannot go through: a community commission has paused the access of someone named on it.',
+    code: 'PERSON_EXCLUDED',
+  };
+}
+
+/**
+ * `quiet`: refuse a person with quietExclusionRefusal(), for routes whose
+ * caller has not proved to be the person named (see above).
+ */
+export function gateNames(db: Database.Database, read: (req: any) => RequestNames, opts: { quiet?: boolean } = {}) {
   ensureOnce(db);
   return (req: any, res: any, next: any) => {
     if (isGateOff()) return next();
@@ -467,7 +486,7 @@ export function gateNames(db: Database.Database, read: (req: any) => RequestName
     try { parts = read(req) || {}; } catch { return next(); }
 
     const actor = findExclusionAmong(db, personSideNames(db, parts));
-    if (actor) return res.status(403).json(exclusionRefusal(actor));
+    if (actor) return res.status(403).json(opts.quiet ? quietExclusionRefusal() : exclusionRefusal(actor));
 
     const seller = findExclusionAmong(db, merchantSideNames(db, parts));
     if (seller) return res.status(403).json(merchantRefusal());

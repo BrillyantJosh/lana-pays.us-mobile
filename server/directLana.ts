@@ -63,7 +63,7 @@ import type Database from 'better-sqlite3';
 import crypto from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 import WebSocket from 'ws';
-import { gateNames, excludedNow, excludedMerchant, merchantRefusal } from './lib/exclusionGate.js';
+import { gateNames, excludedNow, excludedMerchant, merchantRefusal, quietExclusionRefusal } from './lib/exclusionGate.js';
 import { exclusionRefusal } from './lib/personExclusion.js';
 import { verifyRequestSignature } from './lib/nip98.js';
 import { isOwnerOrStaff, unitIdsForMerchant } from './lib/merchantAuth.js';
@@ -81,11 +81,11 @@ import { readDirectParams, type DirectParams } from './lib/directLanaParams.js';
 import { directUnitState, unitRow, type DirectUnit } from './lib/directLanaUnit.js';
 import {
   type LinkRow, linkByToken, linkById, newLinkId, newLinkToken, linkExpiryHours, syncLink, syncAllLinks, linkPayment,
-  linkStatusOf, linkAmounts, publicAttemptView, forCustomer, sellerLinkView, saleInFlight,
+  linkStatusOf, linkAmounts, publicAttemptView, forCustomer, sellerLinkView, saleInFlight, linkClosedFor,
 } from './lib/directLanaLinks.js';
 import {
   type DirectRow, getAttempt, attemptsOfSale, heldByCard, invoiceNumberTaken, insertQuote, beginValidating,
-  move, attemptView, planOf, mayStillBeMined, refuseBeforeSending, replacesOf,
+  move, attemptView, planOf, mayStillBeMined, refuseBeforeSending, replacesOf, compactExpiredQuotes,
 } from './lib/directLanaStore.js';
 
 /** Relays that answered OK for this event. */
@@ -117,6 +117,8 @@ const LOST_AFTER_SECONDS = 600;
  */
 export const RESEND_WINDOW_SECONDS = 30 * 60;
 const RELAYS_NEEDED = 3;
+/** Quotes one payment link takes in ten minutes (a customer trying a few cards needs far fewer). */
+const LINK_QUOTES_PER_10_MIN = 30;
 
 /** The seller's words, in English, for a client that prints `error` as it is. A till reads `code`. */
 const WORDS: Record<string, string> = {
@@ -177,6 +179,7 @@ const WORDS: Record<string, string> = {
   LINK_EXPIRED: 'This payment link has expired.',
   LINK_CLOSED: 'This shop cannot take this payment at the moment.',
   INVOICE_HAS_LINK: 'This invoice number already has an open payment link.',
+  TOO_MANY_TRIES: 'Too many tries for this payment link. Try again in a few minutes.',
 };
 
 const words = (code: string) => WORDS[code] || 'The payment could not be prepared.';
@@ -191,8 +194,18 @@ const codeOf = (e: unknown): string => {
 };
 /** A dependency that did not answer is 503; a KIND 87058 decision is 403; a rule that says no is 409. */
 const statusFor = (code: string) =>
-  ['REGISTRAR_UNAVAILABLE', 'CHAIN_UNAVAILABLE', 'RATE_UNAVAILABLE'].includes(code) ? 503
+  code === 'TOO_MANY_TRIES' ? 429
+  : ['REGISTRAR_UNAVAILABLE', 'CHAIN_UNAVAILABLE', 'RATE_UNAVAILABLE'].includes(code) ? 503
     : ['PERSON_EXCLUDED', 'MERCHANT_UNAVAILABLE'].includes(code) ? 403 : 409;
+
+/**
+ * The KIND 87058 gate on these routes refuses a PERSON without the ground, the
+ * date or the event of the decision (lib/exclusionGate.ts quietExclusionRefusal):
+ * a card or a hex on these requests is named by whoever sends them (a link's
+ * page carries no signature at all, and the gate runs before a till's signature
+ * is checked), so the full refusal would tell a stranger who is excluded and why.
+ */
+const QUIET = { quiet: true };
 
 const one = (v: unknown): string => (typeof v === 'string' ? v : '');
 const newId = (prefix: string) => `${prefix}_${crypto.randomBytes(16).toString('hex')}`;
@@ -272,11 +285,15 @@ function notePayee(db: Database.Database, unitId: string, wallet: string, answer
   }
 }
 
-/** The KIND 87058 decision against anyone a direct payment names, said the way the gate says it. */
+/**
+ * The KIND 87058 decision against anyone a direct payment names, said the way
+ * the gate says it here: a person without the ground (the reader is the seller,
+ * or whoever holds a payment link), the shop as "cannot take payments".
+ */
 function exclusionAgainst(db: Database.Database, hexes: string[], unitId: string): { status: number; body: unknown } | null {
   for (const h of hexes) {
     const decision = excludedNow(db, h);
-    if (decision) return { status: 403, body: exclusionRefusal(decision) };
+    if (decision) return { status: 403, body: quietExclusionRefusal() };
   }
   if (excludedMerchant(db, [unitId])) return { status: 403, body: merchantRefusal() };
   return null;
@@ -571,6 +588,12 @@ export async function runDirectLanaWorker(db: Database.Database, deps: DirectLan
     }
     report.recovered += db.prepare(`UPDATE direct_lana_sales SET status = 'unknown', sent = 1, reason = 'INTERRUPTED_WHILE_SENDING', status_at = ?, updated_at = datetime('now')
       WHERE status = 'broadcasting' AND status_at < ?`).run(nowSec, nowSec - STALE_SECONDS).changes;
+    // An expired quote keeps no coin's raw bytes (lib/directLanaStore.ts compactExpiredQuotes).
+    try {
+      compactExpiredQuotes(db);
+    } catch (e: any) {
+      console.warn('[direct-lana] expired quotes not made small:', e?.message || e);
+    }
 
     const params = readDirectParams(db, null, { pubkey: deps.paramsPubkey, nowSec });
     if (params && params.electrum.length >= 2) {
@@ -661,9 +684,10 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   // The customer's page of a payment link carries no signature, so it is held
   // to the count of the Lana-online pay page (/api/pay/*): ten tries a minute.
   const linkActionLimiter = rateLimit({ windowMs: 60 * 1000, max: deps.limitPerMinute ?? 10, standardHeaders: true, legacyHeaders: false });
-  // The page asks again every 10 s while a payment may still change: fifteen
-  // minutes of that, with room to spare.
-  const linkViewLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: deps.limitPerMinute ? deps.limitPerMinute * 15 : 200, standardHeaders: true, legacyHeaders: false });
+  // The page asks again every 10 s while a payment may still change (90 in
+  // fifteen minutes); several customers may share one address (a phone
+  // network), so the room is wide.
+  const linkViewLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: deps.limitPerMinute ? deps.limitPerMinute * 15 : 600, standardHeaders: true, legacyHeaders: false });
   const settling = new Map<string, number>();
 
   /** Settle a card in the background when a till polls it (at most every 20 s per card). */
@@ -783,6 +807,9 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
       const code = codeOf(e);
       return no(statusFor(code), code);
     }
+    // A payment link's quotes may be asked for by anybody holding the link:
+    // one of them never takes another card's quote away (lib/directLanaStore.ts).
+    const linkSale = !!db.prepare('SELECT 1 FROM direct_lana_links WHERE sale_id = ?').get(saleId);
     insertQuote(db, {
       plan,
       owner_hex: u.owner_hex,
@@ -791,7 +818,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
       payer_wallet_type: payer.type,
       description: checked.description,
       replaces: held.map(h => h.id),
-    }, nowSec());
+    }, nowSec(), { sameCardOnly: linkSale });
     return {
       status: 200,
       body: {
@@ -1005,7 +1032,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
    * The breakdown the till shows before the card is scanned, as exact strings:
    * 10.00 + 10 % = 11.00 EUR = 42.96875 LANA at 0.256. Nothing is reserved.
    */
-  app.get('/api/direct-lana/price', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.query?.unit_id] })), (req: Request, res: Response) => {
+  app.get('/api/direct-lana/price', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.query?.unit_id] }), QUIET), (req: Request, res: Response) => {
     const row = unitRow(db, one(req.query.unit_id));
     if (!row) return res.status(404).json(refusal('UNKNOWN_UNIT'));
     const who = signedSeller(db, req, row, nowSec());
@@ -1059,7 +1086,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   app.post('/api/direct-lana/quote', directLimiter, gateNames(db, req => {
     const card = cardOfBody(req.body);
     return { hex: [req.headers?.['x-lana-hex'], card?.hex], wallet: [card?.address], unit: [req.body?.unit_id] };
-  }), async (req: Request, res: Response) => {
+  }, QUIET), async (req: Request, res: Response) => {
     const body = req.body || {};
     const row = unitRow(db, body.unit_id);
     if (!row) return res.status(404).json(refusal('UNKNOWN_UNIT'));
@@ -1086,8 +1113,12 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     // A payment link's sale keeps the link's margin when the till pays it again
     // (the customer came to the shop): the price the link promised.
     const linkOfSale = typeof body.sale_id === 'string'
-      ? (db.prepare('SELECT margin_percent FROM direct_lana_links WHERE sale_id = ?').get(body.sale_id) as { margin_percent: number } | undefined)
+      ? (db.prepare('SELECT * FROM direct_lana_links WHERE sale_id = ?').get(body.sale_id) as LinkRow | undefined)
       : undefined;
+    // A link paid, cancelled or past its time takes no new payment from the till either
+    // (one that replaces a payment of it still on its way excepted).
+    const closed = linkOfSale ? linkClosedFor(db, syncLink(db, linkOfSale, nowSec()), nowSec()) : null;
+    if (closed) return res.status(409).json(refusal(closed));
     const answer = await quoteSale({
       u, sellerHex: who.hex, card, publicKey: body.public_key, p, cents, invoiceNumber,
       margin: linkOfSale ? linkOfSale.margin_percent : u.margin,
@@ -1104,7 +1135,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   app.post('/api/direct-lana/submit', directLimiter, gateNames(db, req => ({
     hex: [req.headers?.['x-lana-hex'], req.body?.record?.pubkey],
     unit: [unitOfAttempt(db, req.body?.attempt_id)],
-  })), async (req: Request, res: Response) => {
+  }), QUIET), async (req: Request, res: Response) => {
     const body = req.body || {};
     const row = getAttempt(db, body.attempt_id);
     if (!row) return res.status(404).json(refusal('UNKNOWN_SALE'));
@@ -1116,7 +1147,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   });
 
   /** GET /api/direct-lana/sales?unit_id= : the shop's direct sales, newest first. */
-  app.get('/api/direct-lana/sales', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.query?.unit_id] })), (req: Request, res: Response) => {
+  app.get('/api/direct-lana/sales', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.query?.unit_id] }), QUIET), (req: Request, res: Response) => {
     const row = unitRow(db, one(req.query.unit_id)) || db.prepare('SELECT unit_id, owner_hex, authorized_hex FROM business_units WHERE unit_id = ?').get(one(req.query.unit_id));
     if (!row) return res.status(404).json(refusal('UNKNOWN_UNIT'));
     const who = signedSeller(db, req, row, nowSec());
@@ -1127,7 +1158,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   });
 
   /** GET /api/direct-lana/sales/:id : one attempt, for the till to poll. */
-  app.get('/api/direct-lana/sales/:id', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [unitOfAttempt(db, req.params?.id)] })), (req: Request, res: Response) => {
+  app.get('/api/direct-lana/sales/:id', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [unitOfAttempt(db, req.params?.id)] }), QUIET), (req: Request, res: Response) => {
     let row = getAttempt(db, req.params.id);
     if (!row) return res.status(404).json(refusal('UNKNOWN_SALE'));
     const unit = db.prepare('SELECT owner_hex, authorized_hex FROM business_units WHERE unit_id = ?').get(row.unit_id) || {};
@@ -1150,7 +1181,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
    * The identical signed bytes, again (resendAttempt): only when the seller
    * asks for it with the customer present, never by itself.
    */
-  app.post('/api/direct-lana/sales/:id/resend', directLimiter, gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [unitOfAttempt(db, req.params?.id)] })), async (req: Request, res: Response) => {
+  app.post('/api/direct-lana/sales/:id/resend', directLimiter, gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [unitOfAttempt(db, req.params?.id)] }), QUIET), async (req: Request, res: Response) => {
     const row = getAttempt(db, req.params.id);
     if (!row) return res.status(404).json(refusal('UNKNOWN_SALE'));
     const unit = db.prepare('SELECT owner_hex, authorized_hex FROM business_units WHERE unit_id = ?').get(row.unit_id) || {};
@@ -1176,7 +1207,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
    * now, the invoice number and a note the customer sees. Only where the till
    * itself could take LANA neposredno now (the shop, the switch, a price).
    */
-  app.post('/api/direct-lana/links', directLimiter, gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.body?.unit_id] })), (req: Request, res: Response) => {
+  app.post('/api/direct-lana/links', directLimiter, gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.body?.unit_id] }), QUIET), (req: Request, res: Response) => {
     const body = req.body || {};
     const row = unitRow(db, body.unit_id);
     if (!row) return res.status(404).json(refusal('UNKNOWN_UNIT'));
@@ -1223,7 +1254,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   });
 
   /** GET /api/direct-lana/links?unit_id= : the shop's payment links, newest first, as the chain says they are. */
-  app.get('/api/direct-lana/links', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.query?.unit_id] })), (req: Request, res: Response) => {
+  app.get('/api/direct-lana/links', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.query?.unit_id] }), QUIET), (req: Request, res: Response) => {
     const row = sellerUnitRow(one(req.query.unit_id));
     if (!row) return res.status(404).json(refusal('UNKNOWN_UNIT'));
     const who = signedSeller(db, req, row, nowSec());
@@ -1241,7 +1272,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
    * payment may still arrive, and cancelling would hide it. A quote nobody
    * signed yet can no longer be sent.
    */
-  app.post('/api/direct-lana/links/:id/cancel', directLimiter, gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [linkById(db, req.params?.id)?.unit_id] })), (req: Request, res: Response) => {
+  app.post('/api/direct-lana/links/:id/cancel', directLimiter, gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [linkById(db, req.params?.id)?.unit_id] }), QUIET), (req: Request, res: Response) => {
     let link = linkById(db, req.params.id);
     if (!link) return res.status(404).json(refusal('LINK_NOT_FOUND'));
     const who = signedSeller(db, req, sellerUnitRow(link.unit_id) || {}, nowSec());
@@ -1251,13 +1282,14 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     const why = db.transaction((): string | null => {
       const fresh = linkById(db, link!.id)!;
       if (fresh.status === 'paid') return 'LINK_PAID';
-      if (fresh.status !== 'open') return null;
+      if (fresh.status === 'cancelled') return null;
       const attempts = attemptsOfSale(db, fresh.sale_id);
       if (attempts.some(a => a.status === 'paid')) return 'LINK_PAID';
       if (saleInFlight(attempts)) return 'SALE_PAYMENT_PENDING';
+      // Open, or already past its time: a quote nobody sent can no longer be sent.
       db.prepare(`UPDATE direct_lana_sales SET status = 'expired', reason = 'LINK_CANCELLED', status_at = ?, updated_at = datetime('now')
         WHERE sale_id = ? AND status = 'quoted'`).run(now, fresh.sale_id);
-      db.prepare(`UPDATE direct_lana_links SET status = 'cancelled', cancelled_at = ?, updated_at = datetime('now') WHERE id = ? AND status = 'open'`).run(now, fresh.id);
+      db.prepare(`UPDATE direct_lana_links SET status = 'cancelled', cancelled_at = ?, updated_at = datetime('now') WHERE id = ? AND status IN ('open','expired')`).run(now, fresh.id);
       return null;
     })();
     const view = linkView(syncLink(db, linkById(db, link.id)!, now));
@@ -1271,7 +1303,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
    * yet, across every shop the signer is owner or staff of, for the home
    * screen's notice. The signature is the only word on who is asking.
    */
-  app.get('/api/direct-lana/links/unseen', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']] })), (req: Request, res: Response) => {
+  app.get('/api/direct-lana/links/unseen', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']] }), QUIET), (req: Request, res: Response) => {
     const signed = verifyRequestSignature(req, {});
     if (!signed.ok) {
       const { reason } = signed as { ok: false; reason: string };
@@ -1281,21 +1313,23 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     if (decision) return res.status(403).json(exclusionRefusal(decision));
     const units = unitIdsForMerchant(db, signed.hex);
     res.set('Cache-Control', 'no-store');
-    if (!units.length) return res.json({ success: true, count: 0, latest: [] });
-    syncAllLinks(db, nowSec());
+    if (!units.length) return res.json({ success: true, count: 0, by_unit: {}, latest: [] });
+    // The sweep marks paid links every 30 s; this read writes nothing.
     const ph = units.map(() => '?').join(',');
-    const count = (db.prepare(`SELECT COUNT(*) AS c FROM direct_lana_links WHERE unit_id IN (${ph}) AND status = 'paid' AND seen_by_seller = 0`).get(...units) as any).c;
+    const byUnit = db.prepare(`SELECT unit_id, COUNT(*) AS n FROM direct_lana_links WHERE unit_id IN (${ph}) AND status = 'paid' AND seen_by_seller = 0 GROUP BY unit_id`)
+      .all(...units) as Array<{ unit_id: string; n: number }>;
+    const count = byUnit.reduce((n, r) => n + r.n, 0);
     const latest = (db.prepare(`
       SELECT * FROM direct_lana_links WHERE unit_id IN (${ph}) AND status = 'paid' AND seen_by_seller = 0
       ORDER BY paid_at DESC, rowid DESC LIMIT 3
     `).all(...units) as LinkRow[]).map(l => ({
       id: l.id, unit_id: l.unit_id, unit_name: l.unit_name, currency: l.currency, ...linkAmounts(l), paid_at: l.paid_at,
     }));
-    return res.json({ success: true, count, latest });
+    return res.json({ success: true, count, by_unit: Object.fromEntries(byUnit.map(r => [r.unit_id, r.n])), latest });
   });
 
   /** POST /api/direct-lana/links/seen { unit_id } : the seller opened the shop's links. */
-  app.post('/api/direct-lana/links/seen', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.body?.unit_id] })), (req: Request, res: Response) => {
+  app.post('/api/direct-lana/links/seen', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.body?.unit_id] }), QUIET), (req: Request, res: Response) => {
     const row = sellerUnitRow(req.body?.unit_id);
     if (!row) return res.status(404).json(refusal('UNKNOWN_UNIT'));
     const who = signedSeller(db, req, row, nowSec());
@@ -1319,13 +1353,21 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     return null;
   };
 
+  /** An attempt of this link's sale, or nothing. */
+  const attemptOfLink = (link: LinkRow, id: unknown): DirectRow | undefined => {
+    const row = getAttempt(db, id);
+    return row && row.sale_id === link.sale_id ? row : undefined;
+  };
+
   /**
-   * GET /api/direct-pay/:token
+   * GET /api/direct-pay/:token[?attempt=dla_…]
    * The customer's page: the shop, the invoice, the margin, the total, LANA at
    * the price of now (said as approximate: the exact LANA come with the quote),
    * the seller's note, and the payment of this link, if one is on its way or
    * made. 'closed': the link is open, but the shop cannot take it now (why is
-   * not said: the customer can do nothing about it).
+   * not said: the customer can do nothing about it). `attempt`: the page's own
+   * payment of this link, as it is now (`asked`), so a page that sent one
+   * learns how it ended even when it is not the payment the link shows.
    */
   app.get('/api/direct-pay/:token', linkViewLimiter, (req: Request, res: Response) => {
     let link = linkByToken(db, req.params.token);
@@ -1333,6 +1375,8 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     link = syncLink(db, link, nowSec());
     const payment = linkPayment(db, link);
     if (payment) settleSoon(payment);
+    const asked = req.query.attempt !== undefined ? attemptOfLink(link, one(req.query.attempt)) : undefined;
+    if (asked && asked.id !== payment?.id) settleSoon(asked);
     let status: string = linkStatusOf(link, payment);
     let unit: DirectUnit | null = null;
     let price: { rate: string; rate_event_id: string; lanoshi: string; lana: string } | null = null;
@@ -1370,6 +1414,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
         expires_at: link.expires_at,
         paid_at: link.paid_at,
         payment: payment ? publicAttemptView(payment) : null,
+        asked: asked ? publicAttemptView(asked) : null,
       },
     });
   });
@@ -1384,19 +1429,17 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   app.post('/api/direct-pay/:token/quote', linkActionLimiter, gateNames(db, req => {
     const card = cardOfBody(req.body);
     return { hex: [card?.hex], wallet: [card?.address], unit: [linkByToken(db, req.params?.token)?.unit_id] };
-  }), async (req: Request, res: Response) => {
+  }, QUIET), async (req: Request, res: Response) => {
     const body = req.body || {};
     let link = linkByToken(db, req.params.token);
     if (!link) return res.status(404).json(refusal('LINK_NOT_FOUND'));
     link = syncLink(db, link, nowSec());
-    if (link.status === 'paid') return res.status(409).json(refusal('LINK_PAID'));
-    if (link.status === 'cancelled') return res.status(409).json(refusal('LINK_CANCELLED'));
-    if (link.status === 'expired') return res.status(409).json(refusal('LINK_EXPIRED'));
-    // Past its time, still open only because a payment of it may still be
-    // mined: only a quote that can replace that payment.
-    if (link.expires_at !== null && link.expires_at < nowSec() && !saleInFlight(attemptsOfSale(db, link.sale_id))) {
-      return res.status(409).json(refusal('LINK_EXPIRED'));
-    }
+    const closed = linkClosedFor(db, link, nowSec());
+    if (closed) return res.status(409).json(refusal(closed));
+    // Quotes are stored: a link takes at most this many in ten minutes, so
+    // nobody holding it can pile them up (with compactExpiredQuotes).
+    const recent = (db.prepare('SELECT COUNT(*) AS n FROM direct_lana_sales WHERE sale_id = ? AND created_at > ?').get(link.sale_id, nowSec() - 600) as { n: number }).n;
+    if (recent >= LINK_QUOTES_PER_10_MIN) return res.status(429).json(refusal('TOO_MANY_TRIES'));
     const row = unitRow(db, link.unit_id);
     const seller = linkSellerRefusal(link, row);
     if (seller) return res.status(seller.status).json(seller.body);
@@ -1414,14 +1457,12 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
       saleId: link.sale_id, saleMustExist: false,
     });
     res.set('Cache-Control', 'no-store');
-    return res.status(answer.status).json(forCustomer(answer.body));
+    // A quote is asked for with nothing but a public key: it never says what
+    // else that card is paying (no pending ids at all).
+    const { pending_attempt_id: _a, pending_sale_id: _s, ...body2 } = (answer.body || {}) as any;
+    void _a; void _s;
+    return res.status(answer.status).json(forCustomer(body2));
   });
-
-  /** An attempt of this link's sale, or nothing. */
-  const attemptOfLink = (link: LinkRow, id: unknown): DirectRow | undefined => {
-    const row = getAttempt(db, id);
-    return row && row.sale_id === link.sale_id ? row : undefined;
-  };
 
   /**
    * POST /api/direct-pay/:token/submit { attempt_id, raw, record }
@@ -1431,23 +1472,31 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   app.post('/api/direct-pay/:token/submit', linkActionLimiter, gateNames(db, req => ({
     hex: [req.body?.record?.pubkey],
     unit: [linkByToken(db, req.params?.token)?.unit_id],
-  })), async (req: Request, res: Response) => {
+  }), QUIET), async (req: Request, res: Response) => {
     const body = req.body || {};
-    const link = linkByToken(db, req.params.token);
+    let link = linkByToken(db, req.params.token);
     if (!link) return res.status(404).json(refusal('LINK_NOT_FOUND'));
     const row = attemptOfLink(link, body.attempt_id);
     if (!row) return res.status(404).json(refusal('UNKNOWN_SALE'));
     res.set('Cache-Control', 'no-store');
+    link = syncLink(db, link, nowSec());
     if (row.status === 'quoted') {
-      if (link.status === 'cancelled') {
-        move(db, row.id, ['quoted'], 'expired', nowSec(), { reason: 'LINK_CANCELLED' });
-        return res.status(409).json(refusal('LINK_CANCELLED'));
+      // Nothing of it is kept or sent yet: the link and its seller are asked
+      // once more. Paid, cancelled or past its time: this quote is never sent.
+      const closed = linkClosedFor(db, link, nowSec());
+      if (closed) {
+        move(db, row.id, ['quoted'], 'expired', nowSec(), { reason: closed });
+        return res.status(409).json(refusal(closed));
       }
       const seller = linkSellerRefusal(link, unitRow(db, link.unit_id));
       if (seller) return res.status(seller.status).json(seller.body);
+    } else if (!mayStillBeMined(row) && row.status !== 'paid' && (link.status === 'cancelled' || link.status === 'expired')) {
+      // A quote of a link that closed meanwhile (cancelled with it, or run out):
+      // the page is told why, not that its quote ran out.
+      return res.status(409).json(refusal(link.status === 'cancelled' ? 'LINK_CANCELLED' : 'LINK_EXPIRED'));
     }
     const answer = await submitAttempt(row, body);
-    return res.status(answer.status).json(forCustomer(answer.body));
+    return res.status(answer.status).json(forCustomer(answer.body, link.sale_id, db));
   });
 
   /**
@@ -1455,7 +1504,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
    * The identical signed bytes of this link's payment, again (resendAttempt),
    * when the customer asks: within 30 minutes of their signature.
    */
-  app.post('/api/direct-pay/:token/resend', linkActionLimiter, gateNames(db, req => ({ unit: [linkByToken(db, req.params?.token)?.unit_id] })), async (req: Request, res: Response) => {
+  app.post('/api/direct-pay/:token/resend', linkActionLimiter, gateNames(db, req => ({ unit: [linkByToken(db, req.params?.token)?.unit_id] }), QUIET), async (req: Request, res: Response) => {
     const link = linkByToken(db, req.params.token);
     if (!link) return res.status(404).json(refusal('LINK_NOT_FOUND'));
     const row = attemptOfLink(link, req.body?.attempt_id);
@@ -1464,7 +1513,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     res.set('Cache-Control', 'no-store');
     if (seller) return res.status(seller.status).json(seller.body);
     const answer = await resendAttempt(row);
-    return res.status(answer.status).json(forCustomer(answer.body));
+    return res.status(answer.status).json(forCustomer(answer.body, link.sale_id, db));
   });
 
   return deps;
