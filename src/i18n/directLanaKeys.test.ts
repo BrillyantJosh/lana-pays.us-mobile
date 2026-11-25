@@ -81,7 +81,8 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
   const keys = Object.keys(EN).filter(k => k.startsWith('directLana.'));
 
   it('has every key, translated, with the placeholders of English', () => {
-    expect(keys.length).toBe(95);
+    // 95 of the till's LANA neposredno, 22 of its payment links (25 Nov 2026).
+    expect(keys.length).toBe(117);
     for (const key of keys) {
       expect(typeof strings[key], `${name} is missing ${key}`).toBe('string');
       expect(strings[key].trim().length, `${name}:${key} is empty`).toBeGreaterThan(0);

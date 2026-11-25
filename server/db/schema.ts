@@ -724,6 +724,45 @@ export function ensureDirectLanaTables(db: Database.Database): void {
   `);
   // A journal made before superseded_from existed gets it (no row has a value yet).
   try { db.exec('ALTER TABLE direct_lana_sales ADD COLUMN superseded_from TEXT'); } catch { /* column exists */ }
+
+  // A payment link of LANA neposredno (Brilly, 25 Nov 2026): the seller makes
+  // one at the till and sends it; the customer opens it at home and pays from
+  // their own card, in their own browser, straight into the shop's wallet, NOT
+  // through the brain (server/directLana.ts, lib/directLanaLinks.ts). One link
+  // is ONE sale of the journal above (sale_id): every payment of it is an
+  // attempt there, under the same rules as at the till, so a link can be paid
+  // once at most. The invoice and the margin are fixed when the link is made;
+  // LANA are priced when the customer pays.
+  //   open       may be paid
+  //   paid       its sale has a payment in a block
+  //   cancelled  the seller closed it (only while no payment of it may still be mined)
+  //   expired    past expires_at with no payment that may still be mined
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS direct_lana_links (
+      id TEXT PRIMARY KEY,
+      token TEXT NOT NULL UNIQUE,
+      sale_id TEXT NOT NULL UNIQUE,
+      unit_id TEXT NOT NULL,
+      seller_hex TEXT NOT NULL,
+      owner_hex TEXT NOT NULL,
+      unit_name TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      invoice_cents TEXT NOT NULL,
+      margin_percent INTEGER NOT NULL,
+      invoice_number TEXT NOT NULL DEFAULT '',
+      note TEXT,
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','paid','cancelled','expired')),
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER,
+      paid_attempt_id TEXT,
+      paid_at INTEGER,
+      cancelled_at INTEGER,
+      seen_by_seller INTEGER NOT NULL DEFAULT 0 CHECK (seen_by_seller IN (0, 1)),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_dll_unit_created ON direct_lana_links(unit_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_dll_status ON direct_lana_links(status);
+  `);
   // The switch, OFF for every shop until set (server/lib/directLanaUnit.ts):
   // '' off, '*' every shop without a company, or unit ids joined by commas.
   db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('direct_lana_units', '')").run();

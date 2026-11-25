@@ -401,6 +401,7 @@ describe('no route lands ungated by accident', () => {
     '/api/caretaker/:unitId': 'public caretaker contact card',
     '/api/max-transaction': 'public per-unit limit read, no person on the request',
     '/api/pay/:token': 'public view of one payment request; the 192-bit token IS the capability',
+    '/api/direct-pay/:token': 'public view of one LANA neposredno payment link; the 192-bit token IS the capability; it moves nothing, and a link of an excluded seller shows as closed (its quote, submit and resend are gated)',
     '/api/check-wallet': 'registrar passthrough keyed by wallet; the purchase that follows is gated',
 
     // Mounts, not routes — now that the regex can see app.use() with a path.

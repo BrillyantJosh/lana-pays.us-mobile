@@ -18,6 +18,24 @@
  *   GET  /api/direct-lana/sales/:id         one attempt, for the till to poll
  *   POST /api/direct-lana/sales/:id/resend  the identical bytes again
  *
+ * PAYMENT LINKS (Brilly, 25 Nov 2026; lib/directLanaLinks.ts): the seller makes
+ * a link at the till and sends it; the customer pays it at home from their own
+ * card, in their own browser. One link is one sale of the same journal, quoted,
+ * checked, sent and settled by the same code as at the till (quoteSale,
+ * submitAttempt, resendAttempt below), so it can be paid once at most.
+ *   POST /api/direct-lana/links               the seller makes a link (signed)
+ *   GET  /api/direct-lana/links?unit_id=      the shop's links (signed)
+ *   POST /api/direct-lana/links/:id/cancel    close one, while nothing of it is on its way (signed)
+ *   GET  /api/direct-lana/links/unseen        paid links not seen yet (signed)
+ *   POST /api/direct-lana/links/seen          the seller saw them (signed)
+ *   GET  /api/direct-pay/:token               the customer's page
+ *   POST /api/direct-pay/:token/quote         the plan the customer's card will sign
+ *   POST /api/direct-pay/:token/submit        the signed payment and record
+ *   POST /api/direct-pay/:token/resend        the identical bytes again
+ * The customer's routes carry no signature: the link's token is the
+ * capability. Who sells is the seller who made the link, asked again at every
+ * step (still owner or staff, no KIND 87058 decision against them).
+ *
  * ORDER AT QUOTE AND AT SUBMIT, each fresh and failing closed: the seller's
  * signature; KIND 87058 for the seller, the owner, the card and the card's
  * registrar owner; the shop's settings and the switch; the verified KIND 38888
@@ -48,7 +66,8 @@ import WebSocket from 'ws';
 import { gateNames, excludedNow, excludedMerchant, merchantRefusal } from './lib/exclusionGate.js';
 import { exclusionRefusal } from './lib/personExclusion.js';
 import { verifyRequestSignature } from './lib/nip98.js';
-import { isOwnerOrStaff } from './lib/merchantAuth.js';
+import { isOwnerOrStaff, unitIdsForMerchant } from './lib/merchantAuth.js';
+import { cleanRequestNote } from './lib/requestNote.js';
 import { verifyNostrEvent, type NostrEvent } from './lib/nostr.js';
 import {
   DirectLanaError, type DirectLanaPlan, type DirectLanaCoin, NETWORK, QUOTE_SECONDS, MAX_INPUTS, DUST_LANOSHI,
@@ -60,6 +79,10 @@ import { withChain as liveChain, spendingPending, ChainUnavailable, type WithCha
 import { registrarLookup, RegistrarUnavailable, type RegistrarLookup, type RegistrarAnswer } from './lib/directLanaRegistrar.js';
 import { readDirectParams, type DirectParams } from './lib/directLanaParams.js';
 import { directUnitState, unitRow, type DirectUnit } from './lib/directLanaUnit.js';
+import {
+  type LinkRow, linkByToken, linkById, newLinkId, newLinkToken, linkExpiryHours, syncLink, syncAllLinks, linkPayment,
+  linkStatusOf, linkAmounts, publicAttemptView, forCustomer, sellerLinkView, saleInFlight,
+} from './lib/directLanaLinks.js';
 import {
   type DirectRow, getAttempt, attemptsOfSale, heldByCard, invoiceNumberTaken, insertQuote, beginValidating,
   move, attemptView, planOf, mayStillBeMined, refuseBeforeSending, replacesOf,
@@ -148,6 +171,12 @@ const WORDS: Record<string, string> = {
   NOT_ENTITLED: 'This sign-in is not listed as the owner or staff of this shop.',
   PERSON_EXCLUDED: 'This sale cannot go through: a community commission has paused the access of someone named on it.',
   MERCHANT_UNAVAILABLE: 'This shop cannot take payments at the moment.',
+  LINK_NOT_FOUND: 'This payment link is not known here.',
+  LINK_PAID: 'This payment link is already paid.',
+  LINK_CANCELLED: 'The seller cancelled this payment link.',
+  LINK_EXPIRED: 'This payment link has expired.',
+  LINK_CLOSED: 'This shop cannot take this payment at the moment.',
+  INVOICE_HAS_LINK: 'This invoice number already has an open payment link.',
 };
 
 const words = (code: string) => WORDS[code] || 'The payment could not be prepared.';
@@ -559,6 +588,13 @@ export async function runDirectLanaWorker(db: Database.Database, deps: DirectLan
       }
     }
     if (params) report.published = await publishPaidRecords(db, deps, params);
+    // A payment link whose sale is now paid says so; one past its time with
+    // nothing on its way expires.
+    try {
+      syncAllLinks(db, nowSec);
+    } catch (e: any) {
+      console.warn('[direct-lana] payment links not brought up to date:', e?.message || e);
+    }
 
     const frozen = db.prepare('SELECT unit_id, wallet FROM direct_lana_payees WHERE frozen = 1 AND checked_at < ? LIMIT 5').all(nowSec - 600) as Array<{ unit_id: string; wallet: string }>;
     for (const p of frozen) {
@@ -594,6 +630,27 @@ export function stopDirectLanaWorker(): void {
 
 // ── The routes ──────────────────────────────────────────────────────────────
 
+/** An answer as a route sends it. */
+type Answer = { status: number; body: any };
+
+/** What one quote is for, once it is known who sells and which shop (the till's seller, or a payment link). */
+interface QuoteInput {
+  u: DirectUnit;
+  /** Who sells: the till's signed seller, or the seller who made the link. */
+  sellerHex: string;
+  card: { hex: string; address: string };
+  publicKey: string;
+  p: DirectParams;
+  cents: bigint;
+  invoiceNumber: string;
+  /** The margin of this sale: the shop's own at the till, the link's for a payment link. */
+  margin: number;
+  /** undefined: a new sale; otherwise the sale this quote continues (its form is checked here). */
+  saleId: unknown;
+  /** The till continues only a sale it quoted before; a link's sale may have no attempt yet. */
+  saleMustExist: boolean;
+}
+
 export function registerDirectLanaRoutes(app: Express, db: Database.Database, overrides: Partial<DirectLanaDeps> = {}): DirectLanaDeps {
   const deps: DirectLanaDeps = { ...defaultDirectLanaDeps(), ...overrides };
   const nowSec = () => Math.floor(deps.nowMs() / 1000);
@@ -601,6 +658,12 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   // Each quote and submit asks the registrar twice and two Electrum servers:
   // well under the till's own limits, and far from the registrar's hourly budget.
   const directLimiter = rateLimit({ windowMs: 60 * 1000, max: deps.limitPerMinute ?? 20, standardHeaders: true, legacyHeaders: false });
+  // The customer's page of a payment link carries no signature, so it is held
+  // to the count of the Lana-online pay page (/api/pay/*): ten tries a minute.
+  const linkActionLimiter = rateLimit({ windowMs: 60 * 1000, max: deps.limitPerMinute ?? 10, standardHeaders: true, legacyHeaders: false });
+  // The page asks again every 10 s while a payment may still change: fifteen
+  // minutes of that, with room to spare.
+  const linkViewLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: deps.limitPerMinute ? deps.limitPerMinute * 15 : 200, standardHeaders: true, legacyHeaders: false });
   const settling = new Map<string, number>();
 
   /** Settle a card in the background when a till polls it (at most every 20 s per card). */
@@ -613,6 +676,328 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     const p = params(null);
     if (!p || p.electrum.length < 2) return;
     void settleCard(db, deps, row.payer_address, p).catch(() => {});
+  };
+
+  /**
+   * One quote, the same for the till and for a payment link, once the caller
+   * has said who sells, which shop, which card, the invoice and the margin: the
+   * sale, the card's own payments, the register, KIND 87058, the chain and the
+   * plan, in this order, each fresh and failing closed.
+   */
+  const quoteSale = async (q: QuoteInput): Promise<Answer> => {
+    const { u, card, p } = q;
+    const no = (status: number, code: string, extra: Record<string, unknown> = {}): Answer => ({ status, body: refusal(code, extra) });
+    let pay: bigint;
+    try {
+      pay = withMargin(q.cents, q.margin);
+    } catch (e) {
+      return no(409, codeOf(e) === 'CHAIN_UNAVAILABLE' ? 'MARGIN_INVALID' : codeOf(e));
+    }
+    const requested = lanoshiForCents(pay, p.rate);
+    if (requested <= DUST_LANOSHI) return no(409, 'AMOUNT_TOO_SMALL');
+    if (requested > BigInt(Number.MAX_SAFE_INTEGER)) return no(400, 'AMOUNT_INVALID');
+
+    // The sale: a new one, or one started before for exactly this purchase.
+    let saleId = newId('dls');
+    if (q.saleId !== undefined) {
+      if (typeof q.saleId !== 'string' || !/^dls_[0-9a-f]{32}$/.test(q.saleId)) return no(400, 'SALE_MISMATCH');
+      const earlier = attemptsOfSale(db, q.saleId);
+      if (!earlier.length && q.saleMustExist) return no(404, 'UNKNOWN_SALE');
+      if (earlier.some(a => a.unit_id !== u.unit_id || a.currency !== u.currency || a.invoice_cents !== q.cents.toString() || a.invoice_number !== q.invoiceNumber)) {
+        return no(409, 'SALE_MISMATCH');
+      }
+      if (earlier.some(a => a.status === 'paid')) return no(409, 'SALE_ALREADY_PAID');
+      // A payment of this sale from another card may still be mined: not a second one beside it.
+      if (earlier.some(a => mayStillBeMined(a) && a.payer_address !== card.address)) return no(409, 'SALE_PAYMENT_PENDING');
+      saleId = q.saleId;
+    }
+    if (invoiceNumberTaken(db, u.unit_id, q.invoiceNumber, saleId)) return no(409, 'INVOICE_USED');
+
+    // The card's own payments that may still be mined. One on its way, or one of
+    // another sale: the card waits. One of this sale that hangs: a replacement.
+    const held = heldByCard(db, card.address);
+    const waiting = held.find(h => ['validating', 'broadcasting', 'sent'].includes(h.status) || h.sale_id !== saleId);
+    if (waiting) {
+      return no(409, 'CARD_PAYMENT_PENDING', waiting.unit_id === u.unit_id ? { pending_attempt_id: waiting.id, pending_sale_id: waiting.sale_id } : {});
+    }
+
+    let payer: { owner: string; type: string };
+    try {
+      // The card first: an unregistered card ends the quote with one question.
+      payer = checkPayer(await deps.registrar(card.address));
+      const payee = await deps.registrar(u.wallet);
+      notePayee(db, u.unit_id, u.wallet, payee, nowSec());
+      checkPayee(payee, u.owner_hex);
+    } catch (e) {
+      const code = codeOf(e);
+      return no(statusFor(code), code);
+    }
+    const excluded = exclusionAgainst(db, [card.hex, payer.owner], u.unit_id);
+    if (excluded) return excluded;
+    if (payer.owner === u.owner_hex || card.hex === u.owner_hex || card.address === u.wallet) return no(409, 'SELF_PAYMENT');
+    if (p.electrum.length < 2) return no(503, 'CHAIN_UNAVAILABLE');
+
+    let plan: DirectLanaPlan;
+    let checked: ReturnType<typeof checkPlan>;
+    try {
+      plan = await deps.withChain(p.electrum, card.address, async (c) => {
+        if (spendingPending(c.snapshot)) throw new DirectLanaError('CHAIN_PENDING');
+        // A new payment is never byte for byte an earlier one of this card (the
+        // same coins and amounts in the same second would be): it is stamped at
+        // least a second after the card's last signed attempt.
+        const last = (db.prepare('SELECT MAX(created_at) AS t FROM direct_lana_sales WHERE payer_address = ? AND txid IS NOT NULL').get(card.address) as any)?.t;
+        const createdAt = Math.max(nowSec(), Number(last || 0) + 1);
+        const inputs = await chooseCoins(c, requested, createdAt, held);
+        if (!(await c.tipUnchanged())) throw new DirectLanaError('WALLET_STATE_CHANGED');
+        const values = amounts(inputs.map(i => BigInt(i.value)), requested);
+        return {
+          v: 1,
+          network: NETWORK,
+          attempt_id: newId('dla'),
+          sale_id: saleId,
+          unit_id: u.unit_id,
+          unit_name: u.name,
+          sender: card.address,
+          public_key: q.publicKey,
+          card_hex: card.hex,
+          recipient: u.wallet,
+          recipient_hex: u.owner_hex,
+          currency: u.currency,
+          invoice_cents: q.cents.toString(),
+          margin_percent: q.margin,
+          pay_cents: pay.toString(),
+          rate: p.rate,
+          rate_event_id: p.event_id,
+          invoice_number: q.invoiceNumber,
+          amount: values.amount.toString(),
+          fee: values.fee.toString(),
+          change: values.change.toString(),
+          inputs,
+          created_at: createdAt,
+          expires: createdAt + QUOTE_SECONDS,
+        } as DirectLanaPlan;
+      });
+      checked = checkPlan(plan);
+      if (JSON.stringify(plan).length > 250_000) throw new DirectLanaError('TX_TOO_LARGE');
+    } catch (e) {
+      const code = codeOf(e);
+      return no(statusFor(code), code);
+    }
+    insertQuote(db, {
+      plan,
+      owner_hex: u.owner_hex,
+      seller_hex: q.sellerHex,
+      payer_owner_hex: payer.owner,
+      payer_wallet_type: payer.type,
+      description: checked.description,
+      replaces: held.map(h => h.id),
+    }, nowSec());
+    return {
+      status: 200,
+      body: {
+        success: true,
+        attempt_id: plan.attempt_id,
+        sale_id: plan.sale_id,
+        plan,
+        lana: lanaText(checked.amount),
+        fee_lana: lanaText(checked.fee),
+        description: checked.description,
+        replaces: held.map(h => h.id),
+      },
+    };
+  };
+
+  /**
+   * The signed payment and its record for one attempt, the same for the till
+   * and a payment link, once the caller is known to be entitled to it. Kept
+   * (with the record) before anything is sent, checked once more, then sent to
+   * both Electrum servers. The same bytes again answer with what happened to
+   * them; other bytes for the same attempt are refused.
+   */
+  const submitAttempt = async (row: DirectRow, body: any): Promise<Answer> => {
+    if (row.status !== 'quoted') {
+      const same = typeof body.raw === 'string' && body.raw === row.raw_tx && body.record?.id === row.record_id;
+      if (same) return { status: 200, body: { success: row.status !== 'refused', ...attemptView(row) } };
+      return { status: 409, body: refusal('SALE_CONFLICT', { ...attemptView(row) }) };
+    }
+    if (nowSec() > row.expires_at) {
+      move(db, row.id, ['quoted'], 'expired', nowSec(), { reason: 'QUOTE_EXPIRED' });
+      // The whole attempt, as every other answer about it: the till shows it.
+      return { status: 409, body: refusal('QUOTE_EXPIRED', attemptView(getAttempt(db, row.id)!)) };
+    }
+    const plan = planOf(row);
+    let txid: string;
+    let record: NostrEvent;
+    try {
+      checkPlan(plan);
+      txid = verifySignedRaw(plan, body.raw);
+      record = checkRecord(body.record, plan, txid);
+    } catch (e) {
+      return { status: 400, body: refusal(codeOf(e) === 'CHAIN_UNAVAILABLE' ? 'TX_INVALID' : codeOf(e)) };
+    }
+    const began = beginValidating(db, row, { txid, raw: body.raw, record, record_id: record.id }, nowSec());
+    if (began.ok === false) {
+      // NOT_QUOTED cannot happen between the read above and here (no await in
+      // between, one process): it is the last guard, not a path.
+      const why = began.why === 'NOT_QUOTED' ? 'SALE_CONFLICT' : began.why === 'TXID_CONFLICT' ? 'TX_ALREADY_KNOWN' : began.why;
+      return { status: 409, body: refusal(why) };
+    }
+
+    let attempted = false;
+    // Refused before anything was sent: what this attempt was to replace is
+    // put back, since it may still be mined (lib/directLanaStore.ts).
+    const refuseNow = (code: string) => {
+      refuseBeforeSending(db, row.id, code, nowSec());
+      return { code };
+    };
+    let outcome: { code?: string };
+    try {
+      outcome = await (async () => {
+        const state = directUnitState(db, unitRow(db, row.unit_id));
+        if (!state.ok) return refuseNow(state.code);
+        if (state.unit.wallet !== plan.recipient || state.unit.owner_hex !== plan.recipient_hex) return refuseNow('WALLET_CHANGED');
+        let payer: { owner: string; type: string };
+        try {
+          payer = checkPayer(await deps.registrar(plan.sender));
+          const payee = await deps.registrar(plan.recipient);
+          notePayee(db, row.unit_id, plan.recipient, payee, nowSec());
+          checkPayee(payee, plan.recipient_hex);
+        } catch (e) {
+          return refuseNow(codeOf(e));
+        }
+        const excluded = exclusionAgainst(db, [plan.card_hex, payer.owner], row.unit_id);
+        if (excluded) return refuseNow(excluded.status === 403 && (excluded.body as any)?.code === 'MERCHANT_UNAVAILABLE' ? 'MERCHANT_UNAVAILABLE' : 'PERSON_EXCLUDED');
+        if (payer.owner === plan.recipient_hex) return refuseNow('SELF_PAYMENT');
+        const p = params(plan.currency);
+        if (!p?.rate) return refuseNow('RATE_UNAVAILABLE');
+        if (p.rate !== plan.rate) return refuseNow('RATE_CHANGED');
+        if (p.electrum.length < 2) return refuseNow('CHAIN_UNAVAILABLE');
+        return await deps.withChain(p.electrum, plan.sender, async (c) => {
+          if (spendingPending(c.snapshot)) return refuseNow('CHAIN_PENDING');
+          for (const coin of plan.inputs) {
+            const still = c.snapshot.utxos.some(u => u.txid === coin.txid && u.vout === coin.vout && u.value === coin.value && u.height > 0);
+            if (!still || (await c.raw(coin.txid)) !== coin.raw) return refuseNow('WALLET_STATE_CHANGED');
+          }
+          if (!(await c.tipUnchanged())) return refuseNow('WALLET_STATE_CHANGED');
+          if (!move(db, row.id, ['validating'], 'broadcasting', nowSec(), { sent: 1 })) return {};
+          attempted = true;
+          const answers = await c.broadcast(body.raw);
+          const results = JSON.stringify(answers);
+          if (answers.includes('accepted')) {
+            move(db, row.id, ['broadcasting'], 'sent', nowSec(), { broadcast_results: results, reason: null });
+            return {};
+          }
+          if (answers.length > 0 && answers.every(a => a === 'refused')) {
+            const holds = await c.holds(txid, body.raw).catch(() => [] as boolean[]);
+            if (holds.some(Boolean)) {
+              move(db, row.id, ['broadcasting'], 'sent', nowSec(), { broadcast_results: results, reason: null });
+            } else {
+              move(db, row.id, ['broadcasting'], 'refused', nowSec(), { broadcast_results: results, reason: 'BROADCAST_REFUSED' });
+            }
+            return {};
+          }
+          move(db, row.id, ['broadcasting'], 'unknown', nowSec(), { broadcast_results: results, reason: 'NO_CLEAR_ANSWER' });
+          return {};
+        });
+      })();
+    } catch (e) {
+      if (!attempted) outcome = refuseNow(codeOf(e));
+      else {
+        // A lost answer after the bytes were handed over is never a failure the
+        // till may quietly replace: only the chain can tell.
+        move(db, row.id, ['broadcasting'], 'unknown', nowSec(), { reason: 'NO_CLEAR_ANSWER' });
+        outcome = {};
+      }
+    }
+    const after = getAttempt(db, row.id)!;
+    if (after.status === 'refused') {
+      const code = outcome?.code || after.reason || 'BROADCAST_REFUSED';
+      // A replacement refused before it left: the payment it was to replace
+      // may still be mined, and the till says so (and shows it).
+      const pending = after.sent === 1 ? undefined
+        : replacesOf(after).map(id => getAttempt(db, id)).find(a => a && mayStillBeMined(a));
+      return { status: statusFor(code), body: refusal(code, { ...attemptView(after), ...(pending ? { pending_attempt_id: pending.id } : {}) }) };
+    }
+    return { status: 200, body: { success: true, ...attemptView(after) } };
+  };
+
+  /**
+   * The identical signed bytes of one attempt, again, the same for the till and
+   * a payment link: only within RESEND_WINDOW_SECONDS of the card's signature,
+   * never a new signature. A payment every server refused has in effect never
+   * been sent, so a re-send is its first: it is held to every check of a
+   * submit, made afresh, in the same order (the shop and the switch, its wallet
+   * and owner, the register for the card and the shop's wallet, KIND 87058 for
+   * the card and its owner as the register names them NOW, the card's owner not
+   * the shop's, the same LANA price, nothing of the card's waiting for a block,
+   * every coin still there). Any doubt refuses before the bytes go out; the
+   * payer may then pay again with the same card, which spends one of the same
+   * coins.
+   */
+  const resendAttempt = async (row: DirectRow): Promise<Answer> => {
+    const resendable = row.raw_tx && row.txid && (row.status === 'sent' || row.status === 'unknown' || (row.status === 'refused' && row.sent === 1));
+    if (!resendable) return { status: 409, body: refusal('RESEND_NOT_ALLOWED', attemptView(row)) };
+    const plan = planOf(row);
+    /** Refused before the bytes go out again; the attempt stays as the chain says. */
+    const no = (code: string): Answer => ({ status: statusFor(code), body: refusal(code, attemptView(getAttempt(db, row.id)!)) });
+    if (nowSec() - plan.created_at > RESEND_WINDOW_SECONDS) return no('RESEND_TOO_LATE');
+
+    // The shop as it is now: an active unit of this app, exactly without a
+    // company, the switch on, not pending/suspended/rejected, signed by its
+    // owner, and still paying into the wallet and the owner this plan names.
+    const state = directUnitState(db, unitRow(db, row.unit_id));
+    if (!state.ok) return no(state.code);
+    if (state.unit.wallet !== plan.recipient || state.unit.owner_hex !== plan.recipient_hex) return no('WALLET_CHANGED');
+    let payer: { owner: string; type: string };
+    try {
+      payer = checkPayer(await deps.registrar(plan.sender));
+      const payee = await deps.registrar(plan.recipient);
+      notePayee(db, row.unit_id, plan.recipient, payee, nowSec());
+      checkPayee(payee, plan.recipient_hex);
+    } catch (e) {
+      return no(codeOf(e));
+    }
+    // The card, its owner as the register names them now, and the one stored
+    // at the quote (if the register moved the card, both are asked).
+    const excluded = exclusionAgainst(db, [...new Set([row.card_hex, payer.owner, row.payer_owner_hex])], row.unit_id);
+    if (excluded) return excluded;
+    if (payer.owner === plan.recipient_hex || plan.card_hex === plan.recipient_hex || plan.sender === plan.recipient) return no('SELF_PAYMENT');
+    const p = params(plan.currency);
+    if (!p?.rate) return no('RATE_UNAVAILABLE');
+    if (p.rate !== plan.rate) return no('RATE_CHANGED');
+    if (p.electrum.length < 2) return no('CHAIN_UNAVAILABLE');
+    // What this resend found: in a block, waiting for one, taken by a server
+    // now, refused by every server again, or no clear answer. The attempt's
+    // status says what the chain says; `resend` says what this tap did.
+    let resend: 'in_block' | 'waiting' | 'accepted' | 'refused' | 'unknown';
+    try {
+      resend = await deps.withChain(p.electrum, row.payer_address, async (c) => {
+        const seen = c.snapshot.history.find(h => h.txid === row.txid);
+        if (seen && seen.height > 0) { markPaid(db, row, seen.height, nowSec()); return 'in_block' as const; }
+        if (seen) { move(db, row.id, ['unknown', 'refused'], 'sent', nowSec(), { reason: null, fromSent: 1 }); return 'waiting' as const; }
+        // As at a submit: nothing else of the card's waiting for a block, and
+        // every coin this payment spends still a confirmed coin, unchanged.
+        if (spendingPending(c.snapshot)) throw new DirectLanaError('CHAIN_PENDING');
+        for (const coin of plan.inputs) {
+          const still = c.snapshot.utxos.some(u => u.txid === coin.txid && u.vout === coin.vout && u.value === coin.value && u.height > 0);
+          if (!still || (await c.raw(coin.txid)) !== coin.raw) throw new DirectLanaError('WALLET_STATE_CHANGED');
+        }
+        if (!(await c.tipUnchanged())) throw new DirectLanaError('WALLET_STATE_CHANGED');
+        const answers = await c.broadcast(row.raw_tx!);
+        const refusedByAll = answers.length > 0 && answers.every(a => a === 'refused');
+        // Refused, yet a server holds exactly these bytes: it had them already.
+        const held = refusedByAll && (await c.holds(row.txid!, row.raw_tx!).catch(() => [] as boolean[])).some(Boolean);
+        if (answers.includes('accepted') || held) {
+          move(db, row.id, ['unknown', 'refused'], 'sent', nowSec(), { reason: null, fromSent: 1, broadcast_results: JSON.stringify(answers) });
+          return 'accepted' as const;
+        }
+        return refusedByAll ? 'refused' as const : 'unknown' as const;
+      });
+    } catch (e) {
+      const code = codeOf(e);
+      return { status: statusFor(code), body: refusal(code, attemptView(getAttempt(db, row.id)!)) };
+    }
+    return { status: 200, body: { success: true, ...attemptView(getAttempt(db, row.id)!), resend } };
   };
 
   /**
@@ -698,127 +1083,23 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
       return res.status(400).json(refusal(codeOf(e)));
     }
     if (cents <= 0n) return res.status(400).json(refusal('AMOUNT_INVALID'));
-    const pay = withMargin(cents, u.margin);
-    const requested = lanoshiForCents(pay, p.rate);
-    if (requested <= DUST_LANOSHI) return res.status(409).json(refusal('AMOUNT_TOO_SMALL'));
-    if (requested > BigInt(Number.MAX_SAFE_INTEGER)) return res.status(400).json(refusal('AMOUNT_INVALID'));
-
-    // The sale: a new one, or one this till started before for exactly this purchase.
-    let saleId = newId('dls');
-    if (body.sale_id !== undefined) {
-      if (typeof body.sale_id !== 'string' || !/^dls_[0-9a-f]{32}$/.test(body.sale_id)) return res.status(400).json(refusal('SALE_MISMATCH'));
-      const earlier = attemptsOfSale(db, body.sale_id);
-      if (!earlier.length) return res.status(404).json(refusal('UNKNOWN_SALE'));
-      if (earlier.some(a => a.unit_id !== u.unit_id || a.currency !== u.currency || a.invoice_cents !== cents.toString() || a.invoice_number !== invoiceNumber)) {
-        return res.status(409).json(refusal('SALE_MISMATCH'));
-      }
-      if (earlier.some(a => a.status === 'paid')) return res.status(409).json(refusal('SALE_ALREADY_PAID'));
-      // A payment of this sale from another card may still be mined: not a second one beside it.
-      if (earlier.some(a => mayStillBeMined(a) && a.payer_address !== card.address)) return res.status(409).json(refusal('SALE_PAYMENT_PENDING'));
-      saleId = body.sale_id;
-    }
-    if (invoiceNumberTaken(db, u.unit_id, invoiceNumber, saleId)) return res.status(409).json(refusal('INVOICE_USED'));
-
-    // The card's own payments that may still be mined. One on its way, or one of
-    // another sale: the card waits. One of this sale that hangs: a replacement.
-    const held = heldByCard(db, card.address);
-    const waiting = held.find(h => ['validating', 'broadcasting', 'sent'].includes(h.status) || h.sale_id !== saleId);
-    if (waiting) {
-      return res.status(409).json(refusal('CARD_PAYMENT_PENDING', waiting.unit_id === u.unit_id ? { pending_attempt_id: waiting.id, pending_sale_id: waiting.sale_id } : {}));
-    }
-
-    let payer: { owner: string; type: string };
-    try {
-      // The card first: an unregistered card ends the quote with one question.
-      payer = checkPayer(await deps.registrar(card.address));
-      const payee = await deps.registrar(u.wallet);
-      notePayee(db, u.unit_id, u.wallet, payee, nowSec());
-      checkPayee(payee, u.owner_hex);
-    } catch (e) {
-      const code = codeOf(e);
-      return res.status(statusFor(code)).json(refusal(code));
-    }
-    const excluded = exclusionAgainst(db, [card.hex, payer.owner], u.unit_id);
-    if (excluded) return res.status(excluded.status).json(excluded.body);
-    if (payer.owner === u.owner_hex || card.hex === u.owner_hex || card.address === u.wallet) {
-      return res.status(409).json(refusal('SELF_PAYMENT'));
-    }
-    if (p.electrum.length < 2) return res.status(503).json(refusal('CHAIN_UNAVAILABLE'));
-
-    let plan: DirectLanaPlan;
-    let checked: ReturnType<typeof checkPlan>;
-    try {
-      plan = await deps.withChain(p.electrum, card.address, async (c) => {
-        if (spendingPending(c.snapshot)) throw new DirectLanaError('CHAIN_PENDING');
-        // A new payment is never byte for byte an earlier one of this card (the
-        // same coins and amounts in the same second would be): it is stamped at
-        // least a second after the card's last signed attempt.
-        const last = (db.prepare('SELECT MAX(created_at) AS t FROM direct_lana_sales WHERE payer_address = ? AND txid IS NOT NULL').get(card.address) as any)?.t;
-        const createdAt = Math.max(nowSec(), Number(last || 0) + 1);
-        const inputs = await chooseCoins(c, requested, createdAt, held);
-        if (!(await c.tipUnchanged())) throw new DirectLanaError('WALLET_STATE_CHANGED');
-        const values = amounts(inputs.map(i => BigInt(i.value)), requested);
-        return {
-          v: 1,
-          network: NETWORK,
-          attempt_id: newId('dla'),
-          sale_id: saleId,
-          unit_id: u.unit_id,
-          unit_name: u.name,
-          sender: card.address,
-          public_key: body.public_key,
-          card_hex: card.hex,
-          recipient: u.wallet,
-          recipient_hex: u.owner_hex,
-          currency: u.currency,
-          invoice_cents: cents.toString(),
-          margin_percent: u.margin,
-          pay_cents: pay.toString(),
-          rate: p.rate,
-          rate_event_id: p.event_id,
-          invoice_number: invoiceNumber,
-          amount: values.amount.toString(),
-          fee: values.fee.toString(),
-          change: values.change.toString(),
-          inputs,
-          created_at: createdAt,
-          expires: createdAt + QUOTE_SECONDS,
-        } as DirectLanaPlan;
-      });
-      checked = checkPlan(plan);
-      if (JSON.stringify(plan).length > 250_000) throw new DirectLanaError('TX_TOO_LARGE');
-    } catch (e) {
-      const code = codeOf(e);
-      return res.status(statusFor(code)).json(refusal(code));
-    }
-    insertQuote(db, {
-      plan,
-      owner_hex: u.owner_hex,
-      seller_hex: who.hex,
-      payer_owner_hex: payer.owner,
-      payer_wallet_type: payer.type,
-      description: checked.description,
-      replaces: held.map(h => h.id),
-    }, nowSec());
-    res.set('Cache-Control', 'no-store');
-    res.json({
-      success: true,
-      attempt_id: plan.attempt_id,
-      sale_id: plan.sale_id,
-      plan,
-      lana: lanaText(checked.amount),
-      fee_lana: lanaText(checked.fee),
-      description: checked.description,
-      replaces: held.map(h => h.id),
+    // A payment link's sale keeps the link's margin when the till pays it again
+    // (the customer came to the shop): the price the link promised.
+    const linkOfSale = typeof body.sale_id === 'string'
+      ? (db.prepare('SELECT margin_percent FROM direct_lana_links WHERE sale_id = ?').get(body.sale_id) as { margin_percent: number } | undefined)
+      : undefined;
+    const answer = await quoteSale({
+      u, sellerHex: who.hex, card, publicKey: body.public_key, p, cents, invoiceNumber,
+      margin: linkOfSale ? linkOfSale.margin_percent : u.margin,
+      saleId: body.sale_id, saleMustExist: true,
     });
+    if (answer.status === 200) res.set('Cache-Control', 'no-store');
+    return res.status(answer.status).json(answer.body);
   });
 
   /**
    * POST /api/direct-lana/submit { attempt_id, raw, record }
-   * The payment the card signed, and its record. Kept (with the record) before
-   * anything is sent, checked once more, then sent to both Electrum servers.
-   * The same bytes again answer with what happened to them; other bytes for the
-   * same attempt are refused.
+   * The payment the card signed, and its record (submitAttempt).
    */
   app.post('/api/direct-lana/submit', directLimiter, gateNames(db, req => ({
     hex: [req.headers?.['x-lana-hex'], req.body?.record?.pubkey],
@@ -830,111 +1111,8 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     const unit = unitRow(db, row.unit_id) || db.prepare('SELECT owner_hex, authorized_hex FROM business_units WHERE unit_id = ?').get(row.unit_id) || {};
     const who = signedSeller(db, req, unit, nowSec());
     if (!who.ok) return res.status(who.status).json(who.body);
-
-    if (row.status !== 'quoted') {
-      const same = typeof body.raw === 'string' && body.raw === row.raw_tx && body.record?.id === row.record_id;
-      if (same) return res.json({ success: row.status !== 'refused', ...attemptView(row) });
-      return res.status(409).json(refusal('SALE_CONFLICT', { ...attemptView(row) }));
-    }
-    if (nowSec() > row.expires_at) {
-      move(db, row.id, ['quoted'], 'expired', nowSec(), { reason: 'QUOTE_EXPIRED' });
-      // The whole attempt, as every other answer about it: the till shows it.
-      return res.status(409).json(refusal('QUOTE_EXPIRED', attemptView(getAttempt(db, row.id)!)));
-    }
-    const plan = planOf(row);
-    let txid: string;
-    let record: NostrEvent;
-    try {
-      checkPlan(plan);
-      txid = verifySignedRaw(plan, body.raw);
-      record = checkRecord(body.record, plan, txid);
-    } catch (e) {
-      return res.status(400).json(refusal(codeOf(e) === 'CHAIN_UNAVAILABLE' ? 'TX_INVALID' : codeOf(e)));
-    }
-    const began = beginValidating(db, row, { txid, raw: body.raw, record, record_id: record.id }, nowSec());
-    if (began.ok === false) {
-      // NOT_QUOTED cannot happen between the read above and here (no await in
-      // between, one process): it is the last guard, not a path.
-      const why = began.why === 'NOT_QUOTED' ? 'SALE_CONFLICT' : began.why === 'TXID_CONFLICT' ? 'TX_ALREADY_KNOWN' : began.why;
-      return res.status(409).json(refusal(why));
-    }
-
-    let attempted = false;
-    // Refused before anything was sent: what this attempt was to replace is
-    // put back, since it may still be mined (lib/directLanaStore.ts).
-    const refuseNow = (code: string) => {
-      refuseBeforeSending(db, row.id, code, nowSec());
-      return { code };
-    };
-    let outcome: { code?: string };
-    try {
-      outcome = await (async () => {
-        const state = directUnitState(db, unitRow(db, row.unit_id));
-        if (!state.ok) return refuseNow(state.code);
-        if (state.unit.wallet !== plan.recipient || state.unit.owner_hex !== plan.recipient_hex) return refuseNow('WALLET_CHANGED');
-        let payer: { owner: string; type: string };
-        try {
-          payer = checkPayer(await deps.registrar(plan.sender));
-          const payee = await deps.registrar(plan.recipient);
-          notePayee(db, row.unit_id, plan.recipient, payee, nowSec());
-          checkPayee(payee, plan.recipient_hex);
-        } catch (e) {
-          return refuseNow(codeOf(e));
-        }
-        const excluded = exclusionAgainst(db, [plan.card_hex, payer.owner], row.unit_id);
-        if (excluded) return refuseNow(excluded.status === 403 && (excluded.body as any)?.code === 'MERCHANT_UNAVAILABLE' ? 'MERCHANT_UNAVAILABLE' : 'PERSON_EXCLUDED');
-        if (payer.owner === plan.recipient_hex) return refuseNow('SELF_PAYMENT');
-        const p = params(plan.currency);
-        if (!p?.rate) return refuseNow('RATE_UNAVAILABLE');
-        if (p.rate !== plan.rate) return refuseNow('RATE_CHANGED');
-        if (p.electrum.length < 2) return refuseNow('CHAIN_UNAVAILABLE');
-        return await deps.withChain(p.electrum, plan.sender, async (c) => {
-          if (spendingPending(c.snapshot)) return refuseNow('CHAIN_PENDING');
-          for (const coin of plan.inputs) {
-            const still = c.snapshot.utxos.some(u => u.txid === coin.txid && u.vout === coin.vout && u.value === coin.value && u.height > 0);
-            if (!still || (await c.raw(coin.txid)) !== coin.raw) return refuseNow('WALLET_STATE_CHANGED');
-          }
-          if (!(await c.tipUnchanged())) return refuseNow('WALLET_STATE_CHANGED');
-          if (!move(db, row.id, ['validating'], 'broadcasting', nowSec(), { sent: 1 })) return {};
-          attempted = true;
-          const answers = await c.broadcast(body.raw);
-          const results = JSON.stringify(answers);
-          if (answers.includes('accepted')) {
-            move(db, row.id, ['broadcasting'], 'sent', nowSec(), { broadcast_results: results, reason: null });
-            return {};
-          }
-          if (answers.length > 0 && answers.every(a => a === 'refused')) {
-            const holds = await c.holds(txid, body.raw).catch(() => [] as boolean[]);
-            if (holds.some(Boolean)) {
-              move(db, row.id, ['broadcasting'], 'sent', nowSec(), { broadcast_results: results, reason: null });
-            } else {
-              move(db, row.id, ['broadcasting'], 'refused', nowSec(), { broadcast_results: results, reason: 'BROADCAST_REFUSED' });
-            }
-            return {};
-          }
-          move(db, row.id, ['broadcasting'], 'unknown', nowSec(), { broadcast_results: results, reason: 'NO_CLEAR_ANSWER' });
-          return {};
-        });
-      })();
-    } catch (e) {
-      if (!attempted) outcome = refuseNow(codeOf(e));
-      else {
-        // A lost answer after the bytes were handed over is never a failure the
-        // till may quietly replace: only the chain can tell.
-        move(db, row.id, ['broadcasting'], 'unknown', nowSec(), { reason: 'NO_CLEAR_ANSWER' });
-        outcome = {};
-      }
-    }
-    const after = getAttempt(db, row.id)!;
-    if (after.status === 'refused') {
-      const code = outcome?.code || after.reason || 'BROADCAST_REFUSED';
-      // A replacement refused before it left: the payment it was to replace
-      // may still be mined, and the till says so (and shows it).
-      const pending = after.sent === 1 ? undefined
-        : replacesOf(after).map(id => getAttempt(db, id)).find(a => a && mayStillBeMined(a));
-      return res.status(statusFor(code)).json(refusal(code, { ...attemptView(after), ...(pending ? { pending_attempt_id: pending.id } : {}) }));
-    }
-    res.json({ success: true, ...attemptView(after) });
+    const answer = await submitAttempt(row, body);
+    return res.status(answer.status).json(answer.body);
   });
 
   /** GET /api/direct-lana/sales?unit_id= : the shop's direct sales, newest first. */
@@ -969,17 +1147,8 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
 
   /**
    * POST /api/direct-lana/sales/:id/resend { attempt_id }
-   * The identical signed bytes, again: only when the seller asks for it with the
-   * customer present, never by itself, never a new signature, and only within
-   * RESEND_WINDOW_SECONDS of the card's signature. A payment every server
-   * refused has in effect never been sent, so a re-send is its first: it is
-   * held to every check of a submit, made afresh, in the same order (the shop
-   * and the switch, its wallet and owner, the register for the card and the
-   * shop's wallet, KIND 87058 for the card and its owner as the register names
-   * them NOW, the card's owner not the shop's, the same LANA price, nothing of
-   * the card's waiting for a block, every coin still there). Any doubt refuses
-   * before the bytes go out; the till then offers to pay again with the same
-   * card, which spends one of the same coins.
+   * The identical signed bytes, again (resendAttempt): only when the seller
+   * asks for it with the customer present, never by itself.
    */
   app.post('/api/direct-lana/sales/:id/resend', directLimiter, gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [unitOfAttempt(db, req.params?.id)] })), async (req: Request, res: Response) => {
     const row = getAttempt(db, req.params.id);
@@ -987,69 +1156,315 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     const unit = db.prepare('SELECT owner_hex, authorized_hex FROM business_units WHERE unit_id = ?').get(row.unit_id) || {};
     const who = signedSeller(db, req, unit, nowSec());
     if (!who.ok) return res.status(who.status).json(who.body);
-    const resendable = row.raw_tx && row.txid && (row.status === 'sent' || row.status === 'unknown' || (row.status === 'refused' && row.sent === 1));
-    if (!resendable) return res.status(409).json(refusal('RESEND_NOT_ALLOWED', attemptView(row)));
-    const plan = planOf(row);
-    /** Refused before the bytes go out again; the attempt stays as the chain says. */
-    const no = (code: string) => res.status(statusFor(code)).json(refusal(code, attemptView(getAttempt(db, row.id)!)));
-    if (nowSec() - plan.created_at > RESEND_WINDOW_SECONDS) return no('RESEND_TOO_LATE');
+    const answer = await resendAttempt(row);
+    return res.status(answer.status).json(answer.body);
+  });
 
-    // The shop as it is now: an active unit of this app, exactly without a
-    // company, the switch on, not pending/suspended/rejected, signed by its
-    // owner, and still paying into the wallet and the owner this plan names.
-    const state = directUnitState(db, unitRow(db, row.unit_id));
-    if (!state.ok) return no(state.code);
-    if (state.unit.wallet !== plan.recipient || state.unit.owner_hex !== plan.recipient_hex) return no('WALLET_CHANGED');
-    let payer: { owner: string; type: string };
+  // ── Payment links: the seller's side (signed, owner or staff) ─────────────
+
+  /** The shop's row for a seller's link route: an active unit of this app, or the bare row (owner and staff). */
+  const sellerUnitRow = (unitId: unknown) =>
+    unitRow(db, unitId) || (typeof unitId === 'string' && unitId
+      ? db.prepare('SELECT unit_id, owner_hex, authorized_hex FROM business_units WHERE unit_id = ?').get(unitId)
+      : undefined);
+
+  const linkView = (link: LinkRow) => sellerLinkView(link, linkPayment(db, link), attemptView);
+
+  /**
+   * POST /api/direct-lana/links { unit_id, amount, currency?, invoice_number?, note? }
+   * A payment link for one sale: the invoice amount, the shop's margin as it is
+   * now, the invoice number and a note the customer sees. Only where the till
+   * itself could take LANA neposredno now (the shop, the switch, a price).
+   */
+  app.post('/api/direct-lana/links', directLimiter, gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.body?.unit_id] })), (req: Request, res: Response) => {
+    const body = req.body || {};
+    const row = unitRow(db, body.unit_id);
+    if (!row) return res.status(404).json(refusal('UNKNOWN_UNIT'));
+    const who = signedSeller(db, req, row, nowSec());
+    if (!who.ok) return res.status(who.status).json(who.body);
+    const state = directUnitState(db, row);
+    if (!state.ok) return res.status(409).json(refusal(state.code));
+    const u: DirectUnit = state.unit;
+    if (body.currency !== undefined && one(body.currency).toUpperCase() !== u.currency) return res.status(400).json(refusal('CURRENCY_MISMATCH'));
+    const p = params(u.currency);
+    if (!p?.rate) return res.status(503).json(refusal('RATE_UNAVAILABLE'));
+    let cents: bigint;
+    let invoiceNumber: string;
     try {
-      payer = checkPayer(await deps.registrar(plan.sender));
-      const payee = await deps.registrar(plan.recipient);
-      notePayee(db, row.unit_id, plan.recipient, payee, nowSec());
-      checkPayee(payee, plan.recipient_hex);
+      cents = parseCents(body.amount);
+      invoiceNumber = invoiceNumberOf(body.invoice_number);
     } catch (e) {
-      return no(codeOf(e));
+      return res.status(400).json(refusal(codeOf(e)));
     }
-    // The card, its owner as the register names them now, and the one stored
-    // at the quote (if the register moved the card, both are asked).
-    const excluded = exclusionAgainst(db, [...new Set([row.card_hex, payer.owner, row.payer_owner_hex])], row.unit_id);
-    if (excluded) return res.status(excluded.status).json(excluded.body);
-    if (payer.owner === plan.recipient_hex || plan.card_hex === plan.recipient_hex || plan.sender === plan.recipient) return no('SELF_PAYMENT');
-    const p = params(plan.currency);
-    if (!p?.rate) return no('RATE_UNAVAILABLE');
-    if (p.rate !== plan.rate) return no('RATE_CHANGED');
-    if (p.electrum.length < 2) return no('CHAIN_UNAVAILABLE');
-    // What this resend found: in a block, waiting for one, taken by a server
-    // now, refused by every server again, or no clear answer. The attempt's
-    // status says what the chain says; `resend` says what this tap did.
-    let resend: 'in_block' | 'waiting' | 'accepted' | 'refused' | 'unknown';
-    try {
-      resend = await deps.withChain(p.electrum, row.payer_address, async (c) => {
-        const seen = c.snapshot.history.find(h => h.txid === row.txid);
-        if (seen && seen.height > 0) { markPaid(db, row, seen.height, nowSec()); return 'in_block' as const; }
-        if (seen) { move(db, row.id, ['unknown', 'refused'], 'sent', nowSec(), { reason: null, fromSent: 1 }); return 'waiting' as const; }
-        // As at a submit: nothing else of the card's waiting for a block, and
-        // every coin this payment spends still a confirmed coin, unchanged.
-        if (spendingPending(c.snapshot)) throw new DirectLanaError('CHAIN_PENDING');
-        for (const coin of plan.inputs) {
-          const still = c.snapshot.utxos.some(u => u.txid === coin.txid && u.vout === coin.vout && u.value === coin.value && u.height > 0);
-          if (!still || (await c.raw(coin.txid)) !== coin.raw) throw new DirectLanaError('WALLET_STATE_CHANGED');
-        }
-        if (!(await c.tipUnchanged())) throw new DirectLanaError('WALLET_STATE_CHANGED');
-        const answers = await c.broadcast(row.raw_tx!);
-        const refusedByAll = answers.length > 0 && answers.every(a => a === 'refused');
-        // Refused, yet a server holds exactly these bytes: it had them already.
-        const held = refusedByAll && (await c.holds(row.txid!, row.raw_tx!).catch(() => [] as boolean[])).some(Boolean);
-        if (answers.includes('accepted') || held) {
-          move(db, row.id, ['unknown', 'refused'], 'sent', nowSec(), { reason: null, fromSent: 1, broadcast_results: JSON.stringify(answers) });
-          return 'accepted' as const;
-        }
-        return refusedByAll ? 'refused' as const : 'unknown' as const;
-      });
-    } catch (e) {
-      const code = codeOf(e);
-      return res.status(statusFor(code)).json(refusal(code, attemptView(getAttempt(db, row.id)!)));
+    if (cents <= 0n) return res.status(400).json(refusal('AMOUNT_INVALID'));
+    const pay = withMargin(cents, u.margin);
+    const lanoshi = lanoshiForCents(pay, p.rate);
+    if (lanoshi <= DUST_LANOSHI) return res.status(409).json(refusal('AMOUNT_TOO_SMALL'));
+    if (lanoshi > BigInt(Number.MAX_SAFE_INTEGER)) return res.status(400).json(refusal('AMOUNT_INVALID'));
+    const saleId = newId('dls');
+    // An invoice number paid here already, or carried by a payment that may
+    // still be paid, or by another open link of this shop: not a second time.
+    if (invoiceNumber && invoiceNumberTaken(db, u.unit_id, invoiceNumber, saleId)) return res.status(409).json(refusal('INVOICE_USED'));
+    if (invoiceNumber && db.prepare("SELECT 1 FROM direct_lana_links WHERE unit_id = ? AND invoice_number = ? AND status = 'open' LIMIT 1").get(u.unit_id, invoiceNumber)) {
+      return res.status(409).json(refusal('INVOICE_HAS_LINK'));
     }
-    res.json({ success: true, ...attemptView(getAttempt(db, row.id)!), resend });
+    const now = nowSec();
+    const hours = linkExpiryHours(db);
+    const id = newLinkId();
+    db.prepare(`
+      INSERT INTO direct_lana_links (id, token, sale_id, unit_id, seller_hex, owner_hex, unit_name, currency,
+        invoice_cents, margin_percent, invoice_number, note, status, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+    `).run(id, newLinkToken(), saleId, u.unit_id, who.hex, u.owner_hex, u.name, u.currency,
+      cents.toString(), u.margin, invoiceNumber, cleanRequestNote(body.note), now, hours ? now + hours * 3600 : null);
+    console.log(`[direct-lana] payment link made: unit ${u.unit_id.slice(0, 12)} ${centsText(pay)} ${u.currency}`);
+    res.set('Cache-Control', 'no-store');
+    return res.status(201).json({ success: true, link: linkView(linkById(db, id)!) });
+  });
+
+  /** GET /api/direct-lana/links?unit_id= : the shop's payment links, newest first, as the chain says they are. */
+  app.get('/api/direct-lana/links', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.query?.unit_id] })), (req: Request, res: Response) => {
+    const row = sellerUnitRow(one(req.query.unit_id));
+    if (!row) return res.status(404).json(refusal('UNKNOWN_UNIT'));
+    const who = signedSeller(db, req, row, nowSec());
+    if (!who.ok) return res.status(who.status).json(who.body);
+    const now = nowSec();
+    const links = (db.prepare('SELECT * FROM direct_lana_links WHERE unit_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 50').all(row.unit_id) as LinkRow[])
+      .map(l => syncLink(db, l, now));
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, links: links.map(linkView) });
+  });
+
+  /**
+   * POST /api/direct-lana/links/:id/cancel { link_id }
+   * Close an open link. Not while a payment of it may still be mined: that
+   * payment may still arrive, and cancelling would hide it. A quote nobody
+   * signed yet can no longer be sent.
+   */
+  app.post('/api/direct-lana/links/:id/cancel', directLimiter, gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [linkById(db, req.params?.id)?.unit_id] })), (req: Request, res: Response) => {
+    let link = linkById(db, req.params.id);
+    if (!link) return res.status(404).json(refusal('LINK_NOT_FOUND'));
+    const who = signedSeller(db, req, sellerUnitRow(link.unit_id) || {}, nowSec());
+    if (!who.ok) return res.status(who.status).json(who.body);
+    const now = nowSec();
+    link = syncLink(db, link, now);
+    const why = db.transaction((): string | null => {
+      const fresh = linkById(db, link!.id)!;
+      if (fresh.status === 'paid') return 'LINK_PAID';
+      if (fresh.status !== 'open') return null;
+      const attempts = attemptsOfSale(db, fresh.sale_id);
+      if (attempts.some(a => a.status === 'paid')) return 'LINK_PAID';
+      if (saleInFlight(attempts)) return 'SALE_PAYMENT_PENDING';
+      db.prepare(`UPDATE direct_lana_sales SET status = 'expired', reason = 'LINK_CANCELLED', status_at = ?, updated_at = datetime('now')
+        WHERE sale_id = ? AND status = 'quoted'`).run(now, fresh.sale_id);
+      db.prepare(`UPDATE direct_lana_links SET status = 'cancelled', cancelled_at = ?, updated_at = datetime('now') WHERE id = ? AND status = 'open'`).run(now, fresh.id);
+      return null;
+    })();
+    const view = linkView(syncLink(db, linkById(db, link.id)!, now));
+    res.set('Cache-Control', 'no-store');
+    if (why) return res.status(409).json(refusal(why, { link: view }));
+    return res.json({ success: true, link: view });
+  });
+
+  /**
+   * GET /api/direct-lana/links/unseen : paid links the seller has not seen
+   * yet, across every shop the signer is owner or staff of, for the home
+   * screen's notice. The signature is the only word on who is asking.
+   */
+  app.get('/api/direct-lana/links/unseen', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']] })), (req: Request, res: Response) => {
+    const signed = verifyRequestSignature(req, {});
+    if (!signed.ok) {
+      const { reason } = signed as { ok: false; reason: string };
+      return res.status(401).json(refusal('SIGNATURE_REQUIRED', { reason, server_time: nowSec() }));
+    }
+    const decision = excludedNow(db, signed.hex);
+    if (decision) return res.status(403).json(exclusionRefusal(decision));
+    const units = unitIdsForMerchant(db, signed.hex);
+    res.set('Cache-Control', 'no-store');
+    if (!units.length) return res.json({ success: true, count: 0, latest: [] });
+    syncAllLinks(db, nowSec());
+    const ph = units.map(() => '?').join(',');
+    const count = (db.prepare(`SELECT COUNT(*) AS c FROM direct_lana_links WHERE unit_id IN (${ph}) AND status = 'paid' AND seen_by_seller = 0`).get(...units) as any).c;
+    const latest = (db.prepare(`
+      SELECT * FROM direct_lana_links WHERE unit_id IN (${ph}) AND status = 'paid' AND seen_by_seller = 0
+      ORDER BY paid_at DESC, rowid DESC LIMIT 3
+    `).all(...units) as LinkRow[]).map(l => ({
+      id: l.id, unit_id: l.unit_id, unit_name: l.unit_name, currency: l.currency, ...linkAmounts(l), paid_at: l.paid_at,
+    }));
+    return res.json({ success: true, count, latest });
+  });
+
+  /** POST /api/direct-lana/links/seen { unit_id } : the seller opened the shop's links. */
+  app.post('/api/direct-lana/links/seen', gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.body?.unit_id] })), (req: Request, res: Response) => {
+    const row = sellerUnitRow(req.body?.unit_id);
+    if (!row) return res.status(404).json(refusal('UNKNOWN_UNIT'));
+    const who = signedSeller(db, req, row, nowSec());
+    if (!who.ok) return res.status(who.status).json(who.body);
+    const updated = db.prepare(`UPDATE direct_lana_links SET seen_by_seller = 1, updated_at = datetime('now') WHERE unit_id = ? AND status = 'paid' AND seen_by_seller = 0`).run(row.unit_id).changes;
+    return res.json({ success: true, updated });
+  });
+
+  // ── Payment links: the customer's side (no signature; the token is the capability) ──
+
+  /**
+   * Who sells on a link, asked again at every step: the seller who made it is
+   * still the shop's owner or staff, and no KIND 87058 decision is against
+   * them. The person reading the answer is the CUSTOMER, who is the subject of
+   * nothing here: a seller's decision is said as "this shop cannot take
+   * payments" (merchantRefusal), with no ground and no name.
+   */
+  const linkSellerRefusal = (link: LinkRow, row: any): Answer | null => {
+    if (!row || !isOwnerOrStaff(row, link.seller_hex)) return { status: 409, body: refusal('LINK_CLOSED') };
+    if (excludedNow(db, link.seller_hex)) return { status: 403, body: merchantRefusal() };
+    return null;
+  };
+
+  /**
+   * GET /api/direct-pay/:token
+   * The customer's page: the shop, the invoice, the margin, the total, LANA at
+   * the price of now (said as approximate: the exact LANA come with the quote),
+   * the seller's note, and the payment of this link, if one is on its way or
+   * made. 'closed': the link is open, but the shop cannot take it now (why is
+   * not said: the customer can do nothing about it).
+   */
+  app.get('/api/direct-pay/:token', linkViewLimiter, (req: Request, res: Response) => {
+    let link = linkByToken(db, req.params.token);
+    if (!link) return res.status(404).json(refusal('LINK_NOT_FOUND'));
+    link = syncLink(db, link, nowSec());
+    const payment = linkPayment(db, link);
+    if (payment) settleSoon(payment);
+    let status: string = linkStatusOf(link, payment);
+    let unit: DirectUnit | null = null;
+    let price: { rate: string; rate_event_id: string; lanoshi: string; lana: string } | null = null;
+    const money = linkAmounts(link);
+    if (status === 'open' || status === 'paying') {
+      const row = unitRow(db, link.unit_id);
+      const state = row ? directUnitState(db, row) : { ok: false };
+      const sellerOk = !linkSellerRefusal(link, row) && !excludedMerchant(db, [link.unit_id]);
+      if (state.ok && sellerOk && state.unit!.currency === link.currency) {
+        unit = state.unit!;
+        const p = params(unit.currency);
+        if (p?.rate) {
+          const lanoshi = lanoshiForCents(BigInt(money.pay_cents), p.rate);
+          price = { rate: p.rate, rate_event_id: p.event_id, lanoshi: lanoshi.toString(), lana: lanaText(lanoshi) };
+        }
+      }
+      if (status === 'open' && (!unit || !price)) status = 'closed';
+    }
+    res.set('Cache-Control', 'no-store');
+    return res.json({
+      success: true,
+      link: {
+        status,
+        unit_id: link.unit_id,
+        unit_name: unit?.name || link.unit_name,
+        currency: link.currency,
+        ...money,
+        invoice_number: link.invoice_number,
+        note: link.note,
+        sale_id: link.sale_id,
+        recipient: unit?.wallet ?? null,
+        recipient_hex: unit?.owner_hex ?? null,
+        price,
+        created_at: link.created_at,
+        expires_at: link.expires_at,
+        paid_at: link.paid_at,
+        payment: payment ? publicAttemptView(payment) : null,
+      },
+    });
+  });
+
+  /**
+   * POST /api/direct-pay/:token/quote { public_key }
+   * The plan the customer's card will sign: the till's quote (quoteSale), for
+   * the link's sale, with the link's invoice, invoice number and margin, never
+   * the client's. A link that is paid, cancelled or expired takes no quote; one
+   * whose payment hangs takes a quote that replaces it (same card, same coins).
+   */
+  app.post('/api/direct-pay/:token/quote', linkActionLimiter, gateNames(db, req => {
+    const card = cardOfBody(req.body);
+    return { hex: [card?.hex], wallet: [card?.address], unit: [linkByToken(db, req.params?.token)?.unit_id] };
+  }), async (req: Request, res: Response) => {
+    const body = req.body || {};
+    let link = linkByToken(db, req.params.token);
+    if (!link) return res.status(404).json(refusal('LINK_NOT_FOUND'));
+    link = syncLink(db, link, nowSec());
+    if (link.status === 'paid') return res.status(409).json(refusal('LINK_PAID'));
+    if (link.status === 'cancelled') return res.status(409).json(refusal('LINK_CANCELLED'));
+    if (link.status === 'expired') return res.status(409).json(refusal('LINK_EXPIRED'));
+    // Past its time, still open only because a payment of it may still be
+    // mined: only a quote that can replace that payment.
+    if (link.expires_at !== null && link.expires_at < nowSec() && !saleInFlight(attemptsOfSale(db, link.sale_id))) {
+      return res.status(409).json(refusal('LINK_EXPIRED'));
+    }
+    const row = unitRow(db, link.unit_id);
+    const seller = linkSellerRefusal(link, row);
+    if (seller) return res.status(seller.status).json(seller.body);
+    const state = directUnitState(db, row);
+    if (!state.ok) return res.status(409).json(refusal(state.code));
+    const u: DirectUnit = state.unit;
+    if (u.currency !== link.currency) return res.status(409).json(refusal('CURRENCY_MISMATCH'));
+    const card = cardOfBody(body);
+    if (!card) return res.status(400).json(refusal('CARD_KEY_INVALID'));
+    const p = params(u.currency);
+    if (!p?.rate) return res.status(503).json(refusal('RATE_UNAVAILABLE'));
+    const answer = await quoteSale({
+      u, sellerHex: link.seller_hex, card, publicKey: body.public_key, p,
+      cents: BigInt(link.invoice_cents), invoiceNumber: link.invoice_number, margin: link.margin_percent,
+      saleId: link.sale_id, saleMustExist: false,
+    });
+    res.set('Cache-Control', 'no-store');
+    return res.status(answer.status).json(forCustomer(answer.body));
+  });
+
+  /** An attempt of this link's sale, or nothing. */
+  const attemptOfLink = (link: LinkRow, id: unknown): DirectRow | undefined => {
+    const row = getAttempt(db, id);
+    return row && row.sale_id === link.sale_id ? row : undefined;
+  };
+
+  /**
+   * POST /api/direct-pay/:token/submit { attempt_id, raw, record }
+   * The payment the customer's card signed (submitAttempt). Before anything of
+   * it is kept, the link and its seller are asked once more.
+   */
+  app.post('/api/direct-pay/:token/submit', linkActionLimiter, gateNames(db, req => ({
+    hex: [req.body?.record?.pubkey],
+    unit: [linkByToken(db, req.params?.token)?.unit_id],
+  })), async (req: Request, res: Response) => {
+    const body = req.body || {};
+    const link = linkByToken(db, req.params.token);
+    if (!link) return res.status(404).json(refusal('LINK_NOT_FOUND'));
+    const row = attemptOfLink(link, body.attempt_id);
+    if (!row) return res.status(404).json(refusal('UNKNOWN_SALE'));
+    res.set('Cache-Control', 'no-store');
+    if (row.status === 'quoted') {
+      if (link.status === 'cancelled') {
+        move(db, row.id, ['quoted'], 'expired', nowSec(), { reason: 'LINK_CANCELLED' });
+        return res.status(409).json(refusal('LINK_CANCELLED'));
+      }
+      const seller = linkSellerRefusal(link, unitRow(db, link.unit_id));
+      if (seller) return res.status(seller.status).json(seller.body);
+    }
+    const answer = await submitAttempt(row, body);
+    return res.status(answer.status).json(forCustomer(answer.body));
+  });
+
+  /**
+   * POST /api/direct-pay/:token/resend { attempt_id }
+   * The identical signed bytes of this link's payment, again (resendAttempt),
+   * when the customer asks: within 30 minutes of their signature.
+   */
+  app.post('/api/direct-pay/:token/resend', linkActionLimiter, gateNames(db, req => ({ unit: [linkByToken(db, req.params?.token)?.unit_id] })), async (req: Request, res: Response) => {
+    const link = linkByToken(db, req.params.token);
+    if (!link) return res.status(404).json(refusal('LINK_NOT_FOUND'));
+    const row = attemptOfLink(link, req.body?.attempt_id);
+    if (!row) return res.status(404).json(refusal('UNKNOWN_SALE'));
+    const seller = linkSellerRefusal(link, unitRow(db, link.unit_id));
+    res.set('Cache-Control', 'no-store');
+    if (seller) return res.status(seller.status).json(seller.body);
+    const answer = await resendAttempt(row);
+    return res.status(answer.status).json(forCustomer(answer.body));
   });
 
   return deps;

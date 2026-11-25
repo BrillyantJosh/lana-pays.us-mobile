@@ -27,6 +27,8 @@ import MobileQuotaPanel from "@/components/MobileQuotaPanel";
 import FoodCornerNotice, { type FoodCornerOpen } from "@/components/FoodCornerNotice";
 import { useAuth } from "@/contexts/AuthContext";
 import { isNoPayoutAccountUnit } from "@/lib/payoutAccount";
+import { fetchDirectLinksUnseen } from "@/lib/directLanaApi";
+import { formatMoney } from "@/lib/directLanaFormat";
 import lanaIcon from "@/assets/lana-icon.png";
 import mandalaMesh from "@/assets/mandala-mesh.png";
 
@@ -440,6 +442,41 @@ const Index = () => {
     const interval = setInterval(fetchUnseen, 30_000);
     return () => clearInterval(interval);
   }, [session?.nostrHexId, t]);
+
+  // ── LANA neposredno: paid payment links (30 s poll, signed) ──────────────
+  // Only for a seller with a shop whose direct LANA is on. A rising count of
+  // paid links not seen yet fires one toast per link and badges the direct
+  // tile; opening the shop's links in the tab marks them seen.
+  const { i18n } = useTranslation();
+  const hasDirectLinks = businessUnits.some(u => u.payout_account === 'none' && u.direct_lana?.enabled === true);
+  const [unseenLinks, setUnseenLinks] = useState(0);
+  const prevUnseenLinksRef = useRef<number | null>(null);
+  const notifiedLinksRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!session?.privateKeyHex || !hasDirectLinks) { setUnseenLinks(0); return; }
+    const readUnseen = async () => {
+      try {
+        const { status, data } = await fetchDirectLinksUnseen(session);
+        if (status !== 200 || !data?.success) return;
+        const count = Number(data.count) || 0;
+        if (prevUnseenLinksRef.current !== null && count > prevUnseenLinksRef.current) {
+          for (const item of (data.latest || [])) {
+            if (typeof item?.id !== 'string' || notifiedLinksRef.current.has(item.id)) continue;
+            notifiedLinksRef.current.add(item.id);
+            toast.success(t('directLana.linkPaidToast', {
+              amount: formatMoney(String(item.total || ''), String(item.currency || 'EUR'), i18n.language || 'en'),
+              unit: item.unit_name,
+            }), { duration: 10_000 });
+          }
+        }
+        prevUnseenLinksRef.current = count;
+        setUnseenLinks(count);
+      } catch { /* keep previous state */ }
+    };
+    readUnseen();
+    const interval = setInterval(readUnseen, 30_000);
+    return () => clearInterval(interval);
+  }, [session?.privateKeyHex, hasDirectLinks, t]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Open a LANA view, deciding once whether this shop may sell for LANA here. */
   const openLanaView = (view: "lana" | "lana-online") => {
@@ -1154,6 +1191,11 @@ const Index = () => {
                       disabled={noShopSelected}
                       className="relative overflow-hidden rounded-3xl bg-card border-2 border-primary/40 shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                     >
+                      {unseenLinks > 0 && (
+                        <span data-testid="direct-links-badge" className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
+                          {unseenLinks}
+                        </span>
+                      )}
                       <img src={mandalaMesh} alt="" aria-hidden="true" className="absolute inset-0 w-full h-full object-cover opacity-[0.12] dark:opacity-[0.2] pointer-events-none" />
                       <div className="relative z-10 w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
                         <img src={lanaIcon} alt="" className="w-9 h-9 object-contain dark:invert" />

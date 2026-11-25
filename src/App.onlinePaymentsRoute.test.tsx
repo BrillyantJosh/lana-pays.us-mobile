@@ -18,6 +18,7 @@ vi.mock('./pages/Index', () => ({ default: () => <div>INDEX-PAGE</div> }));
 vi.mock('./pages/Login', () => ({ default: () => <div>LOGIN-PAGE</div> }));
 vi.mock('./pages/Admin', () => ({ default: () => <div>ADMIN-PAGE</div> }));
 vi.mock('./pages/PublicPay', () => ({ default: () => <div>PUBLIC-PAY-PAGE</div> }));
+vi.mock('./pages/PublicDirectPay', () => ({ default: () => <div>PUBLIC-DIRECT-PAY-PAGE</div> }));
 vi.mock('./pages/LanaOnlineHistory', () => ({ default: () => <div>HISTORY-PAGE</div> }));
 vi.mock('./pages/OrdersHistory', () => ({ default: () => <div>ORDERS-PAGE</div> }));
 vi.mock('./pages/NotFound', () => ({ default: () => <div>NOT-FOUND-PAGE</div> }));
@@ -33,6 +34,13 @@ describe('the /lana-online/payments route', () => {
     render(<App />);
     expect(await screen.findByText('ONLINE-PAYMENTS-PAGE')).toBeTruthy();
     expect(screen.queryByText('NOT-FOUND-PAGE')).toBeNull();
+  });
+
+  it('a LANA neposredno payment link is public: no session, still the customer\'s page', async () => {
+    window.history.pushState({}, '', `/pay-direct/${'a'.repeat(32)}`);
+    render(<App />);
+    expect(await screen.findByText('PUBLIC-DIRECT-PAY-PAGE')).toBeTruthy();
+    expect(screen.queryByText('LOGIN-PAGE')).toBeNull();
   });
 
   it('without a session it goes to sign-in, not to the page', async () => {

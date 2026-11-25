@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import Login from "./pages/Login";
 import Admin from "./pages/Admin";
 import PublicPay from "./pages/PublicPay";
+import PublicDirectPay from "./pages/PublicDirectPay";
 import LanaOnlineHistory from "./pages/LanaOnlineHistory";
 import OnlinePayments from "./pages/OnlinePayments";
 import OrdersHistory from "./pages/OrdersHistory";
@@ -79,6 +80,10 @@ const App = () => (
             {/* PUBLIC remote-payment page — the 192-bit token is the capability,
                 so this route deliberately has NO ProtectedRoute wrapper. */}
             <Route path="/pay/:token" element={<PublicPay />} />
+            {/* PUBLIC page of a LANA neposredno payment link (a shop without a
+                company): the customer pays straight into the shop's wallet,
+                not through the brain. The token is the capability; no session. */}
+            <Route path="/pay-direct/:token" element={<PublicDirectPay />} />
             <Route
               path="/lana-online/history"
               element={
