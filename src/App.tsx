@@ -13,17 +13,32 @@ import LanaOnlineHistory from "./pages/LanaOnlineHistory";
 import OnlinePayments from "./pages/OnlinePayments";
 import OrdersHistory from "./pages/OrdersHistory";
 import NotFound from "./pages/NotFound";
+import { LockedScreen } from "@/components/LockedScreen";
+import { useVaultInfo } from "@/components/KeyVaultPanel";
 
 const queryClient = new QueryClient();
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { session, isLoading } = useAuth();
+  const { session, locked, isLoading, unlock, logout } = useAuth();
+  const [vault] = useVaultInfo();
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
+    );
+  }
+
+  // Remembered here, key not in this tab, and saved encrypted on this device: unlock in place.
+  if (!session && locked && vault && vault.pubkey === locked.nostrHexId.toLowerCase()) {
+    return (
+      <LockedScreen
+        vault={vault}
+        label={locked.profileName || locked.profileDisplayName}
+        onUnlock={unlock}
+        onSignOut={logout}
+      />
     );
   }
 

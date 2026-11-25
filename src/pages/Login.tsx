@@ -5,6 +5,7 @@ import { ArrowRight, ChevronDown, KeyRound, Leaf, Loader2, LockKeyhole, Menu, Qr
 import { QRScanner } from '@/components/QRScanner';
 import LandingSections from '@/components/LandingSections';
 import { useAuth } from '@/contexts/AuthContext';
+import { SaveKeyOptions, SavedKeyUnlock, useSaveKeyChoice, useVaultErrorText, useVaultInfo } from '@/components/KeyVaultPanel';
 import { changeLanguage } from '@/i18n';
 import abundanceHero from '@/assets/abundance-garden-hero.webp';
 import abundanceHeroLoop from '@/assets/abundance-garden-breeze-loop.mp4';
@@ -16,7 +17,11 @@ const REGISTER_URL = 'https://shop.lanapays.us/welcome';
 
 const Login = () => {
   const { t, i18n } = useTranslation();
-  const { login } = useAuth();
+  const { login, unlock, locked } = useAuth();
+  const [vault, refreshVault] = useVaultInfo();
+  // Offered by default only while nothing is saved here yet (one saved key per device).
+  const saveKey = useSaveKeyChoice(!vault);
+  const explain = useVaultErrorText();
   const [scannerOpen, setScannerOpen] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,10 +71,12 @@ const Login = () => {
     setIsLoggingIn(true);
     setError(null);
     try {
-      await login(data);
+      await login(data, saveKey.choice);
+      saveKey.clear();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('login.failed'));
+      setError(err instanceof Error ? explain(err) : t('login.failed'));
       setIsLoggingIn(false);
+      refreshVault();
     }
   };
 
@@ -174,8 +181,21 @@ const Login = () => {
             <p className="pl-hero-lead">{t('landing.heroLead')}</p>
 
             <div className="pl-entry-card" id="vstop">
+              {/* The key saved encrypted on this device (passkey or password), if there is one. The entry card is dark
+                  in either theme, so the panels inside it are drawn in their dark variant (class "dark"). */}
+              {vault && (
+                <div className="dark mb-3 text-left">
+                  <SavedKeyUnlock
+                    info={vault}
+                    label={locked?.nostrHexId?.toLowerCase() === vault.pubkey ? (locked.profileName || locked.profileDisplayName) : undefined}
+                    allowRemove
+                    onRemoved={refreshVault}
+                    onUnlock={unlock}
+                  />
+                </div>
+              )}
               <div className="pl-entry-title">
-                <span>{copy.loginLabel}</span>
+                <span>{vault ? t('vault.orOtherKey') : copy.loginLabel}</span>
                 <LockKeyhole aria-hidden="true" />
               </div>
               <div className="pl-entry-row">
@@ -205,6 +225,9 @@ const Login = () => {
                   <QrCode />
                   <span>{copy.scanShort}</span>
                 </button>
+              </div>
+              <div className="dark mt-3 text-left">
+                <SaveKeyOptions state={saveKey} disabled={isLoggingIn} />
               </div>
               <p className="pl-security-note"><KeyRound /> {copy.secure}</p>
               {error && <p className="pl-entry-error" role="alert">{error}</p>}

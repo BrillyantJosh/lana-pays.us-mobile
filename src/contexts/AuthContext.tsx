@@ -4,6 +4,8 @@ import i18n from '@/i18n';
 import { checkExclusion, rememberedExclusion, exclusionFromRefusal, type ExclusionVerdict } from '@/lib/exclusion';
 import { SESSION_KEY } from '@/lib/callerIdentity';
 import { ExcludedScreen } from '@/components/ExcludedScreen';
+import { holdKey, forgetHeldKey, onHeldKeyChange, heldKeyHex, heldPrivateKey } from '@/lib/heldKey';
+import { VaultError, discardSavedRecord, saveVault, unlockVault, type VaultMethod } from '@/lib/keyVault';
 
 declare global {
   interface Document {
@@ -23,10 +25,47 @@ interface UserSession {
   expiresAt: number;
 }
 
+/**
+ * What this browser keeps of a session: everything EXCEPT the private key (Brilly, 25. 11. 2026 — the same as
+ * LetsBalance.world). The key itself is only in this tab's memory (lib/heldKey.ts), or encrypted on this device
+ * (lib/keyVault.ts), never in localStorage as it was until then.
+ */
+export type StoredSession = Omit<UserSession, 'privateKeyHex'>;
+
+/** How a sign-in also saves the key encrypted on this device (only the sign-in page offers it). */
+export interface SaveKeyChoice {
+  method: VaultMethod;
+  password?: string;
+  repeat?: string;
+}
+
+/** The session without its key: what may be written to this browser's storage. */
+const publicPart = (s: UserSession | StoredSession): StoredSession => {
+  const { privateKeyHex: _key, ...rest } = s as UserSession;
+  return rest;
+};
+
+/** Write the session — never its key. */
+function writeStoredSession(s: UserSession | StoredSession): void {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(publicPart(s))); } catch (e) { console.warn('Failed to save session:', e); }
+}
+
+/** The public part together with the key this tab holds for it — or null when this tab holds none. */
+function withHeldKey(s: StoredSession | null): UserSession | null {
+  if (!s) return null;
+  const key = heldPrivateKey(String(s.nostrHexId).toLowerCase());
+  return key ? { ...s, privateKeyHex: key } : null;
+}
+
 interface AuthContextType {
+  /** The signed-in session WITH its key — only while this tab holds the key. */
   session: UserSession | null;
+  /** Someone is remembered on this device, but this tab does not hold their key: unlock, or sign in again. */
+  locked: StoredSession | null;
   isLoading: boolean;
-  login: (wif: string) => Promise<void>;
+  login: (wif: string, save?: SaveKeyChoice | null) => Promise<void>;
+  /** Unlock the key saved encrypted on this device (passkey, or its password) and sign in with it. */
+  unlock: (password: string) => Promise<void>;
   logout: () => void;
   /** The standing commission decision against this person, or null. */
   excluded: ExclusionVerdict | null;
@@ -57,7 +96,10 @@ function rememberedForStoredSession(): ExclusionVerdict | null {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<UserSession | null>(null);
+  const [locked, setLocked] = useState<StoredSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const sessionRef = useRef<UserSession | null>(null);
+  sessionRef.current = session;
   // A commission gross-violation decision (KIND 87058) standing against the
   // person whose key is in this session. When set, the whole app is replaced by
   // ExcludedScreen below — no route, no cached tab, no partial page.
@@ -75,7 +117,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Chrome's discarded-tab recovery, and a cross-tab storage event — and a new
   // decision reaches exactly the people who are already signed in, so a gate on
   // login() alone would be invisible to everyone it is meant to reach.
-  const enforceExclusion = useCallback(async (candidate: UserSession | null): Promise<boolean> => {
+  const enforceExclusion = useCallback(async (candidate: { nostrHexId: string } | null): Promise<boolean> => {
     const hex = candidate?.nostrHexId;
     if (!hex) return true;
     const verdict = await checkExclusion(hex);
@@ -84,8 +126,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     }
     setExcluded(verdict);
-    // End the session: the door is closed, not merely covered over.
+    // End the session: the door is closed, not merely covered over — and the key leaves this tab too.
+    forgetHeldKey();
     setSession(null);
+    setLocked(null);
     try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
     return false;
   }, []);
@@ -95,23 +139,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * decision. The remembered verdict blocks instantly, with no network wait and
    * no flash of the dashboard; the live check right after can still lift it.
    */
-  const adoptSession = useCallback((candidate: UserSession) => {
+  const adoptSession = useCallback((candidate: UserSession | StoredSession) => {
     const remembered = rememberedExclusion(candidate.nostrHexId);
     if (remembered) setExcluded(remembered);
-    setSession(candidate);
+    // With its key (this tab holds it) → signed in; without → remembered, LOCKED: unlock, or sign in again.
+    const keyed = 'privateKeyHex' in candidate ? candidate as UserSession : withHeldKey(candidate);
+    if (keyed) { setSession(keyed); setLocked(null); }
+    else { setSession(null); setLocked(publicPart(candidate)); }
     void enforceExclusion(candidate);
   }, [enforceExclusion]);
 
-  const isSessionValid = (session: UserSession): boolean => {
+  const isSessionValid = (session: StoredSession): boolean => {
     return session.expiresAt > Date.now();
   };
 
-  const loadSessionFromStorage = useCallback((): UserSession | null => {
+  /**
+   * The remembered session. One saved before 25. 11. 2026 still carries the private key in plain text: it is
+   * rewritten WITHOUT the key at once, and this tab keeps the key in memory (the cashier is not thrown out in the
+   * middle of a sale); nothing else on the device has it any more.
+   */
+  const loadSessionFromStorage = useCallback((): UserSession | StoredSession | null => {
     try {
       const storedSession = localStorage.getItem(SESSION_KEY);
       if (storedSession) {
-        const parsedSession: UserSession = JSON.parse(storedSession);
-        if (isSessionValid(parsedSession)) {
+        const parsedSession = JSON.parse(storedSession) as UserSession | StoredSession;
+        if (parsedSession && typeof parsedSession.nostrHexId === 'string' && isSessionValid(parsedSession)) {
+          if ('privateKeyHex' in parsedSession) {
+            writeStoredSession(parsedSession);
+            const key = String((parsedSession as UserSession).privateKeyHex || '');
+            try { holdKey(parsedSession.nostrHexId.toLowerCase(), key, false); } catch { return publicPart(parsedSession); }
+          }
           return parsedSession;
         } else {
           localStorage.removeItem(SESSION_KEY);
@@ -145,13 +202,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Save on background
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden' && session) {
-        try {
-          localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-        } catch (e) {
-          console.warn('Failed to save session:', e);
-        }
-      }
+      if (document.visibilityState === 'hidden' && session) writeStoredSession(session);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -163,14 +214,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === SESSION_KEY) {
         if (event.newValue === null) {
+          forgetHeldKey();
           setSession(null);
+          setLocked(null);
         } else {
           try {
-            const updatedSession: UserSession = JSON.parse(event.newValue);
-            if (isSessionValid(updatedSession)) {
+            const updatedSession = JSON.parse(event.newValue) as UserSession | StoredSession;
+            if (updatedSession && typeof updatedSession.nostrHexId === 'string' && isSessionValid(updatedSession)) {
+              // A tab still running the version before 25. 11. wrote the key back: take it out again. Another
+              // tab's key never comes across — this tab keeps its own, or is locked.
+              if ('privateKeyHex' in updatedSession) writeStoredSession(updatedSession);
+              const pub = publicPart(updatedSession);
+              const current = sessionRef.current;
+              if (current && current.nostrHexId === pub.nostrHexId) return;
+              if (current) forgetHeldKey();
               // A second tab can re-seed a session we just cleared, so this path
               // is gated exactly like the other three.
-              adoptSession(updatedSession);
+              adoptSession(pub);
             }
           } catch (e) {
             console.error('Failed to sync session:', e);
@@ -185,16 +245,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Re-ask every 10 minutes, so a decision published while somebody is standing
   // at the till reaches them within the round, not at their next sign-in.
-  const sessionRef = useRef<UserSession | null>(null);
-  sessionRef.current = session;
+  // A LOCKED session is asked about too: the person is still remembered here.
+  const watchedRef = useRef<{ nostrHexId: string } | null>(null);
+  watchedRef.current = session ?? locked;
   useEffect(() => {
-    const id = setInterval(() => { void enforceExclusion(sessionRef.current); }, 10 * 60 * 1000);
+    const id = setInterval(() => { void enforceExclusion(watchedRef.current); }, 10 * 60 * 1000);
     return () => clearInterval(id);
   }, [enforceExclusion]);
 
-  const login = async (wif: string) => {
+  // The held key went away by itself (lib/heldKey.ts: 15 minutes without use, page left, copy removed elsewhere):
+  // keep who it was, and lock — the till needs the key, so it waits behind the unlock screen.
+  useEffect(() => onHeldKeyChange(() => {
+    const current = sessionRef.current;
+    if (current && heldKeyHex() !== current.nostrHexId.toLowerCase()) {
+      setLocked(publicPart(current));
+      setSession(null);
+    }
+  }), []);
+
+  const login = async (wif: string, save: SaveKeyChoice | null = null) => {
+    const clean = wif.trim();
+    let derivedIds: Awaited<ReturnType<typeof convertWifToIds>>;
     try {
-      const derivedIds = await convertWifToIds(wif);
+      derivedIds = await convertWifToIds(clean);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : 'Login failed');
+    }
+    // Saving comes FIRST, right after the click: a passkey can only be created while the browser still counts the
+    // person's click, and the checks below wait on the network. If the sign-in then does not happen, exactly what
+    // was saved here is taken back.
+    const savedRecord = save
+      ? await saveVault(clean, derivedIds.nostrHexId, save.method, save.password ?? '', save.repeat)
+      : null;
+    let signedIn = false;
+    try {
+      // a key saved just now is held like an unlocked one: forgotten after 15 minutes without use
+      signedIn = await finishLogin(derivedIds, !!save);
+    } finally {
+      if (savedRecord && !signedIn) discardSavedRecord(savedRecord);
+    }
+  };
+
+  const unlock = async (password: string) => {
+    const opened = await unlockVault(password);
+    const derivedIds = await convertWifToIds(opened.wif);
+    opened.wif = '';
+    // The record is bound to its id; a key that derives to another id is never used.
+    if (derivedIds.nostrHexId !== opened.pubkey) throw new VaultError('other_identity');
+    await finishLogin(derivedIds, true);
+  };
+
+  /** The sign-in itself; true when a session was set (false: refused by a commission decision). */
+  const finishLogin = async (derivedIds: Awaited<ReturnType<typeof convertWifToIds>>, fromVault: boolean): Promise<boolean> => {
+    try {
 
       // Refuse a fresh sign-in too, so an excluded person never sees the
       // dashboard flash past on the way to the closed door. No error is thrown:
@@ -203,9 +306,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const standing = await checkExclusion(derivedIds.nostrHexId);
       if (standing) {
         setExcluded(standing);
+        forgetHeldKey();
         setSession(null);
+        setLocked(null);
         try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
-        return;
+        return false;
       }
 
       let profileName: string | undefined;
@@ -248,9 +353,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const refusal = exclusionFromRefusal(await profileRes.clone().json().catch(() => null));
         if (refusal) {
           setExcluded(refusal);
+          forgetHeldKey();
           setSession(null);
+          setLocked(null);
           try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
-          return;
+          return false;
         }
       }
 
@@ -313,20 +420,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         expiresAt,
       };
 
+      holdKey(userSession.nostrHexId.toLowerCase(), userSession.privateKeyHex, fromVault);
       setSession(userSession);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(userSession));
+      setLocked(null);
+      writeStoredSession(userSession);
+      return true;
     } catch (error) {
       throw new Error(error instanceof Error ? error.message : 'Login failed');
     }
   };
 
+  /** Sign out: the key leaves this tab's memory. A copy saved encrypted on this device stays until removed there. */
   const logout = () => {
+    forgetHeldKey();
     setSession(null);
-    localStorage.removeItem(SESSION_KEY);
+    setLocked(null);
+    try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
   };
 
   return (
-    <AuthContext.Provider value={{ session, isLoading, login, logout, excluded }}>
+    <AuthContext.Provider value={{ session, locked, isLoading, login, unlock, logout, excluded }}>
       {excluded
         ? <ExcludedScreen verdict={excluded} lang={i18n.language?.startsWith('sl') ? 'sl' : 'en'} />
         : children}
