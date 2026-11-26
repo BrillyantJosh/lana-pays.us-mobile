@@ -141,6 +141,10 @@ The last line must say `mode=refusing`. To turn it off, do the same with `=off`,
 
 A shop without a company and without a bank account (KIND 30901 `payout_account` = `none`) can take LANA straight from the customer's card into its owner's Main Wallet, with the shop's margin (0 to 20 %) on top. It does not go through the brain: no reward, no quota, no Direct Fund, no Lana.Discount. The customer's card key signs the payment and its public KIND 9350 record in the till's browser. This server checks everything again, keeps the exact bytes, sends them to two Electrum servers, and publishes the record once the payment is in a block (`server/directLana.ts`). A shop with a company can never use this path.
 
+### On the spot, and online
+
+The till's "LANA direct" tile is the payment on the spot: the customer's card is scanned at the till. A payment link that the customer pays at home is the online payment. It is made, listed and cancelled in "$Lana-online" (`LanaOnlineTab`), and the red number of paid links not yet seen is on that tile (Brilly, 26 Nov 2026).
+
 ### No switch
 
 Since 26 Nov 2026 there is no switch (Brilly: no switch, it works everywhere). Every shop without a company takes LANA direct as soon as its KIND 30901 says so and nothing below is missing. The old setting `app_settings.direct_lana_units` is dropped at every start, and the admin route refuses it with `NO_SUCH_SETTING`. To stop LANA direct now takes a code change.

@@ -1,8 +1,10 @@
 /**
  * The notice of PAID payment links on the home screen (25 Nov 2026): a red
- * number on the "LANA neposredno" tile, the selected shop's only, gone as soon
- * as its links are opened; asked only by a seller whose shop takes LANA
- * neposredno. (The harness is the one of Index.directLana.test.tsx.)
+ * number on the $Lana-online tile (Brilly, 26 Nov 2026: a link is an online
+ * payment; "LANA direct" is the one on the spot and never shows it), the
+ * selected shop's only, gone as soon as its links are opened in Lana-online;
+ * asked only by a seller whose shop takes LANA neposredno. (The harness is
+ * the one of Index.directLana.test.tsx.)
  *
  * Below: the description of the harness this file was made from.
  * The "LANA neposredno" tile on the home screen (SPEC §4, phase 2).
@@ -45,10 +47,11 @@ vi.mock('@/components/MenuDrawer', () => ({ default: () => null }));
 vi.mock('@/components/MobileQuotaPanel', () => ({ default: () => null }));
 vi.mock('@/components/tabs/CashTab', () => ({ default: () => <div>CASH-TAB</div> }));
 vi.mock('@/components/tabs/LanaTab', () => ({ default: () => <div>LANA-TAB</div> }));
-vi.mock('@/components/tabs/LanaOnlineTab', () => ({ default: () => <div>LANA-ONLINE-TAB</div> }));
-vi.mock('@/components/tabs/DirectLanaTab', () => ({
-  default: (p: any) => <button onClick={() => p.onLinksSeen?.(p.unit.unit_id)}>LINKS-SEEN {p.unit.unit_id}</button>,
+// Lana-online lists the shop's links and says so, as the real tab does when it reads them.
+vi.mock('@/components/tabs/LanaOnlineTab', () => ({
+  default: (p: any) => <button onClick={() => p.onLinksSeen?.(p.unitId)}>LINKS-SEEN {p.unitId}</button>,
 }));
+vi.mock('@/components/tabs/DirectLanaTab', () => ({ default: () => <div>DIRECT-LANA-TAB</div> }));
 vi.mock('@/components/tabs/WalletsTab', () => ({ default: () => <div>WALLETS-TAB</div> }));
 vi.mock('@/components/tabs/OrdersTab', () => ({ default: () => <div>ORDERS-TAB</div> }));
 vi.mock('@/components/tabs/RegularCustomersTab', () => ({ default: () => <div>REGULARS-TAB</div> }));
@@ -109,15 +112,18 @@ afterEach(() => {
 });
 
 
-const badge = () => screen.queryByTestId('direct-links-badge');
+const badge = () => screen.queryByTestId('lana-online-badge');
+const lanaOnlineTile = () => screen.getByText(i18n.t('home.payLanaOnline')).closest('button')!;
 
 describe('the red number of paid payment links', () => {
-  it('shows the selected shop\'s count, and goes as soon as its links are opened', async () => {
+  it('on the $Lana-online tile, the selected shop\'s count; never on "LANA direct"; gone as soon as its links are opened', async () => {
     unseen = { success: true, count: 3, by_unit: { [UNIT]: 2, 'another-unit': 1 }, latest: [] };
     render(<Index />);
     await screen.findByText('Kmetija Novak');
     await waitFor(() => expect(badge()).toHaveTextContent('2'));
-    fireEvent.click(await screen.findByTestId('direct-lana-tile'));
+    expect(lanaOnlineTile().contains(badge())).toBe(true);
+    expect(screen.getByTestId('direct-lana-tile').textContent).not.toContain('2');
+    fireEvent.click(lanaOnlineTile());
     fireEvent.click(await screen.findByText(`LINKS-SEEN ${UNIT}`));
     // Back on the home screen: the shop's number is gone at once, not at the next poll.
     fireEvent.click(screen.getByText(i18n.t('common.back')));

@@ -445,8 +445,10 @@ const Index = () => {
 
   // ── LANA neposredno: paid payment links (30 s poll, signed) ──────────────
   // Only for a seller with a shop whose direct LANA is on. A rising count of
-  // paid links not seen yet fires one toast per link and badges the direct
-  // tile; opening the shop's links in the tab marks them seen.
+  // paid links not seen yet fires one toast per link and badges the
+  // $Lana-online tile (a link is an online payment; "LANA direct" is the one
+  // on the spot, Brilly 26 Nov 2026); opening the shop's links in Lana-online
+  // marks them seen.
   const { i18n } = useTranslation();
   const hasDirectLinks = businessUnits.some(u => u.payout_account === 'none' && u.direct_lana?.enabled === true);
   // Paid links not seen yet, per shop: the tile shows the selected shop's.
@@ -1211,11 +1213,6 @@ const Index = () => {
                       disabled={noShopSelected}
                       className="relative overflow-hidden rounded-3xl bg-card border-2 border-primary/40 shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 flex-1 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                     >
-                      {unseenLinks > 0 && (
-                        <span data-testid="direct-links-badge" className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
-                          {unseenLinks}
-                        </span>
-                      )}
                       <img src={mandalaMesh} alt="" aria-hidden="true" className="absolute inset-0 w-full h-full object-cover opacity-[0.12] dark:opacity-[0.2] pointer-events-none" />
                       <div className="relative z-10 w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
                         <img src={lanaIcon} alt="" className="w-9 h-9 object-contain dark:invert" />
@@ -1270,9 +1267,13 @@ const Index = () => {
                     disabled={noCompanyUnit ? noShopSelected : (lanaPayDisabled || lanaPayoutMissing)}
                     className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 flex-1 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
-                    {unseenPaidCount > 0 && (
-                      <span className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
-                        {unseenPaidCount}
+                    {/* Paid and not seen yet: the brain's requests, and for a shop
+                        without a company its LANA neposredno payment links too
+                        (online payments, Brilly 26 Nov 2026; never on the
+                        on-the-spot "LANA direct" tile). */}
+                    {unseenPaidCount + (noCompanyUnit ? unseenLinks : 0) > 0 && (
+                      <span data-testid="lana-online-badge" className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
+                        {unseenPaidCount + (noCompanyUnit ? unseenLinks : 0)}
                       </span>
                     )}
                     {/* Mandala background mesh */}
@@ -1497,7 +1498,7 @@ const Index = () => {
             {/* Keyed by the shop: another shop starts from nothing, and the
                 card key of an unfinished sale is zeroed as the tab closes. */}
             {activeView === "direct-lana" && effectiveUnit && (
-              <DirectLanaTab key={effectiveUnit.unit_id} unit={effectiveUnit} onLinksSeen={linksSeen} />
+              <DirectLanaTab key={effectiveUnit.unit_id} unit={effectiveUnit} />
             )}
             {activeView === "orders" && (
               <OrdersTab unitId={effectiveUnit?.unit_id} merchantHex={session?.nostrHexId} businessUnits={businessUnits} />

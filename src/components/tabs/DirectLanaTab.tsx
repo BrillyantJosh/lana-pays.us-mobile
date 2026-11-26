@@ -14,6 +14,11 @@
  *              payment), refused (nothing was sent, and why)
  *   list       the shop's direct sales
  *
+ * On the spot only (Brilly, 26 Nov 2026: "LANA direct is a payment on the
+ * spot, one scans there; a link is online"): a payment link the customer pays
+ * at home is made, listed and cancelled in $Lana-online (LanaOnlineTab), and
+ * its paid notice is on that tile.
+ *
  * The card's key lives only in this component's memory, as bytes, from the
  * scan to the signature, and is zeroed after signing, on cancel, when the quote
  * runs out and when the tab closes (lib/directLanaSign.ts). After a lost answer
@@ -23,8 +28,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, CheckCircle2, AlertCircle, Clock, ListChecks, RefreshCw, Send, Link2, Copy, Check, Share2, Receipt } from 'lucide-react';
-import QRCode from 'react-qr-code';
+import { Loader2, CheckCircle2, AlertCircle, Clock, ListChecks, RefreshCw, Send, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,11 +39,8 @@ import { readCardKey, forgetCardKey, checkPlanForCard, signDirectSale, type Card
 import {
   fetchDirectPrice, requestDirectQuote, submitDirectSale, fetchDirectSale, fetchDirectSales, resendDirectSale,
   OPEN_STATUSES, directReasonKey, answerCode,
-  createDirectLink, fetchDirectLinks, cancelDirectLink, markDirectLinksSeen, directLinkUrl,
 } from '@/lib/directLanaApi';
-import { RequestNoteField } from '@/components/RequestNoteField';
 import { ReceiptStep, amountFromReceipt, type ReceiptChoice } from '@/components/ReceiptStep';
-import { noteToSend } from '@/lib/requestNote';
 import { formatMoney, formatDecimal, formatLana, shortAddress } from '@/lib/directLanaFormat';
 import lanaIcon from '@/assets/lana-icon.png';
 
@@ -90,7 +91,8 @@ export interface DirectAttempt {
 }
 
 /**
- * A payment link of this shop (server lib/directLanaLinks.ts sellerLinkView):
+ * A payment link of a shop (server lib/directLanaLinks.ts sellerLinkView), as
+ * $Lana-online shows it (LanaOnlineTab, DirectLinkRequestList):
  * the customer pays it at home, from their own card, into the shop's wallet.
  */
 export interface DirectLink {
@@ -130,7 +132,7 @@ function priceOfAttempt(a: DirectAttempt): Price {
   };
 }
 
-type Step = 'receipt' | 'entry' | 'breakdown' | 'quoting' | 'confirm' | 'sending' | 'status' | 'list' | 'linkForm' | 'linkCreated' | 'links';
+type Step = 'receipt' | 'entry' | 'breakdown' | 'quoting' | 'confirm' | 'sending' | 'status' | 'list';
 
 const CURRENCY_SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
 
@@ -170,7 +172,7 @@ const replacedBy = (a: Pick<DirectAttempt, 'status' | 'reason'>): string | null 
  * `pollMs`: how often a payment that may still change is asked about (8 s at
  * the till; a test asks faster).
  */
-const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaUnit; pollMs?: number; onLinksSeen?: (unitId: string) => void }) => {
+const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?: number }) => {
   const { t, i18n } = useTranslation();
   const { session } = useAuth();
   const locale = i18n.language || 'en';
@@ -186,8 +188,7 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
   const [attempt, setAttempt] = useState<DirectAttempt | null>(null);
   // `frame` 'resend': the refusal of a re-send of a payment that may still be
   // mined. It is said as "not sent again", never as "LANA were not sent".
-  // `frame` 'link': a payment link could not be made; 'cancel': one could not be closed.
-  const [refusal, setRefusal] = useState<{ code: string; pendingAttempt?: string; frame?: 'resend' | 'link' | 'cancel' } | null>(null);
+  const [refusal, setRefusal] = useState<{ code: string; pendingAttempt?: string; frame?: 'resend' } | null>(null);
   const [busy, setBusy] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [sales, setSales] = useState<DirectAttempt[] | null>(null);
@@ -198,12 +199,6 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
   const confirming = useRef(false);
   // The attempt whose submit got no answer at all from this till's point of view.
   const lostSubmit = useRef<string | null>(null);
-  // Payment links: the note the customer sees, the link just made, the shop's links.
-  const [note, setNote] = useState('');
-  const [createdLink, setCreatedLink] = useState<DirectLink | null>(null);
-  const [links, setLinks] = useState<DirectLink[] | null>(null);
-  const [linkCopied, setLinkCopied] = useState<string | null>(null);
-  const [cancelAsk, setCancelAsk] = useState<string | null>(null);
 
   const forgetCard = () => {
     forgetCardKey(cardRef.current);
@@ -224,13 +219,10 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
     sale_id: saleId,
   });
 
-  const reasonText = (code: string, frame?: 'resend' | 'link' | 'cancel') => {
+  const reasonText = (code: string, frame?: 'resend') => {
     const { key, sentence } = directReasonKey(code);
     if (sentence) return t(key);
-    const framed = frame === 'resend' ? 'directLana.resendRefused'
-      : frame === 'link' ? 'directLana.linkRefused'
-        : frame === 'cancel' ? 'directLana.cancelLinkRefused' : 'directLana.refused';
-    return t(framed, { reason: t(key) });
+    return t(frame === 'resend' ? 'directLana.resendRefused' : 'directLana.refused', { reason: t(key) });
   };
   const codeOfError = (e: unknown) => (e instanceof DirectLanaError ? e.code : 'NETWORK');
 
@@ -259,99 +251,6 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
     }, pollMs);
     return () => clearTimeout(timer);
   }, [step, attempt, tick, session, pollMs]);
-
-  // While the link just made is waiting for the customer, its status is asked every 10 s.
-  useEffect(() => {
-    if (step !== 'linkCreated' || !createdLink || ['paid', 'cancelled', 'expired'].includes(createdLink.status)) return;
-    const timer = setTimeout(async () => {
-      try {
-        const { status, data } = await fetchDirectLinks(session, unit.unit_id);
-        const fresh = status === 200 && Array.isArray(data?.links) ? (data.links as DirectLink[]).find(l => l.id === createdLink.id) : undefined;
-        if (fresh) setCreatedLink(fresh);
-      } catch { /* asked again next time */ }
-      setTick(n => n + 1);
-    }, pollMs);
-    return () => clearTimeout(timer);
-  }, [step, createdLink, tick, session, pollMs, unit.unit_id]);
-
-  /** Make a payment link for the sale on the screen: the invoice, the margin of now, the note. */
-  const createLink = async () => {
-    if (!price || busy) return;
-    setBusy(true);
-    setRefusal(null);
-    try {
-      const { status, data } = await createDirectLink(session, {
-        unit_id: unit.unit_id,
-        amount: price.invoice,
-        currency: price.currency,
-        ...(invoiceNumber.trim() ? { invoice_number: invoiceNumber.trim() } : {}),
-        ...(noteToSend(note) ? { note: noteToSend(note) } : {}),
-        ...(receipt ? { receipt_url: receipt.url, ...(receipt.hash ? { receipt_hash: receipt.hash } : {}) } : {}),
-      });
-      if (status === 201 && data?.success && data.link) {
-        setCreatedLink(data.link);
-        setLinkCopied(null);
-        setStep('linkCreated');
-      } else {
-        setRefusal({ code: answerCode(data) || 'GENERIC', frame: 'link' });
-      }
-    } catch {
-      setRefusal({ code: 'NETWORK', frame: 'link' });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const copyLink = async (l: DirectLink) => {
-    try {
-      await navigator.clipboard.writeText(directLinkUrl(l));
-      setLinkCopied(l.id);
-      setTimeout(() => setLinkCopied(c => (c === l.id ? null : c)), 2000);
-    } catch { /* not allowed here */ }
-  };
-
-  const shareLink = async (l: DirectLink) => {
-    try {
-      await navigator.share({
-        title: t('directLana.linkShareTitle'),
-        text: t('directLana.linkShareText', { amount: money(l.pay_cents, l.currency), unit: unit.name }),
-        url: directLinkUrl(l),
-      });
-    } catch { /* cancelled */ }
-  };
-
-  const openLinks = async () => {
-    setStep('links');
-    setLinks(null);
-    setCancelAsk(null);
-    setRefusal(null);
-    try {
-      const { status, data } = await fetchDirectLinks(session, unit.unit_id);
-      setLinks(status === 200 && Array.isArray(data?.links) ? data.links : []);
-      // Seen: the home screen's notice of paid links of this shop goes away.
-      void markDirectLinksSeen(session, unit.unit_id).then(() => onLinksSeen?.(unit.unit_id)).catch(() => {});
-    } catch {
-      setLinks([]);
-    }
-  };
-
-  const cancelLink = async (id: string) => {
-    setBusy(true);
-    setRefusal(null);
-    try {
-      const { status, data } = await cancelDirectLink(session, id);
-      if (data?.link) {
-        setLinks(prev => (prev ? prev.map(l => (l.id === id ? data.link : l)) : prev));
-        setCreatedLink(prev => (prev && prev.id === id ? data.link : prev));
-      }
-      if (status !== 200) setRefusal({ code: answerCode(data) || 'GENERIC', frame: 'cancel' });
-    } catch {
-      setRefusal({ code: 'NETWORK', frame: 'cancel' });
-    } finally {
-      setCancelAsk(null);
-      setBusy(false);
-    }
-  };
 
   const loadPrice = async () => {
     setBusy(true);
@@ -554,8 +453,6 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
     setAttempt(null);
     setRefusal(null);
     setConfirmingNew(false);
-    setNote('');
-    setCreatedLink(null);
     setReceipt(null);
     setStep('receipt');
   };
@@ -660,132 +557,6 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
     </div>
   );
 
-  if (step === 'linkForm' && price) {
-    return (
-      <div className="flex flex-col gap-5 px-6 py-4">
-        {header}
-        {breakdown(price)}
-        <div className="glass-card rounded-2xl p-5 space-y-3">
-          <RequestNoteField value={note} onChange={setNote} />
-          <p className="text-xs text-muted-foreground">{t('directLana.linkPriceNote')}</p>
-        </div>
-        {refusalBox}
-        <Button
-          data-testid="direct-create-link"
-          onClick={createLink}
-          disabled={busy}
-          className="w-full h-14 rounded-2xl text-base font-semibold gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
-        >
-          {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Link2 className="w-5 h-5" />{t('directLana.createLink')}</>}
-        </Button>
-        <Button variant="outline" className="w-full h-12 rounded-2xl" onClick={() => { setRefusal(null); setStep('breakdown'); }} disabled={busy}>{t('common.back')}</Button>
-      </div>
-    );
-  }
-
-  if (step === 'linkCreated' && createdLink) {
-    const l = createdLink;
-    const url = directLinkUrl(l);
-    void tick;
-    return (
-      <div className="flex flex-col gap-5 px-6 py-4">
-        <div className="flex flex-col items-center gap-2 py-2 text-center">
-          <CheckCircle2 className="w-12 h-12 text-primary" />
-          <h2 className="font-display text-xl font-bold text-foreground">{t('directLana.linkCreated')}</h2>
-          <p className="text-2xl font-bold text-foreground">{money(l.pay_cents, l.currency)}</p>
-          {l.invoice_number && <p className="text-sm text-muted-foreground">{l.invoice_number}</p>}
-          {l.note && <p className="text-sm text-foreground/85 break-words max-w-full"><span className="text-muted-foreground">{t('lanaOnline.noteLabel')}: </span>{l.note}</p>}
-          <p data-testid="direct-link-status" className="text-sm font-semibold text-primary">{t(`directLana.linkStatus.${l.status}`)}</p>
-        </div>
-        {l.status === 'open' || l.status === 'paying' ? (
-          <div className="glass-card rounded-2xl border p-5 space-y-4">
-            <p className="text-xs text-muted-foreground">{t('lanaOnline.linkLabel')}</p>
-            <p data-testid="direct-link-url" className="text-sm font-mono text-foreground break-all bg-secondary rounded-xl p-3">{url}</p>
-            <div className="grid grid-cols-2 gap-2">
-              <Button onClick={() => copyLink(l)} variant="outline" className="h-12 rounded-xl gap-2">
-                {linkCopied === l.id ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
-                {linkCopied === l.id ? t('lanaOnline.linkCopied') : t('lanaOnline.copyLink')}
-              </Button>
-              {typeof navigator !== 'undefined' && typeof navigator.share === 'function' ? (
-                <Button onClick={() => shareLink(l)} className="h-12 rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
-                  <Share2 className="w-4 h-4" /> {t('lanaOnline.shareLink')}
-                </Button>
-              ) : (
-                <Button onClick={() => copyLink(l)} className="h-12 rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
-                  <Copy className="w-4 h-4" /> {t('lanaOnline.copyLink')}
-                </Button>
-              )}
-            </div>
-            <div className="flex flex-col items-center gap-2 pt-2">
-              <div className="bg-white p-3 rounded-xl"><QRCode value={url} size={168} /></div>
-              <p className="text-xs text-muted-foreground text-center">{t('lanaOnline.qrHint')}</p>
-            </div>
-            {l.expires_at && (
-              <p className="text-xs text-muted-foreground text-center">{t('lanaOnline.expiresNote', { date: new Date(l.expires_at * 1000).toLocaleString(locale) })}</p>
-            )}
-          </div>
-        ) : null}
-        {refusalBox}
-        <Button data-testid="direct-new-link" variant="outline" className="w-full h-12 rounded-2xl" onClick={newSale}>{t('common.newPayment')}</Button>
-        <button onClick={openLinks} className="text-sm text-muted-foreground hover:text-foreground flex items-center justify-center gap-2">
-          <Link2 className="w-4 h-4" /> {t('directLana.showLinks')}
-        </button>
-      </div>
-    );
-  }
-
-  if (step === 'links') {
-    return (
-      <div className="flex flex-col gap-4 px-6 py-4">
-        <h2 className="font-display text-xl font-bold text-foreground">{t('directLana.linksTitle')}</h2>
-        {refusalBox}
-        {links === null ? (
-          <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" />
-        ) : links.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t('directLana.linksEmpty')}</p>
-        ) : (
-          <ul className="space-y-2">
-            {links.map(l => (
-              <li key={l.id} data-testid="direct-link-row" className="rounded-xl border border-border p-3 space-y-2">
-                <div className="flex justify-between gap-2">
-                  <span className="text-sm font-semibold text-foreground">{money(l.pay_cents, l.currency)}{l.payment ? ` · ${lana(l.payment.amount_lanoshi)}` : ''}</span>
-                  <span data-testid="direct-link-row-status" className={`text-xs font-semibold ${l.status === 'paid' ? 'text-emerald-600' : 'text-muted-foreground'}`}>{t(`directLana.linkStatus.${l.status}`)}</span>
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {new Date(l.created_at * 1000).toLocaleString(locale)}{l.invoice_number ? ` · ${l.invoice_number}` : ''}
-                </div>
-                {l.note && <p className="text-xs text-foreground/80 break-words">{l.note}</p>}
-                {l.payment?.txid && (l.status === 'paid' || l.status === 'paying') && (
-                  <a href={`https://chainz.cryptoid.info/lana/tx.dws?${l.payment.txid}`} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-primary underline break-all block">{l.payment.txid}</a>
-                )}
-                {l.status === 'open' && (
-                  cancelAsk === l.id ? (
-                    <div className="rounded-lg bg-amber-50 dark:bg-amber-500/5 border border-amber-300 dark:border-amber-500/30 p-3 space-y-2">
-                      <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">{t('directLana.cancelLinkConfirm', { amount: money(l.pay_cents, l.currency) })}</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button data-testid="direct-link-cancel-yes" variant="outline" className="h-10 rounded-lg" disabled={busy} onClick={() => cancelLink(l.id)}>{t('directLana.cancelLink')}</Button>
-                        <Button className="h-10 rounded-lg" disabled={busy} onClick={() => setCancelAsk(null)}>{t('common.back')}</Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button variant="outline" className="h-10 rounded-lg gap-1.5 text-xs" onClick={() => copyLink(l)}>
-                        {linkCopied === l.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                        {linkCopied === l.id ? t('lanaOnline.linkCopied') : t('lanaOnline.copyLink')}
-                      </Button>
-                      <Button data-testid="direct-link-cancel" variant="outline" className="h-10 rounded-lg text-xs" onClick={() => setCancelAsk(l.id)}>{t('directLana.cancelLink')}</Button>
-                    </div>
-                  )
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        <Button data-testid="direct-links-back" variant="outline" className="w-full h-12 rounded-2xl" onClick={backFromList}>{t('common.back')}</Button>
-      </div>
-    );
-  }
-
   if (step === 'list') {
     return (
       <div className="flex flex-col gap-4 px-6 py-4">
@@ -816,16 +587,12 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
     );
   }
 
-  // The seller's lists, reachable from the first screen and from the amount.
+  // The shop's direct payments, reachable from the first screen and from the amount.
+  // (Its payment links are in $Lana-online.)
   const listButtons = (
-    <>
-      <button onClick={openList} className="text-sm text-muted-foreground hover:text-foreground flex items-center justify-center gap-2">
-        <ListChecks className="w-4 h-4" /> {t('directLana.showList')}
-      </button>
-      <button data-testid="direct-show-links" onClick={openLinks} className="text-sm text-muted-foreground hover:text-foreground flex items-center justify-center gap-2">
-        <Link2 className="w-4 h-4" /> {t('directLana.showLinks')}
-      </button>
-    </>
+    <button onClick={openList} className="text-sm text-muted-foreground hover:text-foreground flex items-center justify-center gap-2">
+      <ListChecks className="w-4 h-4" /> {t('directLana.showList')}
+    </button>
   );
 
   if (step === 'receipt') {
@@ -905,23 +672,6 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
               <img src={lanaIcon} alt="" className="w-5 h-5 object-contain dark:invert" />
               {t('directLana.scanCard')}
             </Button>
-            {/* The customer is not here: a link they pay at home, from their own
-                card. Only for a NEW sale: a link is a sale of its own, so offered
-                while a payment of this one may still be mined (paying it again,
-                or a lost answer) the customer could pay twice. */}
-            {!saleId && !attempt && (
-              <>
-                <Button
-                  data-testid="direct-send-link"
-                  variant="outline"
-                  onClick={() => { setRefusal(null); setStep('linkForm'); }}
-                  className="w-full h-12 rounded-2xl gap-2 border-2 border-primary text-primary bg-primary/5"
-                >
-                  <Link2 className="w-4 h-4" /> {t('directLana.sendLink')}
-                </Button>
-                <p className="text-xs text-muted-foreground text-center -mt-2">{t('directLana.sendLinkHint')}</p>
-              </>
-            )}
             <Button variant="outline" className="w-full h-12 rounded-2xl" onClick={newSale}>{t('common.back')}</Button>
           </>
         )}

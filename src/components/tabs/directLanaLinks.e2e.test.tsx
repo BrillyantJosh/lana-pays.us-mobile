@@ -1,6 +1,8 @@
 /**
  * A LANA neposredno payment link end to end (Brilly, 25 Nov 2026): the seller
- * makes it in the real till tab (DirectLanaTab), the customer pays it on the
+ * makes it in the real $Lana-online tab (LanaOnlineTab; 26 Nov 2026: a link is
+ * an online payment, the till's "LANA direct" is the one on the spot and makes
+ * none), the customer pays it on the
  * real public page (PublicDirectPay) with the real new signer, and the real
  * server routes (server/directLana.ts) run in this process on an in-memory
  * database. Only the camera, the chain (as if two agreeing Electrum servers),
@@ -74,6 +76,7 @@ vi.mock('@/lib/directLanaSign', async (importOriginal) => {
 });
 
 import DirectLanaTab from './DirectLanaTab';
+import LanaOnlineTab from './LanaOnlineTab';
 import PublicDirectPay from '@/pages/PublicDirectPay';
 
 // ── people, wallets, the shop ───────────────────────────────────────────────
@@ -228,18 +231,24 @@ afterEach(() => {
 });
 
 // ── the seller's steps ──────────────────────────────────────────────────────
+/** The seller's $Lana-online tab of this shop without a company. */
+function sellerOpensLanaOnline() {
+  return render(
+    <MemoryRouter>
+      <LanaOnlineTab unitCurrency="EUR" unitId={UNIT} merchantHex={OWNER_HEX} noCompany directLana={{ enabled: true, reason: null }} unitName="Kmetija Novak" />
+    </MemoryRouter>,
+  );
+}
+
 async function sellerMakesLink(amount = '10,00', invoice = '', note = '') {
-  const view = render(<DirectLanaTab unit={UNIT_VIEW} pollMs={40} />);
+  const view = sellerOpensLanaOnline();
   // The receipt step first (26 Nov 2026); these links are made without a photo.
   fireEvent.click(await screen.findByTestId('receipt-skip'));
-  fireEvent.change(await screen.findByTestId('direct-amount'), { target: { value: amount } });
-  if (invoice) fireEvent.change(screen.getByTestId('direct-invoice'), { target: { value: invoice } });
-  fireEvent.click(screen.getByTestId('direct-continue'));
-  await screen.findByTestId('direct-breakdown');
-  fireEvent.click(screen.getByTestId('direct-send-link'));
+  fireEvent.change(await screen.findByTestId('online-direct-amount'), { target: { value: amount } });
+  if (invoice) fireEvent.change(screen.getByTestId('online-direct-invoice'), { target: { value: invoice } });
   if (note) fireEvent.change(screen.getByLabelText(/Opomba/), { target: { value: note } });
-  fireEvent.click(screen.getByTestId('direct-create-link'));
-  const url = (await screen.findByTestId('direct-link-url')).textContent || '';
+  fireEvent.click(screen.getByTestId('online-direct-create'));
+  const url = (await screen.findByTestId('online-direct-url')).textContent || '';
   const token = /\/pay-direct\/([A-Za-z0-9_-]{32})$/.exec(url)?.[1];
   expect(token, url).toBeTruthy();
   return { view, token: token! };
@@ -300,11 +309,10 @@ describe('a payment link, from the till to the customer\'s card to a block', () 
     expect(published.length).toBe(1);
     cleanup();
 
-    // The seller's list says PLAČANO.
-    render(<DirectLanaTab unit={UNIT_VIEW} pollMs={40} />);
-    fireEvent.click(screen.getByTestId('direct-show-links'));
-    const status = await screen.findByTestId('direct-link-row-status');
-    expect(status.textContent).toBe('PLAČANO');
+    // The seller's list in $Lana-online says PLAČANO.
+    sellerOpensLanaOnline();
+    const status = await screen.findByTestId('online-direct-link-row-status');
+    await waitFor(() => expect(status.textContent).toBe('PLAČANO'));
   });
 
   it('opened again after it was paid: "already paid", no key asked', async () => {
@@ -326,10 +334,9 @@ describe('a payment link, from the till to the customer\'s card to a block', () 
 
   it('the seller cancels it: the customer sees it cancelled and cannot pay', async () => {
     const { view, token } = await sellerMakesLink();
-    fireEvent.click(screen.getByText(i18n.t('directLana.showLinks')));
-    fireEvent.click(await screen.findByTestId('direct-link-cancel'));
-    fireEvent.click(screen.getByTestId('direct-link-cancel-yes'));
-    await waitFor(() => expect(screen.getByTestId('direct-link-row-status').textContent).toBe('Preklicano'));
+    fireEvent.click(await screen.findByTestId('online-direct-link-cancel'));
+    fireEvent.click(await screen.findByTestId('online-direct-link-cancel-yes'));
+    await waitFor(() => expect(screen.getByTestId('online-direct-link-row-status').textContent).toBe('Preklicano'));
     view.unmount();
     customerOpens(token);
     await screen.findByTestId('pay-direct-closed-cancelled');
@@ -387,23 +394,19 @@ describe('a payment link, from the till to the customer\'s card to a block', () 
     expect(new Set(chain.broadcasts).size).toBe(1);
   });
 
-  it('review fix: while a payment of the sale may still be mined, the till offers no link (it would be a second sale)', async () => {
-    chain.mode = 'odd';
+  it('the till\'s "LANA direct" makes no link and lists none: it is the payment on the spot (26 Nov 2026)', async () => {
     render(<DirectLanaTab unit={UNIT_VIEW} pollMs={40} />);
-    fireEvent.click(await screen.findByTestId('receipt-skip'));
+    await screen.findByTestId('receipt-step');
+    expect(screen.queryByText('Pokaži povezave za plačilo')).toBeNull();
+    fireEvent.click(screen.getByTestId('receipt-skip'));
     fireEvent.change(await screen.findByTestId('direct-amount'), { target: { value: '10,00' } });
+    expect(screen.queryByText('Pokaži povezave za plačilo')).toBeNull();
     fireEvent.click(screen.getByTestId('direct-continue'));
     await screen.findByTestId('direct-breakdown');
-    // A fresh sale: the link is offered.
-    expect(screen.getByTestId('direct-send-link')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('direct-scan'));
-    fireEvent.click(await screen.findByText('SCAN-NOW'));
-    fireEvent.click(await screen.findByTestId('direct-confirm'));
-    await screen.findByTestId('direct-status-unknown');
-    // "Pay again": the same sale, the same card. No link beside it.
-    fireEvent.click(screen.getByTestId('direct-pay-again'));
-    await screen.findByTestId('direct-breakdown');
-    expect(screen.queryByTestId('direct-send-link')).toBeNull();
+    // On the spot: the customer's card is scanned here; no link is offered.
+    expect(screen.getByTestId('direct-scan')).toBeTruthy();
+    expect(screen.queryByText('Pošlji povezavo za plačilo')).toBeNull();
+    expect(requests.filter(r => r.url.startsWith('/api/direct-lana/links'))).toEqual([]);
   });
 
   it('review fix: cancelled while the customer looks at the confirm screen: "cancelled", no key asked again', async () => {
