@@ -19,7 +19,7 @@ import { registerDirectLanaRoutes, runDirectLanaWorker, RESEND_WINDOW_SECONDS, t
 import { ChainUnavailable, type WithChain, type ChainRead, type Utxo, type BroadcastAnswer } from './lib/directLanaChain.js';
 import { RegistrarUnavailable, type RegistrarAnswer } from './lib/directLanaRegistrar.js';
 import { parseLanaTx, txidOfRaw } from './lib/directLanaTx.js';
-import { move, getAttempt, beginValidating, refuseBeforeSending } from './lib/directLanaStore.js';
+import { move, getAttempt, beginValidating, refuseBeforeSending, directDedupHit } from './lib/directLanaStore.js';
 import { directLanaView, unitRow } from './lib/directLanaUnit.js';
 import { addressScript, bytesToHex, type DirectLanaPlan } from './lib/directLanaCore.js';
 import { readCardKey, signDirectSale } from '../src/lib/directLanaSign.js';
@@ -1192,5 +1192,86 @@ describe('a crash in the middle of a submit is put right by the sweep, never by 
     nowMs += 3_600_000;
     await runDirectLanaWorker(db, deps as DirectLanaDeps);
     expect(row(plan.attempt_id).status).toBe('sent');
+  });
+});
+
+describe('the receipt photo (Brilly, 26 Nov 2026: the same procedure as LANA, the money to the shop\'s wallet)', () => {
+  const R = { receipt_url: 'https://files.example/r-1.jpg', receipt_hash: 'cd'.repeat(32) };
+
+  it('kept with the sale and shown to the seller; never in the signed plan nor the public record', async () => {
+    const { plan, s, r } = await paySent(R);
+    expect(r.data.status).toBe('sent');
+    expect(row(plan.attempt_id)).toMatchObject({ receipt_url: R.receipt_url, receipt_hash: R.receipt_hash });
+    const seen = await get(`/api/direct-lana/sales/${plan.attempt_id}`);
+    expect(seen.data.receipt_url).toBe(R.receipt_url);
+    expect(JSON.stringify(seen.data)).not.toContain(R.receipt_hash);
+    for (const text of [JSON.stringify(plan), JSON.stringify(s.record)]) {
+      expect(text).not.toContain('r-1.jpg');
+      expect(text).not.toContain(R.receipt_hash);
+    }
+  });
+
+  it('"No receipt" is a sale as before', async () => {
+    const { plan, r } = await paySent();
+    expect(r.data.status).toBe('sent');
+    expect(row(plan.attempt_id)).toMatchObject({ receipt_url: null, receipt_hash: null });
+  });
+
+  it('the same photo is never paid twice in the shop: refused at the quote; another photo goes on', async () => {
+    await paySent(R);
+    const again = await quote({ ...R, invoice_number: 'other' }, CARD2);
+    expect(again.status).toBe(409);
+    expect(again.data.code).toBe('RECEIPT_USED');
+    expect((await quote({ receipt_url: 'https://files.example/r-2.jpg', receipt_hash: 'ef'.repeat(32) }, CARD2)).status).toBe(200);
+  });
+
+  it('— and at the submit, when another sale with it went out between the quote and the submit: nothing sent', async () => {
+    const first = await quote(R);
+    const second = await quote(R, CARD2);
+    expect(second.status).toBe(200);
+    expect((await submit(first.data.plan, sign(first.data.plan))).data.status).toBe('sent');
+    const r = await submit(second.data.plan, sign(second.data.plan, CARD2));
+    // As INVOICE_USED at the submit: refused before anything is kept or sent.
+    expect(r.status).toBe(409);
+    expect(r.data.code).toBe('RECEIPT_USED');
+    expect(row(second.data.attempt_id).status).toBe('quoted');
+    expect(chain.broadcasts.length).toBe(1);
+  });
+
+  it('a sale started before keeps its own photo, whatever a later quote of it says', async () => {
+    const first = await quote(R);
+    expect(first.status).toBe(200);
+    const again = await quote({ sale_id: first.data.sale_id, receipt_url: 'https://files.example/other.jpg', receipt_hash: '12'.repeat(32) });
+    expect(again.status, JSON.stringify(again.data)).toBe(200);
+    expect(row(again.data.attempt_id)).toMatchObject({ receipt_url: R.receipt_url, receipt_hash: R.receipt_hash });
+  });
+
+  it('a receipt that does not read is refused before anything is asked', async () => {
+    const bad: Array<Record<string, unknown>> = [
+      { receipt_hash: 'cd'.repeat(32) },
+      { receipt_url: 'javascript:alert(1)' },
+      { receipt_url: 'https://files.example/a b.jpg' },
+      { receipt_url: R.receipt_url, receipt_hash: 'not-a-hash' },
+      { receipt_url: `https://files.example/${'a'.repeat(600)}` },
+      { receipt_url: 42 },
+    ];
+    for (const b of bad) {
+      const r = await quote(b);
+      expect(r.status, JSON.stringify(b)).toBe(400);
+      expect(r.data.code).toBe('RECEIPT_INVALID');
+    }
+    expect(registrarAsked).toEqual([]);
+  });
+
+  it('the till\'s early warning (check-dedup) sees a direct sale of the photo or of the number; a quote nobody signed holds nothing', async () => {
+    const { plan } = await paySent({ ...R, invoice_number: 'R-9' });
+    const byPhoto = directDedupHit(db, UNIT, { receiptHash: R.receipt_hash });
+    expect(byPhoto).toMatchObject({ duplicate: true, by: 'receipt_image' });
+    expect(byPhoto!.original_created_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    expect(directDedupHit(db, UNIT, { invoiceNumber: ' R-9 ' })).toMatchObject({ duplicate: true, by: 'invoice' });
+    expect(directDedupHit(db, UNIT, { receiptHash: 'ef'.repeat(32), invoiceNumber: 'R-10' })).toBe(null);
+    expect(directDedupHit(db, COMPANY, { receiptHash: R.receipt_hash })).toBe(null);
+    db.prepare("UPDATE direct_lana_sales SET status = 'quoted' WHERE id = ?").run(plan.attempt_id);
+    expect(directDedupHit(db, UNIT, { receiptHash: R.receipt_hash })).toBe(null);
   });
 });

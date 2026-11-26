@@ -230,7 +230,9 @@ afterEach(() => {
 // ── the seller's steps ──────────────────────────────────────────────────────
 async function sellerMakesLink(amount = '10,00', invoice = '', note = '') {
   const view = render(<DirectLanaTab unit={UNIT_VIEW} pollMs={40} />);
-  fireEvent.change(screen.getByTestId('direct-amount'), { target: { value: amount } });
+  // The receipt step first (26 Nov 2026); these links are made without a photo.
+  fireEvent.click(await screen.findByTestId('receipt-skip'));
+  fireEvent.change(await screen.findByTestId('direct-amount'), { target: { value: amount } });
   if (invoice) fireEvent.change(screen.getByTestId('direct-invoice'), { target: { value: invoice } });
   fireEvent.click(screen.getByTestId('direct-continue'));
   await screen.findByTestId('direct-breakdown');
@@ -388,7 +390,8 @@ describe('a payment link, from the till to the customer\'s card to a block', () 
   it('review fix: while a payment of the sale may still be mined, the till offers no link (it would be a second sale)', async () => {
     chain.mode = 'odd';
     render(<DirectLanaTab unit={UNIT_VIEW} pollMs={40} />);
-    fireEvent.change(screen.getByTestId('direct-amount'), { target: { value: '10,00' } });
+    fireEvent.click(await screen.findByTestId('receipt-skip'));
+    fireEvent.change(await screen.findByTestId('direct-amount'), { target: { value: '10,00' } });
     fireEvent.click(screen.getByTestId('direct-continue'));
     await screen.findByTestId('direct-breakdown');
     // A fresh sale: the link is offered.

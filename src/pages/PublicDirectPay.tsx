@@ -29,7 +29,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  Loader2, CheckCircle2, AlertCircle, Clock, XCircle, Globe, Store, QrCode, KeyRound, Send, RefreshCw,
+  Loader2, CheckCircle2, AlertCircle, Clock, XCircle, Globe, Store, QrCode, KeyRound, Send, RefreshCw, Receipt,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -81,6 +81,8 @@ export interface LinkView {
   pay_cents: string;
   total: string;
   invoice_number: string;
+  /** The receipt the seller photographed (26 Nov 2026), or null. */
+  receipt_url?: string | null;
   note: string | null;
   sale_id: string;
   recipient: string | null;
@@ -464,6 +466,13 @@ const PublicDirectPay = ({ pollMs = 10_000 }: { pollMs?: number }) => {
           <p className="text-xs text-muted-foreground">{t('pay.noteFromSeller')}</p>
           <p className="text-sm text-foreground break-words">{link.note}</p>
         </div>
+      )}
+      {/* The receipt the seller photographed, as the Lana-online page shows its own. */}
+      {link.receipt_url && /^https?:\/\//.test(link.receipt_url) && (
+        <a data-testid="pay-direct-receipt" href={link.receipt_url} target="_blank" rel="noopener noreferrer"
+          className="flex items-center gap-2 text-sm text-primary underline">
+          <Receipt className="w-4 h-4" /> {t('pay.viewReceipt')}
+        </a>
       )}
       <div className="space-y-1.5 pt-2 border-t border-border">
         <div className="flex justify-between items-baseline gap-3">

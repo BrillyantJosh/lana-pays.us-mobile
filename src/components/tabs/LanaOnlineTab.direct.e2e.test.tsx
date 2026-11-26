@@ -159,6 +159,10 @@ beforeEach(async () => {
     const path = String(url).split('?')[0];
     requests.push({ url: path, method: init.method || 'GET', headers: JSON.stringify(init.headers || {}), body: typeof init.body === 'string' ? init.body : '' });
     if (path.startsWith('/api/direct-lana/') || path.startsWith('/api/payment-requests')) return realFetch(base + url, init);
+    // The receipt photo's own routes (server/index.ts), as they answer.
+    if (path === '/api/receipt/upload') return new Response(JSON.stringify({ success: true, url: RECEIPT_URL, hash: RECEIPT_HASH }), { status: 200 });
+    if (path === '/api/receipt/analyze') return new Response(JSON.stringify({ isReceipt: true, amount: 12.5, currency: 'EUR', invoiceNumber: 'R-77', items: 'Jajca, 30 kosov' }), { status: 200 });
+    if (path === '/api/brain/purchase/check-dedup') return new Response(JSON.stringify({ duplicate: false }), { status: 200 });
     return new Response('{}', { status: 404 });
   }) as any);
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn(async () => {}) } });
@@ -183,8 +187,12 @@ function openTab(props: { unitId: string; noCompany?: boolean; directLana?: any 
   );
 }
 
-/** The form of a shop without a company: no photo step, straight to the fields. */
+const RECEIPT_URL = 'https://files.example/receipt-77.jpg';
+const RECEIPT_HASH = 'ab'.repeat(32);
+
+/** The form of a shop without a company, after its receipt step ("No receipt" here). */
 async function fillDirect(amount: string, invoice = '', note = '') {
+  if (screen.queryByTestId('receipt-step')) fireEvent.click(screen.getByTestId('receipt-skip'));
   fireEvent.change(await screen.findByTestId('online-direct-amount'), { target: { value: amount } });
   if (invoice) fireEvent.change(screen.getByTestId('online-direct-invoice'), { target: { value: invoice } });
   if (note) fireEvent.change(screen.getByLabelText(/Note/), { target: { value: note } });
@@ -194,8 +202,9 @@ async function fillDirect(amount: string, invoice = '', note = '') {
 describe('a shop without a company: LANA neposredno, no switch (Brilly, 26 Nov 2026)', () => {
   it('the form makes a LANA neposredno payment link with one signed call: invoice + margin, into the shop\'s wallet', async () => {
     openTab({ unitId: NO_COMPANY, noCompany: true, directLana: ON });
-    // No photo is asked for: a direct link carries none.
-    expect(screen.queryByText(i18n.t('cash.takePhotoLabel'))).toBeNull();
+    // The receipt comes first, as for every request (26 Nov 2026); "No receipt" goes on to the form.
+    expect(await screen.findByTestId('receipt-step')).toBeTruthy();
+    expect(screen.getByText(i18n.t('cash.takePhotoLabel'))).toBeTruthy();
     await fillDirect('12,50', 'R-7', 'Jajca za soboto');
 
     const url = flat((await screen.findByTestId('online-direct-url')).textContent);
@@ -251,8 +260,44 @@ describe('a shop without a company: LANA neposredno, no switch (Brilly, 26 Nov 2
     expect(linkRows().length).toBe(1);
   });
 
+  it('with a receipt photo: read for the amount and the number, carried by the link, shown on the customer\'s page', async () => {
+    const { container } = openTab({ unitId: NO_COMPANY, noCompany: true, directLana: ON });
+    await screen.findByTestId('receipt-step');
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['bytes-of-receipt'], 'r.jpg', { type: 'image/jpeg' })] } });
+    fireEvent.click(await screen.findByTestId('receipt-continue'));
+    // What the reader saw is in the form; the receipt is there to look at again.
+    expect((await screen.findByTestId('online-direct-amount') as HTMLInputElement).value).toBe('12.50');
+    expect((screen.getByTestId('online-direct-invoice') as HTMLInputElement).value).toBe('R-77');
+    expect(screen.getByTestId('online-direct-receipt')).toBeTruthy();
+    // Asked early whether the photo or its number was paid already.
+    expect(JSON.parse(sent('/api/brain/purchase/check-dedup')[0].body)).toEqual({ unit_id: NO_COMPANY, receipt_hash: RECEIPT_HASH, invoice_number: 'R-77' });
+    fireEvent.click(screen.getByTestId('online-direct-create'));
+
+    await screen.findByTestId('online-direct-url');
+    expect(JSON.parse(sent('/api/direct-lana/links')[0].body)).toEqual({
+      unit_id: NO_COMPANY, amount: '12.50', currency: 'EUR', invoice_number: 'R-77', receipt_url: RECEIPT_URL, receipt_hash: RECEIPT_HASH,
+    });
+    expect(linkRows()[0]).toMatchObject({ receipt_url: RECEIPT_URL, receipt_hash: RECEIPT_HASH });
+    const page = await (await realFetch(`${base}/api/direct-pay/${linkRows()[0].token}`)).json() as any;
+    expect(page.link.receipt_url).toBe(RECEIPT_URL);
+    expect(JSON.stringify(page)).not.toContain(RECEIPT_HASH);
+
+    // The same photo on a second link while the first is open: refused, in the till's words.
+    fireEvent.click(screen.getByText(i18n.t('lanaOnline.newRequest')));
+    const again = (await screen.findByTestId('receipt-step')).querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(again, { target: { files: [new File(['bytes-of-receipt'], 'r.jpg', { type: 'image/jpeg' })] } });
+    fireEvent.click(await screen.findByTestId('receipt-continue'));
+    fireEvent.change(await screen.findByTestId('online-direct-invoice'), { target: { value: 'R-78' } });
+    fireEvent.click(screen.getByTestId('online-direct-create'));
+    expect(flat((await screen.findByTestId('online-direct-error')).textContent))
+      .toBe(i18n.t('directLana.linkRefused', { reason: i18n.t('directLana.reason.RECEIPT_HAS_LINK') }));
+    expect(linkRows().length).toBe(1);
+  });
+
   it('an amount the server would not read is never sent', async () => {
     openTab({ unitId: NO_COMPANY, noCompany: true, directLana: ON });
+    fireEvent.click(await screen.findByTestId('receipt-skip'));
     fireEvent.change(await screen.findByTestId('online-direct-amount'), { target: { value: '12.505' } });
     expect((screen.getByTestId('online-direct-create') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByTestId('online-direct-amount'), { target: { value: '0' } });

@@ -145,6 +145,12 @@ A shop without a company and without a bank account (KIND 30901 `payout_account`
 
 Since 26 Nov 2026 there is no switch (Brilly: no switch, it works everywhere). Every shop without a company takes LANA direct as soon as its KIND 30901 says so and nothing below is missing. The old setting `app_settings.direct_lana_units` is dropped at every start, and the admin route refuses it with `NO_SUCH_SETTING`. To stop LANA direct now takes a code change.
 
+### The receipt photo
+
+Since 26 Nov 2026 a direct sale starts like a sale through the brain: with the receipt photo (`src/components/ReceiptStep.tsx`, at the till's "LANA direct" and at Lana-online of a shop without a company). It is uploaded (`/api/receipt/upload`), read for the amount and the invoice number (`/api/receipt/analyze`), and asked about (`/api/brain/purchase/check-dedup`, which now also asks this app's own direct sales). "No receipt" goes on without one.
+
+The till sends `receipt_url` and `receipt_hash` with a new sale's quote or with a payment link. The server keeps them on `direct_lana_sales` and `direct_lana_links`. They never go into the signed plan or the public KIND 9350 record. A sale started before keeps its own receipt, and a link's sale takes the link's. The same photo (its hash) is never paid twice in one shop: `RECEIPT_USED` at the quote and at the submit, `RECEIPT_HAS_LINK` for a second open link, and `RECEIPT_INVALID` for a receipt that does not read. The customer's page of a link shows the receipt, as the Lana-online page does.
+
 ### What a shop needs for it
 
 - KIND 38888 names at least two Electrum servers (port 5097), the relays, and an `fx` price for the shop's currency (EUR, GBP or USD). With fewer than two Electrum servers every direct sale is refused.

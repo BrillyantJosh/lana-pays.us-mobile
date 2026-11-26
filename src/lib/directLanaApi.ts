@@ -50,6 +50,8 @@ export const fetchDirectPrice = (s: DirectSession | null | undefined, unitId: st
 
 export const requestDirectQuote = (s: DirectSession | null | undefined, body: {
   unit_id: string; amount: string; currency: string; public_key: string; invoice_number?: string; sale_id?: string;
+  /** The receipt photo of a new sale, as /api/receipt/upload answered (a sale started before keeps its own). */
+  receipt_url?: string; receipt_hash?: string;
 }) => call(s, 'POST', '/api/direct-lana/quote', body);
 
 export const submitDirectSale = (s: DirectSession | null | undefined, body: { attempt_id: string; raw: string; record: unknown }) =>
@@ -82,6 +84,8 @@ const OWN_REASONS = [
   'NOT_RECEIVED',
   // Payment links: a paid link cannot be cancelled; an invoice number already on an open link.
   'LINK_PAID', 'INVOICE_HAS_LINK',
+  // The receipt photo (26 Nov 2026): already paid, already on an open link, or not readable.
+  'RECEIPT_USED', 'RECEIPT_HAS_LINK', 'RECEIPT_INVALID',
 ];
 const GROUPS: Record<string, string> = {
   UNKNOWN_UNIT: 'UNIT', UNIT_NOT_DIRECT: 'UNIT', UNIT_BLOCKED: 'UNIT',
@@ -130,6 +134,8 @@ export const answerCode = (data: any): string => (typeof data?.code === 'string'
 
 export const createDirectLink = (s: DirectSession | null | undefined, body: {
   unit_id: string; amount: string; currency: string; invoice_number?: string; note?: string;
+  /** The receipt photo, as /api/receipt/upload answered: the customer's page shows it. */
+  receipt_url?: string; receipt_hash?: string;
 }) => call(s, 'POST', '/api/direct-lana/links', body);
 
 export const fetchDirectLinks = (s: DirectSession | null | undefined, unitId: string) =>
@@ -199,6 +205,8 @@ const PAY_GROUPS: Record<string, string> = {
   CARD_MISMATCH: 'PLAN', TX_INVALID: 'PLAN', RECORD_INVALID: 'PLAN', SALE_CONFLICT: 'PLAN', SALE_MISMATCH: 'PLAN',
   TX_TOO_LARGE: 'PLAN', SIGNATURE_FAILED: 'PLAN', UNKNOWN_SALE: 'PLAN', RESEND_NOT_ALLOWED: 'PLAN', TX_ALREADY_KNOWN: 'PLAN',
   LINK_PAID: 'SALE_ALREADY_PAID',
+  // The receipt is paid already: to the customer, the same as the invoice (26 Nov 2026).
+  RECEIPT_USED: 'INVOICE_USED',
 };
 const PAY_SHARED: Record<string, string> = {
   PERSON_EXCLUDED: 'purchase.personExcluded',

@@ -104,3 +104,24 @@ export async function checkDedup(
   }
   return null;
 }
+
+/**
+ * The till's own "already used" screen, photographed and read back as a
+ * receipt: the reader's words then are this app's refusal, so the photo is
+ * treated as a hit on the photo. The same phrases as the LANA, cash and
+ * Lana-online tabs (each keeps its own copy).
+ */
+const OWN_DEDUP_PHRASES = [
+  'each invoice can only be funded', 'invoice number already used',
+  'invoice already used for this shop', 'this description was already used',
+  'every purchase is a new moment', 'the same photo cannot be used twice',
+  'this receipt photo has already been uploaded',
+  'vsak račun je mogoče financirati', 'številka računa je za to trgovino že uporabljena',
+  'ta opis je bil že uporabljen', 'vsak nakup je nov trenutek',
+  'ta slika računa je bila že naložena', 'iste slike ni mogoče uporabiti', 'bodi prisoten',
+];
+export function looksLikeOwnDedupError(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const lowered = String(text).toLowerCase();
+  return OWN_DEDUP_PHRASES.some(p => lowered.includes(p));
+}

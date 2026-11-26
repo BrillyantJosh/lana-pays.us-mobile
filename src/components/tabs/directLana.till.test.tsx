@@ -67,6 +67,7 @@ vi.mock('@/components/QRScanner', () => ({
     isOpen ? <button onClick={() => { onScan(globalThis.__scanValue); onClose(); }}>SCAN-NOW</button> : null,
 }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ session: globalThis.__session }) }));
+vi.mock('@/lib/compress-image', () => ({ compressImage: vi.fn(async (f: File) => ({ file: f })) }));
 // The real card reader, watched: every key it hands out is kept here, so the
 // test can see its bytes zeroed. Signing and everything else stay real.
 vi.mock('@/lib/directLanaSign', async (importOriginal) => {
@@ -208,6 +209,10 @@ beforeEach(async () => {
       headers: JSON.stringify(init.headers || {}),
       body: typeof init.body === 'string' ? init.body : '',
     });
+    // The receipt step's own routes (server/index.ts), as they answer.
+    if (url === '/api/receipt/upload') return new Response(JSON.stringify({ success: true, url: RECEIPT_URL, hash: RECEIPT_HASH }), { status: 200 });
+    if (url === '/api/receipt/analyze') return new Response(JSON.stringify({ isReceipt: true, amount: 10, currency: 'EUR', invoiceNumber: 'R-12', items: 'Jajca' }), { status: 200 });
+    if (url === '/api/brain/purchase/check-dedup') return new Response(JSON.stringify({ duplicate: false }), { status: 200 });
     // Anything but LANA neposredno is not this tab's business: no answer for it.
     if (!String(url).startsWith('/api/direct-lana/')) return new Response('{}', { status: 404 });
     if (dropNextSubmit && url === '/api/direct-lana/submit') {
@@ -228,24 +233,34 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   // Whatever the test did: the card's WIF and key never left the tab, and the
-  // till asked nothing but LANA neposredno.
+  // till asked nothing but LANA neposredno and, for the receipt, its own routes.
   const keyHex = bytesToHex(CARD);
   for (const r of requests) {
     for (const part of [r.url, r.headers, r.body]) {
       expect(part).not.toContain(CARD_WIF);
       expect(part).not.toContain(keyHex);
     }
-    expect(r.url.startsWith('/api/direct-lana/'), r.url).toBe(true);
+    expect(r.url.startsWith('/api/direct-lana/') || RECEIPT_ROUTES.includes(r.url), r.url).toBe(true);
   }
 });
+
+const RECEIPT_URL = 'https://files.example/till-r.jpg';
+const RECEIPT_HASH = '5c'.repeat(32);
+const RECEIPT_ROUTES = ['/api/receipt/upload', '/api/receipt/analyze', '/api/brain/purchase/check-dedup'];
 
 // ── the steps a seller takes ────────────────────────────────────────────────
 function open(pollMs = 40) {
   return render(<DirectLanaTab unit={UNIT_VIEW} pollMs={pollMs} />);
 }
 
+/** The receipt step comes first (26 Nov 2026); these sales are made without a photo ("No receipt"). */
+async function skipReceipt() {
+  fireEvent.click(await screen.findByTestId('receipt-skip'));
+}
+
 async function enterAmount(amount = '10,00', invoice = '') {
-  fireEvent.change(screen.getByTestId('direct-amount'), { target: { value: amount } });
+  if (screen.queryByTestId('receipt-step')) await skipReceipt();
+  fireEvent.change(await screen.findByTestId('direct-amount'), { target: { value: amount } });
   if (invoice) fireEvent.change(screen.getByTestId('direct-invoice'), { target: { value: invoice } });
   fireEvent.click(screen.getByTestId('direct-continue'));
   return screen.findByTestId('direct-breakdown');
@@ -647,7 +662,8 @@ describe('a new payment while one may still be mined is for another purchase onl
     expect(screen.getByTestId('direct-status-unknown')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('direct-new-sale'));
     fireEvent.click(screen.getByTestId('direct-new-sale-confirm'));
-    expect(await screen.findByTestId('direct-amount')).toBeInTheDocument();
+    // A new payment starts with its receipt.
+    expect(await screen.findByTestId('receipt-step')).toBeInTheDocument();
   });
 
   it('— after a payment that went out ("sent"), a new payment starts at once', async () => {
@@ -655,7 +671,7 @@ describe('a new payment while one may still be mined is for another purchase onl
     await confirmPayment();
     await screen.findByTestId('direct-status-sent');
     fireEvent.click(screen.getByTestId('direct-new-sale'));
-    expect(await screen.findByTestId('direct-amount')).toBeInTheDocument();
+    expect(await screen.findByTestId('receipt-step')).toBeInTheDocument();
   });
 
   it('back from the list returns to the payment being checked, not to a new sale', async () => {
@@ -691,5 +707,48 @@ describe('a replacement refused before it left points back to the payment still 
     fireEvent.click(screen.getByText('Pokaži to plačilo'));
     expect(await screen.findByTestId('direct-status-unknown')).toBeInTheDocument();
     expect(chain.broadcasts.length).toBe(1);
+  });
+});
+
+describe('the receipt photo first, as at LANA (Brilly, 26 Nov 2026)', () => {
+  it('read for the amount and the number, kept with the sale on the server; never in the card\'s record', async () => {
+    const view = open();
+    await screen.findByTestId('receipt-step');
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['bytes-of-receipt'], 'r.jpg', { type: 'image/jpeg' })] } });
+    fireEvent.click(await screen.findByTestId('receipt-continue'));
+    expect((await screen.findByTestId('direct-amount') as HTMLInputElement).value).toBe('10.00');
+    expect((screen.getByTestId('direct-invoice') as HTMLInputElement).value).toBe('R-12');
+    expect(screen.getByTestId('direct-receipt')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('direct-continue'));
+    await screen.findByTestId('direct-breakdown');
+    await scanCard();
+    await screen.findByTestId('direct-confirm-text');
+    const asked = requests.filter(r => r.url === '/api/direct-lana/quote');
+    expect(JSON.parse(asked[0].body)).toMatchObject({ invoice_number: 'R-12', receipt_url: RECEIPT_URL, receipt_hash: RECEIPT_HASH });
+    await confirmPayment();
+    await screen.findByTestId('direct-status-sent');
+    const sale = rows()[0];
+    expect(sale).toMatchObject({ receipt_url: RECEIPT_URL, receipt_hash: RECEIPT_HASH, invoice_number: 'R-12' });
+    expect(String(sale.record_json)).not.toContain('till-r.jpg');
+    expect(String(sale.record_json)).not.toContain(RECEIPT_HASH);
+  });
+
+  it('a photo paid already: no Continue and no "No receipt", only a new photo', async () => {
+    const view = open();
+    await screen.findByTestId('receipt-step');
+    vi.mocked(fetch).mockImplementation((async (url: string, init: any = {}) => {
+      requests.push({ url: String(url).split('?')[0], method: init.method || 'GET', headers: JSON.stringify(init.headers || {}), body: typeof init.body === 'string' ? init.body : '' });
+      if (url === '/api/receipt/upload') return new Response(JSON.stringify({ success: true, url: RECEIPT_URL, hash: RECEIPT_HASH }), { status: 200 });
+      if (url === '/api/receipt/analyze') return new Response(JSON.stringify({ isReceipt: true, amount: 10, invoiceNumber: 'R-12', items: 'Jajca' }), { status: 200 });
+      if (url === '/api/brain/purchase/check-dedup') return new Response(JSON.stringify({ duplicate: true, by: 'receipt_image', original_created_at: '2026-11-26 10:00:00' }), { status: 200 });
+      return new Response('{}', { status: 404 });
+    }) as any);
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['bytes-of-receipt'], 'r.jpg', { type: 'image/jpeg' })] } });
+    expect(await screen.findByTestId('receipt-dedup')).toBeTruthy();
+    expect(screen.queryByTestId('receipt-continue')).toBeNull();
+    expect(screen.queryByTestId('receipt-skip')).toBeNull();
+    expect(screen.queryByTestId('direct-amount')).toBeNull();
   });
 });

@@ -30,6 +30,7 @@ import { brainPreviewHandler } from './brainPreview.js';
 import { registerSaleNumberRoutes } from './saleNumbers.js';
 import { registerDirectLanaRoutes } from './directLana.js';
 import { directLanaView, unitRow } from './lib/directLanaUnit.js';
+import { directDedupHit } from './lib/directLanaStore.js';
 import { purchaseSellerCheck, logPurchaseCheckState } from './purchaseSeller.js';
 import { keepRawBody } from './lib/nip98.js';
 import { devRelays } from './lib/devOverrides.js';
@@ -1205,9 +1206,17 @@ app.post('/api/brain/purchase/preview', purchaseLimiter, gateNames(db, purchaseN
  * Pre-flight: ask Brain whether this (unit_id, receipt_hash) or
  * (unit_id, invoice_number) is already used. Lets the mobile UI hide the
  * "Continue" button at the receipt step rather than blocking only at submit.
+ * The brain knows nothing of LANA neposredno, so this app's own direct sales
+ * of the unit are asked too (26 Nov 2026): a receipt paid directly is not paid
+ * again, in cash or in LANA, and the other way round.
  */
 app.post('/api/brain/purchase/check-dedup', purchaseLimiter, gateNames(db, purchaseNames), async (req, res) => {
+  let direct: ReturnType<typeof directDedupHit> = null;
+  try {
+    direct = directDedupHit(db, String(req.body?.unit_id || ''), { receiptHash: req.body?.receipt_hash, invoiceNumber: req.body?.invoice_number });
+  } catch { /* the brain's answer alone, as before */ }
   if (!BRAIN_API_URL) {
+    if (direct) return res.status(200).json(direct);
     return res.status(503).json({ success: false, error: 'Brain service not configured' });
   }
   try {
@@ -1220,12 +1229,13 @@ app.post('/api/brain/purchase/check-dedup', purchaseLimiter, gateNames(db, purch
       body: JSON.stringify(req.body),
     });
     const data = await response.json();
+    if (!data?.duplicate && direct) return res.status(200).json(direct);
     res.status(response.status).json(data);
   } catch (error: any) {
     console.error('[mobile] Brain dedup proxy error:', error.message);
     // Don't fail the user flow if the check itself errors — Brain will still
     // enforce dedup at submit time. Return a permissive response.
-    res.status(200).json({ duplicate: false });
+    res.status(200).json(direct || { duplicate: false });
   }
 });
 

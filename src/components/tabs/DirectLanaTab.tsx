@@ -3,6 +3,9 @@
  * customer's card straight into the owner's wallet, with the shop's margin on
  * top, not through the brain (server/directLana.ts).
  *
+ *   receipt    the receipt photo first, as at LANA (Brilly, 26 Nov 2026): read for
+ *              the amount and the number, asked whether it was paid already
+ *              (components/ReceiptStep.tsx); "No receipt" goes on without one
  *   entry      the invoice amount, and an invoice number if the seller has one
  *   breakdown  invoice, margin, total, LANA at the price, "the customer pays
  *              the network fee"; then the customer's card is scanned
@@ -20,7 +23,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, CheckCircle2, AlertCircle, Clock, ListChecks, RefreshCw, Send, Link2, Copy, Check, Share2 } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, Clock, ListChecks, RefreshCw, Send, Link2, Copy, Check, Share2, Receipt } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,6 +38,7 @@ import {
   createDirectLink, fetchDirectLinks, cancelDirectLink, markDirectLinksSeen, directLinkUrl,
 } from '@/lib/directLanaApi';
 import { RequestNoteField } from '@/components/RequestNoteField';
+import { ReceiptStep, amountFromReceipt, type ReceiptChoice } from '@/components/ReceiptStep';
 import { noteToSend } from '@/lib/requestNote';
 import { formatMoney, formatDecimal, formatLana, shortAddress } from '@/lib/directLanaFormat';
 import lanaIcon from '@/assets/lana-icon.png';
@@ -126,7 +130,7 @@ function priceOfAttempt(a: DirectAttempt): Price {
   };
 }
 
-type Step = 'entry' | 'breakdown' | 'quoting' | 'confirm' | 'sending' | 'status' | 'list' | 'linkForm' | 'linkCreated' | 'links';
+type Step = 'receipt' | 'entry' | 'breakdown' | 'quoting' | 'confirm' | 'sending' | 'status' | 'list' | 'linkForm' | 'linkCreated' | 'links';
 
 const CURRENCY_SYMBOL: Record<string, string> = { GBP: '£', USD: '$', EUR: '€' };
 
@@ -171,7 +175,9 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
   const { session } = useAuth();
   const locale = i18n.language || 'en';
 
-  const [step, setStep] = useState<Step>('entry');
+  const [step, setStep] = useState<Step>('receipt');
+  // The receipt photo of this sale (none: "No receipt"). A sale started before keeps its own on the server.
+  const [receipt, setReceipt] = useState<{ url: string; hash: string | null } | null>(null);
   const [amount, setAmount] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [price, setPrice] = useState<Price | null>(null);
@@ -280,6 +286,7 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
         currency: price.currency,
         ...(invoiceNumber.trim() ? { invoice_number: invoiceNumber.trim() } : {}),
         ...(noteToSend(note) ? { note: noteToSend(note) } : {}),
+        ...(receipt ? { receipt_url: receipt.url, ...(receipt.hash ? { receipt_hash: receipt.hash } : {}) } : {}),
       });
       if (status === 201 && data?.success && data.link) {
         setCreatedLink(data.link);
@@ -377,6 +384,8 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
         public_key: card.publicKey,
         ...(invoiceNumber.trim() ? { invoice_number: invoiceNumber.trim() } : {}),
         ...(saleId ? { sale_id: saleId } : {}),
+        // A new sale carries its receipt; a sale started before keeps its own (the server's).
+        ...(!saleId && receipt ? { receipt_url: receipt.url, ...(receipt.hash ? { receipt_hash: receipt.hash } : {}) } : {}),
       });
       if (status !== 200 || !data?.success) {
         forgetCard();
@@ -547,6 +556,16 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
     setConfirmingNew(false);
     setNote('');
     setCreatedLink(null);
+    setReceipt(null);
+    setStep('receipt');
+  };
+
+  /** The receipt step is done: its photo (or none) and what was read from it. */
+  const takeReceipt = (c: ReceiptChoice) => {
+    setReceipt(c.url ? { url: c.url, hash: c.hash } : null);
+    setAmount(amountFromReceipt(c.amount));
+    setInvoiceNumber(c.invoiceNumber.slice(0, 64));
+    setRefusal(null);
     setStep('entry');
   };
 
@@ -593,6 +612,11 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
       {refusal.pendingAttempt && (
         <Button variant="outline" className="w-full h-11 rounded-xl" onClick={() => showSale(refusal.pendingAttempt!)}>
           {t('directLana.showPending')}
+        </Button>
+      )}
+      {(refusal.code === 'RECEIPT_USED' || refusal.code === 'RECEIPT_HAS_LINK' || refusal.code === 'RECEIPT_INVALID') && !saleId && (
+        <Button data-testid="direct-new-receipt" variant="outline" className="w-full h-11 rounded-xl" onClick={newSale}>
+          {t('cash.retakePhoto')}
         </Button>
       )}
     </div>
@@ -792,11 +816,35 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
     );
   }
 
+  // The seller's lists, reachable from the first screen and from the amount.
+  const listButtons = (
+    <>
+      <button onClick={openList} className="text-sm text-muted-foreground hover:text-foreground flex items-center justify-center gap-2">
+        <ListChecks className="w-4 h-4" /> {t('directLana.showList')}
+      </button>
+      <button data-testid="direct-show-links" onClick={openLinks} className="text-sm text-muted-foreground hover:text-foreground flex items-center justify-center gap-2">
+        <Link2 className="w-4 h-4" /> {t('directLana.showLinks')}
+      </button>
+    </>
+  );
+
+  if (step === 'receipt') {
+    return <ReceiptStep header={header} currency={unit.currency} unitId={unit.unit_id} onDone={takeReceipt} footer={listButtons} />;
+  }
+
   if (step === 'entry') {
     const symbol = CURRENCY_SYMBOL[unit.currency] || unit.currency;
     return (
       <div className="flex flex-col gap-5 px-6 py-4">
         {header}
+        {receipt && (
+          <div data-testid="direct-receipt" className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/5 px-4 py-3">
+            <a href={receipt.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400 underline">
+              <Receipt className="w-4 h-4" /> {t('pay.viewReceipt')}
+            </a>
+            <button onClick={newSale} className="text-xs text-muted-foreground hover:text-foreground">{t('cash.retakePhoto')}</button>
+          </div>
+        )}
         <div className="glass-card rounded-2xl p-5 space-y-4">
           <div className="space-y-2">
             <Label className="text-sm font-medium text-foreground">{t('directLana.amountLabel', { symbol })} <span className="text-destructive">*</span></Label>
@@ -831,12 +879,7 @@ const DirectLanaTab = ({ unit, pollMs = 8000, onLinksSeen }: { unit: DirectLanaU
         >
           {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : t('directLana.continue')}
         </Button>
-        <button onClick={openList} className="text-sm text-muted-foreground hover:text-foreground flex items-center justify-center gap-2">
-          <ListChecks className="w-4 h-4" /> {t('directLana.showList')}
-        </button>
-        <button data-testid="direct-show-links" onClick={openLinks} className="text-sm text-muted-foreground hover:text-foreground flex items-center justify-center gap-2">
-          <Link2 className="w-4 h-4" /> {t('directLana.showLinks')}
-        </button>
+        {listButtons}
       </div>
     );
   }

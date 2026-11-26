@@ -84,9 +84,10 @@ import {
   linkStatusOf, linkAmounts, publicAttemptView, forCustomer, sellerLinkView, saleInFlight, linkClosedFor,
 } from './lib/directLanaLinks.js';
 import {
-  type DirectRow, getAttempt, attemptsOfSale, heldByCard, invoiceNumberTaken, insertQuote, beginValidating,
+  type DirectRow, getAttempt, attemptsOfSale, heldByCard, invoiceNumberTaken, receiptTaken, insertQuote, beginValidating,
   move, attemptView, planOf, mayStillBeMined, refuseBeforeSending, replacesOf, compactExpiredQuotes,
 } from './lib/directLanaStore.js';
+import { receiptOfBody, type DirectReceipt } from './lib/directLanaReceipt.js';
 
 /** Relays that answered OK for this event. */
 export type RelayPublisher = (event: NostrEvent, relays: string[]) => Promise<string[]>;
@@ -138,6 +139,8 @@ const WORDS: Record<string, string> = {
   AMOUNT_TOO_SMALL: 'This amount is too small to pay in LANA.',
   INVOICE_NUMBER_INVALID: 'This invoice number is not valid.',
   INVOICE_USED: 'This invoice number is already paid in this shop.',
+  RECEIPT_USED: 'This receipt is already paid in this shop.',
+  RECEIPT_INVALID: 'The receipt photo could not be read. Take it again.',
   CARD_KEY_INVALID: 'This card cannot pay.',
   REGISTRAR_UNAVAILABLE: 'The wallet register could not be checked. Try again in a few minutes.',
   PAYER_NOT_REGISTERED: 'The customer\'s card is not registered.',
@@ -178,6 +181,7 @@ const WORDS: Record<string, string> = {
   LINK_EXPIRED: 'This payment link has expired.',
   LINK_CLOSED: 'This shop cannot take this payment at the moment.',
   INVOICE_HAS_LINK: 'This invoice number already has an open payment link.',
+  RECEIPT_HAS_LINK: 'This receipt already has an open payment link.',
   TOO_MANY_TRIES: 'Too many tries for this payment link. Try again in a few minutes.',
 };
 
@@ -194,6 +198,7 @@ const codeOf = (e: unknown): string => {
 /** A dependency that did not answer is 503; a KIND 87058 decision is 403; a rule that says no is 409. */
 const statusFor = (code: string) =>
   code === 'TOO_MANY_TRIES' ? 429
+  : code === 'RECEIPT_INVALID' ? 400
   : ['REGISTRAR_UNAVAILABLE', 'CHAIN_UNAVAILABLE', 'RATE_UNAVAILABLE'].includes(code) ? 503
     : ['PERSON_EXCLUDED', 'MERCHANT_UNAVAILABLE'].includes(code) ? 403 : 409;
 
@@ -667,6 +672,8 @@ interface QuoteInput {
   invoiceNumber: string;
   /** The margin of this sale: the shop's own at the till, the link's for a payment link. */
   margin: number;
+  /** The receipt photo of a NEW sale (a sale started before keeps its own). */
+  receipt: DirectReceipt | null;
   /** undefined: a new sale; otherwise the sale this quote continues (its form is checked here). */
   saleId: unknown;
   /** The till continues only a sale it quoted before; a link's sale may have no attempt yet. */
@@ -722,6 +729,8 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
 
     // The sale: a new one, or one started before for exactly this purchase.
     let saleId = newId('dls');
+    // Its receipt: a sale started before keeps the one it was started with.
+    let receipt: DirectReceipt | null = q.receipt;
     if (q.saleId !== undefined) {
       if (typeof q.saleId !== 'string' || !/^dls_[0-9a-f]{32}$/.test(q.saleId)) return no(400, 'SALE_MISMATCH');
       const earlier = attemptsOfSale(db, q.saleId);
@@ -733,8 +742,10 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
       // A payment of this sale from another card may still be mined: not a second one beside it.
       if (earlier.some(a => mayStillBeMined(a) && a.payer_address !== card.address)) return no(409, 'SALE_PAYMENT_PENDING');
       saleId = q.saleId;
+      if (earlier.length) receipt = earlier[0].receipt_url ? { url: earlier[0].receipt_url, hash: earlier[0].receipt_hash } : null;
     }
     if (invoiceNumberTaken(db, u.unit_id, q.invoiceNumber, saleId)) return no(409, 'INVOICE_USED');
+    if (receiptTaken(db, u.unit_id, receipt?.hash, saleId)) return no(409, 'RECEIPT_USED');
 
     // The card's own payments that may still be mined. One on its way, or one of
     // another sale: the card waits. One of this sale that hangs: a replacement.
@@ -817,6 +828,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
       payer_wallet_type: payer.type,
       description: checked.description,
       replaces: held.map(h => h.id),
+      receipt,
     }, nowSec(), { sameCardOnly: linkSale });
     return {
       status: 200,
@@ -1077,7 +1089,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   });
 
   /**
-   * POST /api/direct-lana/quote { unit_id, amount, currency?, public_key, invoice_number?, sale_id? }
+   * POST /api/direct-lana/quote { unit_id, amount, currency?, public_key, invoice_number?, receipt_url?, receipt_hash?, sale_id? }
    * The plan the customer's card will sign, after every check. `public_key` is
    * the card's (never its key): the card's address is derived from it here.
    * `sale_id` continues a sale (a second quote after a refusal, or a replacement).
@@ -1102,9 +1114,11 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     if (!p?.rate) return res.status(503).json(refusal('RATE_UNAVAILABLE'));
     let cents: bigint;
     let invoiceNumber: string;
+    let receipt: DirectReceipt | null;
     try {
       cents = parseCents(body.amount);
       invoiceNumber = invoiceNumberOf(body.invoice_number);
+      receipt = receiptOfBody(body);
     } catch (e) {
       return res.status(400).json(refusal(codeOf(e)));
     }
@@ -1121,6 +1135,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     const answer = await quoteSale({
       u, sellerHex: who.hex, card, publicKey: body.public_key, p, cents, invoiceNumber,
       margin: linkOfSale ? linkOfSale.margin_percent : u.margin,
+      receipt,
       saleId: body.sale_id, saleMustExist: true,
     });
     if (answer.status === 200) res.set('Cache-Control', 'no-store');
@@ -1201,7 +1216,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   const linkView = (link: LinkRow) => sellerLinkView(link, linkPayment(db, link), attemptView);
 
   /**
-   * POST /api/direct-lana/links { unit_id, amount, currency?, invoice_number?, note? }
+   * POST /api/direct-lana/links { unit_id, amount, currency?, invoice_number?, receipt_url?, receipt_hash?, note? }
    * A payment link for one sale: the invoice amount, the shop's margin as it is
    * now, the invoice number and a note the customer sees. Only where the till
    * itself could take LANA neposredno now (the shop, a price).
@@ -1220,9 +1235,11 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     if (!p?.rate) return res.status(503).json(refusal('RATE_UNAVAILABLE'));
     let cents: bigint;
     let invoiceNumber: string;
+    let receipt: DirectReceipt | null;
     try {
       cents = parseCents(body.amount);
       invoiceNumber = invoiceNumberOf(body.invoice_number);
+      receipt = receiptOfBody(body);
     } catch (e) {
       return res.status(400).json(refusal(codeOf(e)));
     }
@@ -1238,15 +1255,21 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     if (invoiceNumber && db.prepare("SELECT 1 FROM direct_lana_links WHERE unit_id = ? AND invoice_number = ? AND status = 'open' LIMIT 1").get(u.unit_id, invoiceNumber)) {
       return res.status(409).json(refusal('INVOICE_HAS_LINK'));
     }
+    // The same for the receipt photo (26 Nov 2026).
+    if (receipt?.hash && receiptTaken(db, u.unit_id, receipt.hash, saleId)) return res.status(409).json(refusal('RECEIPT_USED'));
+    if (receipt?.hash && db.prepare("SELECT 1 FROM direct_lana_links WHERE unit_id = ? AND receipt_hash = ? AND status = 'open' LIMIT 1").get(u.unit_id, receipt.hash)) {
+      return res.status(409).json(refusal('RECEIPT_HAS_LINK'));
+    }
     const now = nowSec();
     const hours = linkExpiryHours(db);
     const id = newLinkId();
     db.prepare(`
       INSERT INTO direct_lana_links (id, token, sale_id, unit_id, seller_hex, owner_hex, unit_name, currency,
-        invoice_cents, margin_percent, invoice_number, note, status, created_at, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+        invoice_cents, margin_percent, invoice_number, receipt_url, receipt_hash, note, status, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
     `).run(id, newLinkToken(), saleId, u.unit_id, who.hex, u.owner_hex, u.name, u.currency,
-      cents.toString(), u.margin, invoiceNumber, cleanRequestNote(body.note), now, hours ? now + hours * 3600 : null);
+      cents.toString(), u.margin, invoiceNumber, receipt?.url ?? null, receipt?.hash ?? null,
+      cleanRequestNote(body.note), now, hours ? now + hours * 3600 : null);
     console.log(`[direct-lana] payment link made: unit ${u.unit_id.slice(0, 12)} ${centsText(pay)} ${u.currency}`);
     res.set('Cache-Control', 'no-store');
     return res.status(201).json({ success: true, link: linkView(linkById(db, id)!) });
@@ -1404,6 +1427,8 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
         currency: link.currency,
         ...money,
         invoice_number: link.invoice_number,
+        // The receipt the seller photographed, as the Lana-online page shows its own.
+        receipt_url: link.receipt_url ?? null,
         note: link.note,
         sale_id: link.sale_id,
         recipient: unit?.wallet ?? null,
@@ -1453,6 +1478,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     const answer = await quoteSale({
       u, sellerHex: link.seller_hex, card, publicKey: body.public_key, p,
       cents: BigInt(link.invoice_cents), invoiceNumber: link.invoice_number, margin: link.margin_percent,
+      receipt: link.receipt_url ? { url: link.receipt_url, hash: link.receipt_hash ?? null } : null,
       saleId: link.sale_id, saleMustExist: false,
     });
     res.set('Cache-Control', 'no-store');

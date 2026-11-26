@@ -49,6 +49,9 @@ export interface DirectRow {
   fee_lanoshi: string;
   invoice_number: string;
   description: string;
+  /** The sale's receipt photo (26 Nov 2026), or null: none was taken. Never in the plan or the record. */
+  receipt_url: string | null;
+  receipt_hash: string | null;
   plan_json: string;
   replaces_json: string;
   /** What a superseded attempt was before (JSON {status, reason}); null otherwise. */
@@ -111,6 +114,51 @@ export function invoiceNumberTaken(db: Database.Database, unitId: string, invoic
   return !!row;
 }
 
+/**
+ * Is this receipt photo (the hash of its bytes) already paid in this unit, or
+ * carried by another sale that may still be paid? As invoiceNumberTaken: the
+ * same receipt is never paid twice (Brilly, 26 Nov 2026), and an attempt of the
+ * same sale is the same purchase.
+ */
+export function receiptTaken(db: Database.Database, unitId: string, receiptHash: string | null | undefined, saleId: string): boolean {
+  if (!receiptHash) return false;
+  const row = db.prepare(`
+    SELECT 1 FROM direct_lana_sales
+    WHERE unit_id = ? AND receipt_hash = ? AND sale_id <> ?
+      AND (status IN ('validating','broadcasting','sent','unknown','superseded','paid') OR (status = 'refused' AND sent = 1))
+    LIMIT 1
+  `).get(unitId, receiptHash, saleId);
+  return !!row;
+}
+
+/**
+ * The till's early warning (POST /api/brain/purchase/check-dedup asks the
+ * brain, which knows nothing of direct sales): was this photo or this invoice
+ * number already paid, or may it still be paid, as LANA neposredno in this
+ * unit? The answer has the brain's shape, the earlier sale's time in UTC
+ * 'YYYY-MM-DD HH:MM:SS'. The server still refuses at the quote and the submit.
+ */
+export function directDedupHit(
+  db: Database.Database,
+  unitId: string,
+  probe: { receiptHash?: unknown; invoiceNumber?: unknown },
+): { duplicate: true; by: 'receipt_image' | 'invoice'; original_created_at: string } | null {
+  if (typeof unitId !== 'string' || !unitId) return null;
+  const used = `(status IN ('validating','broadcasting','sent','unknown','superseded','paid') OR (status = 'refused' AND sent = 1))`;
+  const when = (t: number) => new Date(t * 1000).toISOString().slice(0, 19).replace('T', ' ');
+  const hash = typeof probe.receiptHash === 'string' && /^[0-9a-f]{64}$/.test(probe.receiptHash) ? probe.receiptHash : '';
+  if (hash) {
+    const row = db.prepare(`SELECT created_at FROM direct_lana_sales WHERE unit_id = ? AND receipt_hash = ? AND ${used} ORDER BY created_at LIMIT 1`).get(unitId, hash) as { created_at: number } | undefined;
+    if (row) return { duplicate: true, by: 'receipt_image', original_created_at: when(row.created_at) };
+  }
+  const number = typeof probe.invoiceNumber === 'string' ? probe.invoiceNumber.trim() : '';
+  if (number) {
+    const row = db.prepare(`SELECT created_at FROM direct_lana_sales WHERE unit_id = ? AND invoice_number = ? AND ${used} ORDER BY created_at LIMIT 1`).get(unitId, number) as { created_at: number } | undefined;
+    if (row) return { duplicate: true, by: 'invoice', original_created_at: when(row.created_at) };
+  }
+  return null;
+}
+
 export const planOf = (row: Pick<DirectRow, 'plan_json'>): DirectLanaPlan => JSON.parse(row.plan_json) as DirectLanaPlan;
 
 export interface NewAttempt {
@@ -121,6 +169,8 @@ export interface NewAttempt {
   payer_wallet_type: string;
   description: string;
   replaces: string[];
+  /** The sale's receipt photo, or null (none was taken). */
+  receipt?: { url: string; hash: string | null } | null;
 }
 
 /**
@@ -146,14 +196,15 @@ export function insertQuote(db: Database.Database, a: NewAttempt, nowSec: number
         id, sale_id, unit_id, owner_hex, seller_hex, payer_address, payer_public_key, card_hex,
         payer_owner_hex, payer_wallet_type, recipient_wallet, recipient_hex, recipient_name,
         currency, invoice_cents, margin_percent, pay_cents, rate, rate_event_id,
-        amount_lanoshi, fee_lanoshi, invoice_number, description, plan_json, replaces_json,
+        amount_lanoshi, fee_lanoshi, invoice_number, description, receipt_url, receipt_hash, plan_json, replaces_json,
         status, sent, created_at, expires_at, status_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'quoted', 0, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'quoted', 0, ?, ?, ?)
     `).run(
       p.attempt_id, p.sale_id, p.unit_id, a.owner_hex, a.seller_hex, p.sender, p.public_key, p.card_hex,
       a.payer_owner_hex, a.payer_wallet_type, p.recipient, p.recipient_hex, p.unit_name,
       p.currency, p.invoice_cents, p.margin_percent, p.pay_cents, p.rate, p.rate_event_id,
-      p.amount, p.fee, p.invoice_number, a.description, JSON.stringify(p), JSON.stringify(a.replaces),
+      p.amount, p.fee, p.invoice_number, a.description, a.receipt?.url ?? null, a.receipt?.hash ?? null,
+      JSON.stringify(p), JSON.stringify(a.replaces),
       p.created_at, p.expires, nowSec,
     );
   })();
@@ -191,7 +242,7 @@ class NotQuoted extends Error {}
 
 /** Why a move into 'validating' could not be made. */
 export type ValidatingRefusal =
-  | 'NOT_QUOTED' | 'CARD_PAYMENT_PENDING' | 'SALE_PAYMENT_PENDING' | 'SALE_ALREADY_PAID' | 'INVOICE_USED' | 'TXID_CONFLICT';
+  | 'NOT_QUOTED' | 'CARD_PAYMENT_PENDING' | 'SALE_PAYMENT_PENDING' | 'SALE_ALREADY_PAID' | 'INVOICE_USED' | 'RECEIPT_USED' | 'TXID_CONFLICT';
 
 /** The attempts a quote replaces: each of them shares at least one coin with it. */
 export function replacesOf(row: Pick<DirectRow, 'replaces_json'>): string[] {
@@ -237,6 +288,7 @@ export function beginValidating(
         return { ok: false, why: 'SALE_ALREADY_PAID' };
       }
       if (invoiceNumberTaken(db, row.unit_id, row.invoice_number, row.sale_id)) return { ok: false, why: 'INVOICE_USED' };
+      if (receiptTaken(db, row.unit_id, row.receipt_hash, row.sale_id)) return { ok: false, why: 'RECEIPT_USED' };
       const others = db.prepare(`
         SELECT id, sale_id, payer_address, status, sent FROM direct_lana_sales
         WHERE id <> ? AND (payer_address = ? OR sale_id = ?)
@@ -364,6 +416,7 @@ export function attemptView(row: DirectRow) {
     amount_lanoshi: row.amount_lanoshi,
     fee_lanoshi: row.fee_lanoshi,
     invoice_number: row.invoice_number,
+    receipt_url: row.receipt_url ?? null,
     recipient_wallet: row.recipient_wallet,
     recipient_name: row.recipient_name,
     payer_address: row.payer_address,

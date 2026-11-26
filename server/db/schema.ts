@@ -763,6 +763,17 @@ export function ensureDirectLanaTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_dll_unit_created ON direct_lana_links(unit_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_dll_status ON direct_lana_links(status);
   `);
+  // The receipt of a direct sale or of a payment link (Brilly, 26 Nov 2026: the
+  // same procedure as LANA through the brain, a photo first): where the photo
+  // is and the hash of its bytes, as /api/receipt/upload answered. Never in the
+  // signed plan nor in the public KIND 9350 record.
+  for (const table of ['direct_lana_sales', 'direct_lana_links']) {
+    for (const column of ['receipt_url TEXT', 'receipt_hash TEXT']) {
+      try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`); } catch { /* column exists */ }
+    }
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_dls_unit_receipt ON direct_lana_sales(unit_id, receipt_hash)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_dll_unit_receipt ON direct_lana_links(unit_id, receipt_hash)');
   // LANA neposredno's switch is gone (Brilly, 26 Nov 2026): every shop without
   // a company takes it. Its old setting row would only mislead a reader.
   db.prepare("DELETE FROM app_settings WHERE key = 'direct_lana_units'").run();

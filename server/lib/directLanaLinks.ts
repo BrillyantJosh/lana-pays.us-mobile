@@ -43,6 +43,9 @@ export interface LinkRow {
   invoice_cents: string;
   margin_percent: number;
   invoice_number: string;
+  /** The receipt photo the seller took for this sale (26 Nov 2026), or null. */
+  receipt_url: string | null;
+  receipt_hash: string | null;
   note: string | null;
   status: LinkStatus;
   created_at: number;
@@ -245,6 +248,7 @@ export function sellerLinkView(link: LinkRow, payment: DirectRow | null, attempt
     currency: link.currency,
     ...linkAmounts(link),
     invoice_number: link.invoice_number,
+    receipt_url: link.receipt_url ?? null,
     note: link.note,
     status: linkStatusOf(link, payment),
     created_at: link.created_at,

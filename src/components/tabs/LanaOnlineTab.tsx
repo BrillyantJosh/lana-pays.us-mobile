@@ -30,7 +30,7 @@ import { withCallerHex, withCallerField } from '@/lib/callerIdentity';
 import { Link } from 'react-router-dom';
 import {
   Loader2, Camera, CheckCircle, CheckCircle2, ImagePlus, Globe,
-  Copy, Check, Share2, History, ChevronRight, Info,
+  Copy, Check, Share2, History, ChevronRight, Info, Receipt,
 } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { compressImage } from '@/lib/compress-image';
@@ -45,6 +45,7 @@ import { DirectLinkRequestList, linkMoney } from '@/components/DirectLinkRequest
 import { freshReceiptFields, checkDedup, canContinueAfterHit, type DedupHit } from '@/lib/receiptDedup';
 import { DuplicateNumberFix } from '@/components/DuplicateNumberFix';
 import { RequestNoteField } from '@/components/RequestNoteField';
+import { ReceiptStep, amountFromReceipt, type ReceiptChoice } from '@/components/ReceiptStep';
 import { noteToSend } from '@/lib/requestNote';
 import { createDirectLink, fetchDirectLinks, markDirectLinksSeen, directLinkUrl, directReasonKey, answerCode } from '@/lib/directLanaApi';
 import { onlineRequestRail, closedReasonKey, isDirectAmount, type DirectLanaView } from '@/lib/onlineRequestRail';
@@ -310,6 +311,8 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex, noCompany, directLan
         currency,
         ...(invoice ? { invoice_number: invoice } : {}),
         ...(noteText ? { note: noteText } : {}),
+        // The receipt photographed first, as for every request (26 Nov 2026): the customer's page shows it.
+        ...(receiptUrl ? { receipt_url: receiptUrl, ...(receiptHash ? { receipt_hash: receiptHash } : {}) } : {}),
       });
       if (status === 201 && data?.success && data.link) {
         setCreatedLink(data.link);
@@ -390,6 +393,16 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex, noCompany, directLan
       setCreateError(t('lana.networkError'));
     }
     setIsCreating(false);
+  };
+
+  /** A shop without a company: the receipt step is done (its photo, or none), on to the link's form. */
+  const takeDirectReceipt = (c: ReceiptChoice) => {
+    setReceiptUrl(c.url);
+    setReceiptHash(c.hash);
+    setAmount(amountFromReceipt(c.amount));
+    setInvoiceNumber(c.invoiceNumber.slice(0, DIRECT_INVOICE_MAX));
+    setCreateError(null);
+    setStep('entry');
   };
 
   const resetForNew = () => {
@@ -577,11 +590,22 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex, noCompany, directLan
   }
 
   if (direct && step !== 'created') {
-    // No receipt photo: a direct link carries none. Straight to the form, or
-    // to why there is none for this shop now.
+    // The receipt photo first, as for every request (Brilly, 26 Nov 2026), then
+    // the link's form; or why no link can be made for this shop now.
+    if (!closedReason && step === 'receipt') {
+      return <ReceiptStep header={directHeader} currency={currency} unitId={unitIdRef.current || ''} onDone={takeDirectReceipt} footer={<RecentBlock />} />;
+    }
     return (
       <div className="flex flex-col gap-5 px-6 py-4">
         {directHeader}
+        {!closedReason && receiptUrl && (
+          <div data-testid="online-direct-receipt" className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/5 px-4 py-3">
+            <a href={receiptUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400 underline">
+              <Receipt className="w-4 h-4" /> {t('pay.viewReceipt')}
+            </a>
+            <button onClick={resetForNew} className="text-xs text-muted-foreground hover:text-foreground">{t('cash.retakePhoto')}</button>
+          </div>
+        )}
 
         {closedReason ? (
           <div data-testid="online-direct-closed" className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-5 flex items-start gap-3">

@@ -648,3 +648,35 @@ describe('review fixes (25 Nov 2026): nobody holding the link can block it, fill
     expect(unseen.data.by_unit).toEqual({ [UNIT]: 1 });
   });
 });
+
+describe('the receipt photo of a link (Brilly, 26 Nov 2026)', () => {
+  const R = { receipt_url: 'https://files.example/link-r.jpg', receipt_hash: '9a'.repeat(32) };
+
+  it('kept with the link, shown to the seller and on the customer\'s page (never its hash); the sale paid from it carries it', async () => {
+    const link = await newLink({ ...R, invoice_number: 'R-5' });
+    expect(linkById(db, link.id)).toMatchObject({ receipt_url: R.receipt_url, receipt_hash: R.receipt_hash });
+    expect((link as any).receipt_url).toBe(R.receipt_url);
+    const page = await view(link.token);
+    expect(page.data.link.receipt_url).toBe(R.receipt_url);
+    expect(JSON.stringify(page.data)).not.toContain(R.receipt_hash);
+    // A customer's quote cannot put another photo on the sale.
+    const q = await quote(link.token, CARD, { receipt_url: 'https://evil.example/x.jpg', receipt_hash: '00'.repeat(32) });
+    expect(q.status, JSON.stringify(q.data)).toBe(200);
+    expect(getAttempt(db, q.data.attempt_id)).toMatchObject({ receipt_url: R.receipt_url, receipt_hash: R.receipt_hash });
+  });
+
+  it('one open link per photo; a photo paid already makes no link; a bad one is refused', async () => {
+    await newLink(R);
+    expect((await makeLink(R)).data.code).toBe('RECEIPT_HAS_LINK');
+    const other = { receipt_url: 'https://files.example/link-r2.jpg', receipt_hash: '7b'.repeat(32) };
+    const paidLink = await newLink(other);
+    const { r } = await pay(paidLink.token);
+    expect(r.data.status).toBe('sent');
+    expect((await makeLink(other)).data.code).toBe('RECEIPT_USED');
+    const bad = await makeLink({ receipt_url: 'ftp://files.example/x.jpg' });
+    expect(bad.status).toBe(400);
+    expect(bad.data.code).toBe('RECEIPT_INVALID');
+    // No photo: links as before.
+    expect((await makeLink()).status).toBe(201);
+  });
+});
