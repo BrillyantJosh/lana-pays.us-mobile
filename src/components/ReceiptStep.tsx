@@ -3,10 +3,12 @@
  * procedure as LANA: the receipt first, only the money goes to the shop's
  * wallet"). The same pipeline as the LANA and Lana-online tabs: a photo (camera
  * or gallery), uploaded (/api/receipt/upload answers where it is and the hash of
- * its bytes), read (/api/receipt/analyze: the amount and the invoice number),
- * and asked about (/api/brain/purchase/check-dedup, which asks the brain and
- * this app's own direct sales): a photo already paid hides "Continue", a number
- * already paid can be corrected in place. "No receipt" goes on without one.
+ * its bytes), read (/api/receipt/analyze: the amount, and what was sold), and
+ * asked about (/api/brain/purchase/check-dedup, which asks the brain and this
+ * app's own direct sales): a photo already paid hides "Continue". "No receipt"
+ * goes on without one. No invoice NUMBER is read or asked for (Brilly, 26 Nov
+ * 2026: a shop without a company has no invoices): what was sold is handed on
+ * as the sale's optional description instead.
  *
  * Used by the till's "LANA direct" (DirectLanaTab) and by Lana-online of a shop
  * without a company (LanaOnlineTab). The LANA and Lana-online steps of the
@@ -18,8 +20,7 @@ import { Loader2, Camera, CheckCircle, ImagePlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { compressImage } from '@/lib/compress-image';
 import { withCallerHex, withCallerField } from '@/lib/callerIdentity';
-import { freshReceiptFields, checkDedup, canContinueAfterHit, looksLikeOwnDedupError, type DedupHit } from '@/lib/receiptDedup';
-import { DuplicateNumberFix } from '@/components/DuplicateNumberFix';
+import { freshReceiptFields, checkDedup, looksLikeOwnDedupError, type DedupHit } from '@/lib/receiptDedup';
 
 /** What the step hands on: the photo (or none) and what was read from it. */
 export interface ReceiptChoice {
@@ -29,13 +30,11 @@ export interface ReceiptChoice {
   hash: string | null;
   /** The amount read from the receipt ('' when none). */
   amount: string;
-  /** The invoice number read from it, or the one the seller corrected ('' when none). */
-  invoiceNumber: string;
-  /** What the reader saw on it. */
+  /** What was sold, as the reader saw it on the photo (null when it saw nothing it could name). */
   description: string | null;
 }
 
-export const NO_RECEIPT: ReceiptChoice = { url: null, hash: null, amount: '', invoiceNumber: '', description: null };
+export const NO_RECEIPT: ReceiptChoice = { url: null, hash: null, amount: '', description: null };
 
 /** An amount read from a receipt, as the amount fields take it ('' when it does not read as one). */
 export const amountFromReceipt = (text: string): string => {
@@ -59,11 +58,11 @@ export function ReceiptStep({ header, currency, unitId, onDone, footer }: {
   const [analyzing, setAnalyzing] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [kind, setKind] = useState<'receipt' | 'photo'>('receipt');
+  // What the reader says (also when it could not read: "overloaded"), and what it saw that was sold.
   const [description, setDescription] = useState<string | null>(null);
+  const [sold, setSold] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
-  const [invoiceNumber, setInvoiceNumber] = useState('');
   const [hit, setHit] = useState<DedupHit | null>(null);
-  const [rechecking, setRechecking] = useState(false);
   // The photo being read now: an answer about an older photo is dropped.
   const current = useRef(0);
 
@@ -80,10 +79,10 @@ export function ReceiptStep({ header, currency, unitId, onDone, footer }: {
     setHit(null);
     setHash(null);
     setUrl(null);
-    setInvoiceNumber(fresh.invoiceNumber);
     setAmount(fresh.amount);
     setKind('receipt');
     setDescription(null);
+    setSold(null);
 
     const reader = new FileReader();
     reader.onload = (e) => { if (!stale()) setPreview(e.target?.result as string); };
@@ -92,7 +91,6 @@ export function ReceiptStep({ header, currency, unitId, onDone, footer }: {
     setUploading(true);
     const { file } = await compressImage(rawFile);
     let localHash: string | null = null;
-    let localNumber: string | null = null;
     try {
       const form = new FormData();
       form.append('receipt', file, file.name);
@@ -121,8 +119,7 @@ export function ReceiptStep({ header, currency, unitId, onDone, footer }: {
       if (analysis.isReceipt) {
         setKind('receipt');
         if (analysis.amount) setAmount(String(analysis.amount));
-        if (analysis.invoiceNumber) { setInvoiceNumber(String(analysis.invoiceNumber)); localNumber = String(analysis.invoiceNumber); }
-        if (analysis.items) setDescription(analysis.items);
+        if (analysis.items) { setDescription(analysis.items); setSold(String(analysis.items)); }
         if (looksLikeOwnDedupError(analysis.items)) setHit({ by: 'receipt_image', date: '' });
       } else if (analysis.analysisError) {
         setKind('photo');
@@ -130,25 +127,16 @@ export function ReceiptStep({ header, currency, unitId, onDone, footer }: {
       } else {
         setKind('photo');
         setDescription(analysis.description || t('cash.photoCaptured'));
+        if (analysis.description) setSold(String(analysis.description));
         if (looksLikeOwnDedupError(analysis.description)) setHit({ by: 'receipt_image', date: '' });
       }
     } catch { /* the seller can still go on and type the amount */ }
     finally { if (!stale()) setAnalyzing(false); }
 
-    // Asked early (the brain and this app's direct sales); the server refuses again at payment.
-    const found = await checkDedup(unitId, { receiptHash: localHash, invoiceNumber: localNumber }, withCallerHex({ 'Content-Type': 'application/json' }));
+    // Asked early whether this PHOTO was paid already (the brain and this app's direct sales); the server refuses
+    // again at payment. No number is asked about: there is none.
+    const found = localHash ? await checkDedup(unitId, { receiptHash: localHash }, withCallerHex({ 'Content-Type': 'application/json' })) : null;
     if (found && !stale()) setHit(found);
-  };
-
-  /** After a hit on the number: the seller typed the number printed on the receipt. Ask again for THAT one. */
-  const continueAfterNumberFix = async () => {
-    if (!hit || !canContinueAfterHit(hit, invoiceNumber)) return;
-    setRechecking(true);
-    const again = await checkDedup(unitId, { invoiceNumber }, withCallerHex({ 'Content-Type': 'application/json' }));
-    setRechecking(false);
-    if (again) { setHit(again); return; }
-    setHit(null);
-    onDone({ url, hash, amount, invoiceNumber: invoiceNumber.trim(), description });
   };
 
   const pick = (capture: boolean, big: boolean) => (
@@ -200,23 +188,13 @@ export function ReceiptStep({ header, currency, unitId, onDone, footer }: {
           <p className="text-xl text-foreground/85 mt-1.5 leading-relaxed whitespace-pre-wrap break-words">{description}</p>
         </div>
       )}
-      {/* A hit on the photo hides Continue; a hit on the number offers to correct it in place. */}
+      {/* A hit on the photo hides Continue: a new photo is needed. */}
       {hit && (
         <div data-testid="receipt-dedup" className="rounded-2xl p-4 border bg-destructive/10 border-destructive/20">
           <p className="text-xl text-destructive text-center leading-relaxed">
             {t(hit.by === 'receipt_image' ? 'cash.duplicateReceiptImage' : 'cash.duplicateInvoice', { date: hit.date })}
           </p>
         </div>
-      )}
-      {hit?.by === 'invoice' && !analyzing && (
-        <DuplicateNumberFix
-          hit={hit}
-          value={invoiceNumber}
-          onChange={setInvoiceNumber}
-          onContinue={continueAfterNumberFix}
-          checking={rechecking}
-          disabled={uploading}
-        />
       )}
       {!preview ? (
         <div className="grid grid-cols-2 gap-2">
@@ -228,7 +206,7 @@ export function ReceiptStep({ header, currency, unitId, onDone, footer }: {
           {!analyzing && !hit && (
             <Button
               data-testid="receipt-continue"
-              onClick={() => onDone({ url, hash, amount, invoiceNumber: invoiceNumber.trim(), description })}
+              onClick={() => onDone({ url, hash, amount, description: sold })}
               className="w-full h-14 rounded-2xl text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
               disabled={uploading}
             >

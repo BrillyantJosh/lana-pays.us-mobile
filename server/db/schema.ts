@@ -773,6 +773,9 @@ export function ensureDirectLanaTables(db: Database.Database): void {
     }
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_dls_unit_receipt ON direct_lana_sales(unit_id, receipt_hash)');
+  // What was sold, in the seller's words (26 Nov 2026: a shop without a company has no invoice, so the till asks
+  // for an optional description instead of an invoice number). Kept with the sale; never in the plan or the record.
+  try { db.exec('ALTER TABLE direct_lana_sales ADD COLUMN what_sold TEXT'); } catch { /* column exists */ }
   db.exec('CREATE INDEX IF NOT EXISTS idx_dll_unit_receipt ON direct_lana_links(unit_id, receipt_hash)');
   // LANA neposredno's switch is gone (Brilly, 26 Nov 2026): every shop without
   // a company takes it. Its old setting row would only mislead a reader.

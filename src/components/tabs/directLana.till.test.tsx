@@ -258,10 +258,10 @@ async function skipReceipt() {
   fireEvent.click(await screen.findByTestId('receipt-skip'));
 }
 
-async function enterAmount(amount = '10,00', invoice = '') {
+async function enterAmount(amount = '10,00', whatSold = '') {
   if (screen.queryByTestId('receipt-step')) await skipReceipt();
   fireEvent.change(await screen.findByTestId('direct-amount'), { target: { value: amount } });
-  if (invoice) fireEvent.change(screen.getByTestId('direct-invoice'), { target: { value: invoice } });
+  if (whatSold) fireEvent.change(screen.getByTestId('direct-what-sold'), { target: { value: whatSold } });
   fireEvent.click(screen.getByTestId('direct-continue'));
   return screen.findByTestId('direct-breakdown');
 }
@@ -271,9 +271,9 @@ async function scanCard() {
   fireEvent.click(await screen.findByText('SCAN-NOW'));
 }
 
-async function toConfirm(amount = '10,00', invoice = '', pollMs = 40) {
+async function toConfirm(amount = '10,00', whatSold = '', pollMs = 40) {
   open(pollMs);
-  await enterAmount(amount, invoice);
+  await enterAmount(amount, whatSold);
   await scanCard();
   return screen.findByTestId('direct-confirm-text');
 }
@@ -358,13 +358,25 @@ describe('the whole sale, in Brilly\'s words', () => {
     expect(chain.broadcasts.length).toBe(1);
   });
 
-  it('an invoice number, when entered, is in the sale and in the public record', async () => {
-    await toConfirm('10,00', 'R-17');
+  it('no invoice number is asked (a shop without a company has none); what was sold, when said, is kept with the sale and listed, never in the public record', async () => {
+    open();
+    await skipReceipt();
+    expect(await screen.findByTestId('direct-amount')).toBeTruthy();
+    expect(screen.queryByText(/Številka računa/)).toBeNull();
+    expect(screen.getByText('Kaj ste prodali? (neobvezno)')).toBeTruthy();
+    await enterAmount('10,00', 'Jajca, 10 kosov');
+    await scanCard();
+    await screen.findByTestId('direct-confirm-text');
     const quote = JSON.parse(requests.find(r => r.url === '/api/direct-lana/quote')!.body);
-    expect(quote.invoice_number).toBe('R-17');
+    expect(quote.what_sold).toBe('Jajca, 10 kosov');
+    expect(quote.invoice_number).toBeUndefined();
     await confirmPayment();
     await screen.findByTestId('direct-status-sent');
-    expect(JSON.parse(JSON.parse(rows()[0].record_json).content).description).toContain('Invoice no.: R-17');
+    expect(rows()[0]).toMatchObject({ what_sold: 'Jajca, 10 kosov', invoice_number: '' });
+    expect(String(rows()[0].record_json)).not.toContain('Jajca');
+    expect(String(rows()[0].plan_json)).not.toContain('Jajca');
+    fireEvent.click(screen.getByText('Pokaži neposredna plačila'));
+    expect(flat((await screen.findByTestId('direct-sale-row')).textContent)).toContain('Jajca, 10 kosov');
   });
 
   it('the list of the shop\'s direct sales', async () => {
@@ -718,18 +730,22 @@ describe('the receipt photo first, as at LANA (Brilly, 26 Nov 2026)', () => {
     fireEvent.change(input, { target: { files: [new File(['bytes-of-receipt'], 'r.jpg', { type: 'image/jpeg' })] } });
     fireEvent.click(await screen.findByTestId('receipt-continue'));
     expect((await screen.findByTestId('direct-amount') as HTMLInputElement).value).toBe('10.00');
-    expect((screen.getByTestId('direct-invoice') as HTMLInputElement).value).toBe('R-12');
+    // What was sold, as read from the photo; no invoice number (none is read or asked for).
+    expect((screen.getByTestId('direct-what-sold') as HTMLInputElement).value).toBe('Jajca');
     expect(screen.getByTestId('direct-receipt')).toBeTruthy();
     fireEvent.click(screen.getByTestId('direct-continue'));
     await screen.findByTestId('direct-breakdown');
     await scanCard();
     await screen.findByTestId('direct-confirm-text');
     const asked = requests.filter(r => r.url === '/api/direct-lana/quote');
-    expect(JSON.parse(asked[0].body)).toMatchObject({ invoice_number: 'R-12', receipt_url: RECEIPT_URL, receipt_hash: RECEIPT_HASH });
+    expect(JSON.parse(asked[0].body)).toMatchObject({ what_sold: 'Jajca', receipt_url: RECEIPT_URL, receipt_hash: RECEIPT_HASH });
+    expect(JSON.parse(asked[0].body).invoice_number).toBeUndefined();
+    // The photo alone is asked about, never a number.
+    expect(JSON.parse(requests.find(r => r.url === '/api/brain/purchase/check-dedup')!.body)).toEqual({ unit_id: UNIT, receipt_hash: RECEIPT_HASH });
     await confirmPayment();
     await screen.findByTestId('direct-status-sent');
     const sale = rows()[0];
-    expect(sale).toMatchObject({ receipt_url: RECEIPT_URL, receipt_hash: RECEIPT_HASH, invoice_number: 'R-12' });
+    expect(sale).toMatchObject({ receipt_url: RECEIPT_URL, receipt_hash: RECEIPT_HASH, invoice_number: '', what_sold: 'Jajca' });
     expect(String(sale.record_json)).not.toContain('till-r.jpg');
     expect(String(sale.record_json)).not.toContain(RECEIPT_HASH);
   });

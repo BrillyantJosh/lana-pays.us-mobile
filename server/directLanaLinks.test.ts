@@ -680,3 +680,15 @@ describe('the receipt photo of a link (Brilly, 26 Nov 2026)', () => {
     expect((await makeLink()).status).toBe(201);
   });
 });
+
+describe('what a link\'s sale sold (26 Nov 2026)', () => {
+  it('the link\'s note says what the customer pays for: the sale paid from it carries it', async () => {
+    const link = await newLink({ note: 'Jajca za soboto' });
+    const q = await quote(link.token);
+    expect(q.status, JSON.stringify(q.data)).toBe(200);
+    expect(getAttempt(db, q.data.attempt_id)?.what_sold).toBe('Jajca za soboto');
+    // The customer's quote cannot say otherwise.
+    const q2 = await quote(link.token, CARD, { what_sold: 'Nekaj drugega' });
+    expect(getAttempt(db, q2.data.attempt_id)?.what_sold).toBe('Jajca za soboto');
+  });
+});

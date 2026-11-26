@@ -674,6 +674,8 @@ interface QuoteInput {
   margin: number;
   /** The receipt photo of a NEW sale (a sale started before keeps its own). */
   receipt: DirectReceipt | null;
+  /** What a NEW sale sold, in the seller's words (a sale started before keeps its own). */
+  whatSold: string | null;
   /** undefined: a new sale; otherwise the sale this quote continues (its form is checked here). */
   saleId: unknown;
   /** The till continues only a sale it quoted before; a link's sale may have no attempt yet. */
@@ -729,8 +731,9 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
 
     // The sale: a new one, or one started before for exactly this purchase.
     let saleId = newId('dls');
-    // Its receipt: a sale started before keeps the one it was started with.
+    // Its receipt and its description: a sale started before keeps the ones it was started with.
     let receipt: DirectReceipt | null = q.receipt;
+    let whatSold: string | null = q.whatSold;
     if (q.saleId !== undefined) {
       if (typeof q.saleId !== 'string' || !/^dls_[0-9a-f]{32}$/.test(q.saleId)) return no(400, 'SALE_MISMATCH');
       const earlier = attemptsOfSale(db, q.saleId);
@@ -742,7 +745,10 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
       // A payment of this sale from another card may still be mined: not a second one beside it.
       if (earlier.some(a => mayStillBeMined(a) && a.payer_address !== card.address)) return no(409, 'SALE_PAYMENT_PENDING');
       saleId = q.saleId;
-      if (earlier.length) receipt = earlier[0].receipt_url ? { url: earlier[0].receipt_url, hash: earlier[0].receipt_hash } : null;
+      if (earlier.length) {
+        receipt = earlier[0].receipt_url ? { url: earlier[0].receipt_url, hash: earlier[0].receipt_hash } : null;
+        whatSold = earlier[0].what_sold ?? null;
+      }
     }
     if (invoiceNumberTaken(db, u.unit_id, q.invoiceNumber, saleId)) return no(409, 'INVOICE_USED');
     if (receiptTaken(db, u.unit_id, receipt?.hash, saleId)) return no(409, 'RECEIPT_USED');
@@ -829,6 +835,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
       description: checked.description,
       replaces: held.map(h => h.id),
       receipt,
+      whatSold,
     }, nowSec(), { sameCardOnly: linkSale });
     return {
       status: 200,
@@ -1089,7 +1096,9 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
   });
 
   /**
-   * POST /api/direct-lana/quote { unit_id, amount, currency?, public_key, invoice_number?, receipt_url?, receipt_hash?, sale_id? }
+   * POST /api/direct-lana/quote { unit_id, amount, currency?, public_key, invoice_number?, what_sold?, receipt_url?, receipt_hash?, sale_id? }
+   * `what_sold`: what was sold, in the seller's words (26 Nov 2026: a shop without a company has no invoice); kept
+   * with the sale, never in the plan or the public record.
    * The plan the customer's card will sign, after every check. `public_key` is
    * the card's (never its key): the card's address is derived from it here.
    * `sale_id` continues a sale (a second quote after a refusal, or a replacement).
@@ -1136,6 +1145,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
       u, sellerHex: who.hex, card, publicKey: body.public_key, p, cents, invoiceNumber,
       margin: linkOfSale ? linkOfSale.margin_percent : u.margin,
       receipt,
+      whatSold: cleanRequestNote(body.what_sold),
       saleId: body.sale_id, saleMustExist: true,
     });
     if (answer.status === 200) res.set('Cache-Control', 'no-store');
@@ -1479,6 +1489,8 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
       u, sellerHex: link.seller_hex, card, publicKey: body.public_key, p,
       cents: BigInt(link.invoice_cents), invoiceNumber: link.invoice_number, margin: link.margin_percent,
       receipt: link.receipt_url ? { url: link.receipt_url, hash: link.receipt_hash ?? null } : null,
+      // The link's note says what the customer pays for: the sale's description.
+      whatSold: link.note ?? null,
       saleId: link.sale_id, saleMustExist: false,
     });
     res.set('Cache-Control', 'no-store');

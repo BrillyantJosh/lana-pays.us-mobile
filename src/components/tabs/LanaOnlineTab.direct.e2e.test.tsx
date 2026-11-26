@@ -190,11 +190,10 @@ function openTab(props: { unitId: string; noCompany?: boolean; directLana?: any 
 const RECEIPT_URL = 'https://files.example/receipt-77.jpg';
 const RECEIPT_HASH = 'ab'.repeat(32);
 
-/** The form of a shop without a company, after its receipt step ("No receipt" here). */
-async function fillDirect(amount: string, invoice = '', note = '') {
+/** The form of a shop without a company, after its receipt step ("No receipt" here): the amount and the note. */
+async function fillDirect(amount: string, note = '') {
   if (screen.queryByTestId('receipt-step')) fireEvent.click(screen.getByTestId('receipt-skip'));
   fireEvent.change(await screen.findByTestId('online-direct-amount'), { target: { value: amount } });
-  if (invoice) fireEvent.change(screen.getByTestId('online-direct-invoice'), { target: { value: invoice } });
   if (note) fireEvent.change(screen.getByLabelText(/Note/), { target: { value: note } });
   fireEvent.click(screen.getByTestId('online-direct-create'));
 }
@@ -205,7 +204,12 @@ describe('a shop without a company: LANA neposredno, no switch (Brilly, 26 Nov 2
     // The receipt comes first, as for every request (26 Nov 2026); "No receipt" goes on to the form.
     expect(await screen.findByTestId('receipt-step')).toBeTruthy();
     expect(screen.getByText(i18n.t('cash.takePhotoLabel'))).toBeTruthy();
-    await fillDirect('12,50', 'R-7', 'Jajca za soboto');
+    // No invoice number is asked (a shop without a company has none): the note says what it is for.
+    expect(await screen.findByTestId('receipt-skip')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('receipt-skip'));
+    await screen.findByTestId('online-direct-amount');
+    expect(screen.queryByTestId('online-direct-invoice')).toBeNull();
+    await fillDirect('12,50', 'Jajca za soboto');
 
     const url = flat((await screen.findByTestId('online-direct-url')).textContent);
     const token = /\/pay-direct\/([A-Za-z0-9_-]{32})$/.exec(url)?.[1];
@@ -218,14 +222,14 @@ describe('a shop without a company: LANA neposredno, no switch (Brilly, 26 Nov 2
     // The till's own link call, signed, with the form's fields; nothing of the brain's rail.
     const made = sent('/api/direct-lana/links');
     expect(made.length).toBe(1);
-    expect(JSON.parse(made[0].body)).toEqual({ unit_id: NO_COMPANY, amount: '12.50', currency: 'EUR', invoice_number: 'R-7', note: 'Jajca za soboto' });
+    expect(JSON.parse(made[0].body)).toEqual({ unit_id: NO_COMPANY, amount: '12.50', currency: 'EUR', note: 'Jajca za soboto' });
     expect(sent('/api/payment-requests')).toEqual([]);
     expect(requests.some(r => r.url.startsWith('/api/receipt') || r.url.startsWith('/api/brain'))).toBe(false);
 
     // Stored as the till's link: one sale, the invoice, the shop's margin, the note.
     const rows = linkRows();
     expect(rows.length).toBe(1);
-    expect(rows[0]).toMatchObject({ token, unit_id: NO_COMPANY, seller_hex: OWNER_HEX, owner_hex: OWNER_HEX, invoice_cents: '1250', margin_percent: 10, invoice_number: 'R-7', note: 'Jajca za soboto', status: 'open', currency: 'EUR' });
+    expect(rows[0]).toMatchObject({ token, unit_id: NO_COMPANY, seller_hex: OWNER_HEX, owner_hex: OWNER_HEX, invoice_cents: '1250', margin_percent: 10, invoice_number: '', note: 'Jajca za soboto', status: 'open', currency: 'EUR' });
     expect(requestRows()).toEqual([]);
 
     // The customer's page of it: open, the total, straight into the shop's wallet.
@@ -234,7 +238,7 @@ describe('a shop without a company: LANA neposredno, no switch (Brilly, 26 Nov 2
     expect(document.body.textContent).not.toMatch(NO_BANK_WORDS);
   });
 
-  it('the invoice number is optional; the list below shows the shop\'s links, and an open one can be cancelled', async () => {
+  it('the note is optional too; the list below shows the shop\'s links, and an open one can be cancelled', async () => {
     openTab({ unitId: NO_COMPANY, noCompany: true, directLana: ON });
     await fillDirect('5');
     await screen.findByTestId('online-direct-url');
@@ -249,18 +253,7 @@ describe('a shop without a company: LANA neposredno, no switch (Brilly, 26 Nov 2
     expect(sent(`/api/direct-lana/links/${linkRows()[0].id}/cancel`).length).toBe(1);
   });
 
-  it('a refusal of the server reads in the till\'s words, framed as the link (an invoice number already on an open link)', async () => {
-    openTab({ unitId: NO_COMPANY, noCompany: true, directLana: ON });
-    await fillDirect('5', 'R-1');
-    await screen.findByTestId('online-direct-url');
-    fireEvent.click(screen.getByText(i18n.t('lanaOnline.newRequest')));
-    await fillDirect('6', 'R-1');
-    expect(flat((await screen.findByTestId('online-direct-error')).textContent))
-      .toBe(i18n.t('directLana.linkRefused', { reason: i18n.t('directLana.reason.INVOICE_HAS_LINK') }));
-    expect(linkRows().length).toBe(1);
-  });
-
-  it('with a receipt photo: read for the amount and the number, carried by the link, shown on the customer\'s page', async () => {
+  it('with a receipt photo: read for the amount and what was sold (the note), carried by the link, shown on the customer\'s page', async () => {
     const { container } = openTab({ unitId: NO_COMPANY, noCompany: true, directLana: ON });
     await screen.findByTestId('receipt-step');
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -268,15 +261,16 @@ describe('a shop without a company: LANA neposredno, no switch (Brilly, 26 Nov 2
     fireEvent.click(await screen.findByTestId('receipt-continue'));
     // What the reader saw is in the form; the receipt is there to look at again.
     expect((await screen.findByTestId('online-direct-amount') as HTMLInputElement).value).toBe('12.50');
-    expect((screen.getByTestId('online-direct-invoice') as HTMLInputElement).value).toBe('R-77');
+    expect((screen.getByLabelText(/Note/) as HTMLTextAreaElement | HTMLInputElement).value).toBe('Jajca, 30 kosov');
+    expect(screen.queryByTestId('online-direct-invoice')).toBeNull();
     expect(screen.getByTestId('online-direct-receipt')).toBeTruthy();
-    // Asked early whether the photo or its number was paid already.
-    expect(JSON.parse(sent('/api/brain/purchase/check-dedup')[0].body)).toEqual({ unit_id: NO_COMPANY, receipt_hash: RECEIPT_HASH, invoice_number: 'R-77' });
+    // Asked early whether the photo was paid already (no number: there is none).
+    expect(JSON.parse(sent('/api/brain/purchase/check-dedup')[0].body)).toEqual({ unit_id: NO_COMPANY, receipt_hash: RECEIPT_HASH });
     fireEvent.click(screen.getByTestId('online-direct-create'));
 
     await screen.findByTestId('online-direct-url');
     expect(JSON.parse(sent('/api/direct-lana/links')[0].body)).toEqual({
-      unit_id: NO_COMPANY, amount: '12.50', currency: 'EUR', invoice_number: 'R-77', receipt_url: RECEIPT_URL, receipt_hash: RECEIPT_HASH,
+      unit_id: NO_COMPANY, amount: '12.50', currency: 'EUR', note: 'Jajca, 30 kosov', receipt_url: RECEIPT_URL, receipt_hash: RECEIPT_HASH,
     });
     expect(linkRows()[0]).toMatchObject({ receipt_url: RECEIPT_URL, receipt_hash: RECEIPT_HASH });
     const page = await (await realFetch(`${base}/api/direct-pay/${linkRows()[0].token}`)).json() as any;
@@ -288,8 +282,7 @@ describe('a shop without a company: LANA neposredno, no switch (Brilly, 26 Nov 2
     const again = (await screen.findByTestId('receipt-step')).querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(again, { target: { files: [new File(['bytes-of-receipt'], 'r.jpg', { type: 'image/jpeg' })] } });
     fireEvent.click(await screen.findByTestId('receipt-continue'));
-    fireEvent.change(await screen.findByTestId('online-direct-invoice'), { target: { value: 'R-78' } });
-    fireEvent.click(screen.getByTestId('online-direct-create'));
+    fireEvent.click(await screen.findByTestId('online-direct-create'));
     expect(flat((await screen.findByTestId('online-direct-error')).textContent))
       .toBe(i18n.t('directLana.linkRefused', { reason: i18n.t('directLana.reason.RECEIPT_HAS_LINK') }));
     expect(linkRows().length).toBe(1);
@@ -328,7 +321,7 @@ describe('a shop without a company that lacks something LANA neposredno needs', 
   it('the till still thinks it can, the server says the shop is suspended: its words, framed as the link; no link stored', async () => {
     db.prepare("UPDATE business_units SET suspension_status = 'suspended' WHERE unit_id = ?").run(NO_COMPANY);
     openTab({ unitId: NO_COMPANY, noCompany: true, directLana: ON });
-    await fillDirect('12,50', 'R-7');
+    await fillDirect('12,50');
     await waitFor(() => expect(sent('/api/direct-lana/links').length).toBe(1));
     expect(await screen.findByText(i18n.t('directLana.linkRefused', { reason: i18n.t('directLana.reason.UNIT') }))).toBeInTheDocument();
     expect(screen.queryByTestId('online-direct-closed')).toBeNull();

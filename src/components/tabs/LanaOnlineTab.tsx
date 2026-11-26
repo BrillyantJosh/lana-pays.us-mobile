@@ -55,8 +55,6 @@ import lanaIcon from '@/assets/lana-icon.png';
 /** A payment link as the seller's routes answer (server lib/directLanaLinks.ts sellerLinkView). */
 type SellerLink = DirectLink & { seen?: boolean; unit_name?: string };
 
-/** The longest invoice number a direct link takes (server lib/directLanaCore.ts MAX_INVOICE_NUMBER). */
-const DIRECT_INVOICE_MAX = 64;
 
 /** Same own-dedup-screenshot heuristic as LanaTab/CashTab. */
 const OWN_DEDUP_PHRASES = [
@@ -400,7 +398,9 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex, noCompany, directLan
     setReceiptUrl(c.url);
     setReceiptHash(c.hash);
     setAmount(amountFromReceipt(c.amount));
-    setInvoiceNumber(c.invoiceNumber.slice(0, DIRECT_INVOICE_MAX));
+    // No invoice number for a shop without a company (26 Nov 2026): what was sold goes in the note the customer sees.
+    setInvoiceNumber('');
+    setNote((c.description || '').replace(/\s+/g, ' ').trim().slice(0, 200));
     setCreateError(null);
     setStep('entry');
   };
@@ -615,18 +615,6 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex, noCompany, directLan
         ) : (
           <>
             <div className="glass-card rounded-2xl p-5 space-y-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-foreground">{t('directLana.invoiceNumberLabel')}</Label>
-                <Input
-                  data-testid="online-direct-invoice"
-                  placeholder={t('cash.invoicePlaceholder')}
-                  value={invoiceNumber}
-                  maxLength={DIRECT_INVOICE_MAX}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  className="h-12 rounded-xl bg-background border-input"
-                />
-                <p className="text-xs text-muted-foreground">{t('directLana.invoiceNumberHint')}</p>
-              </div>
               <div className="space-y-2">
                 <Label className="text-sm font-medium text-foreground">
                   {t('directLana.amountLabel', { symbol: sym })} <span className="text-destructive">*</span>

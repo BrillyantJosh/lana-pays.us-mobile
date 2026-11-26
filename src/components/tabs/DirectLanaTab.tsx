@@ -6,7 +6,9 @@
  *   receipt    the receipt photo first, as at LANA (Brilly, 26 Nov 2026): read for
  *              the amount and the number, asked whether it was paid already
  *              (components/ReceiptStep.tsx); "No receipt" goes on without one
- *   entry      the invoice amount, and an invoice number if the seller has one
+ *   entry      the invoice amount, and what was sold if the seller says it (optional;
+ *              26 Nov 2026: a shop without a company has no invoice, so no invoice
+ *              number is asked for)
  *   breakdown  invoice, margin, total, LANA at the price, "the customer pays
  *              the network fee"; then the customer's card is scanned
  *   confirm    the exact LANA, the fee and the shop; nothing can be undone
@@ -70,6 +72,8 @@ interface Price {
 
 /** One attempt as the server shows it (lib/directLanaStore.ts attemptView). */
 export interface DirectAttempt {
+  /** What was sold, in the seller's words (absent on an older server). */
+  what_sold?: string | null;
   attempt_id: string;
   sale_id: string;
   status: string;
@@ -181,7 +185,10 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
   // The receipt photo of this sale (none: "No receipt"). A sale started before keeps its own on the server.
   const [receipt, setReceipt] = useState<{ url: string; hash: string | null } | null>(null);
   const [amount, setAmount] = useState('');
+  // An invoice number only for a sale started before with one (paying it again must say the same); a new sale has none.
   const [invoiceNumber, setInvoiceNumber] = useState('');
+  // What was sold, in the seller's words: optional, read from the receipt photo when there is one.
+  const [whatSold, setWhatSold] = useState('');
   const [price, setPrice] = useState<Price | null>(null);
   const [plan, setPlan] = useState<DirectLanaPlan | null>(null);
   const [saleId, setSaleId] = useState<string | null>(null);
@@ -285,6 +292,7 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
         ...(saleId ? { sale_id: saleId } : {}),
         // A new sale carries its receipt; a sale started before keeps its own (the server's).
         ...(!saleId && receipt ? { receipt_url: receipt.url, ...(receipt.hash ? { receipt_hash: receipt.hash } : {}) } : {}),
+        ...(!saleId && whatSold.trim() ? { what_sold: whatSold.trim() } : {}),
       });
       if (status !== 200 || !data?.success) {
         forgetCard();
@@ -425,6 +433,7 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
         setSaleId(data.sale_id);
         setPrice(priceOfAttempt(data));
         setInvoiceNumber(data.invoice_number || '');
+        setWhatSold(data.what_sold || '');
         setPlan(null);
         setRefusal(null);
         setStep('status');
@@ -453,6 +462,7 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
     setAttempt(null);
     setRefusal(null);
     setConfirmingNew(false);
+    setWhatSold('');
     setReceipt(null);
     setStep('receipt');
   };
@@ -461,7 +471,8 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
   const takeReceipt = (c: ReceiptChoice) => {
     setReceipt(c.url ? { url: c.url, hash: c.hash } : null);
     setAmount(amountFromReceipt(c.amount));
-    setInvoiceNumber(c.invoiceNumber.slice(0, 64));
+    setInvoiceNumber('');
+    setWhatSold((c.description || '').replace(/\s+/g, ' ').trim().slice(0, 200));
     setRefusal(null);
     setStep('entry');
   };
@@ -575,7 +586,7 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
                     <span className="text-xs font-medium text-muted-foreground">{t(`directLana.status.${s.status}`)}</span>
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {new Date(s.created_at * 1000).toLocaleString(locale)}{s.invoice_number ? ` · ${s.invoice_number}` : ''}
+                    {new Date(s.created_at * 1000).toLocaleString(locale)}{s.what_sold ? ` · ${s.what_sold}` : ''}{s.invoice_number ? ` · ${s.invoice_number}` : ''}
                   </div>
                 </button>
               </li>
@@ -626,15 +637,15 @@ const DirectLanaTab = ({ unit, pollMs = 8000 }: { unit: DirectLanaUnit; pollMs?:
             />
           </div>
           <div className="space-y-2">
-            <Label className="text-sm font-medium text-foreground">{t('directLana.invoiceNumberLabel')}</Label>
+            <Label className="text-sm font-medium text-foreground">{t('directLana.whatSoldLabel')}</Label>
             <Input
-              data-testid="direct-invoice"
-              value={invoiceNumber}
-              maxLength={64}
-              onChange={(e) => setInvoiceNumber(e.target.value)}
+              data-testid="direct-what-sold"
+              value={whatSold}
+              maxLength={200}
+              placeholder={t('cash.whatDidYouSellPlaceholder')}
+              onChange={(e) => setWhatSold(e.target.value)}
               className="h-12 rounded-xl bg-background border-input"
             />
-            <p className="text-xs text-muted-foreground">{t('directLana.invoiceNumberHint')}</p>
           </div>
         </div>
         {refusalBox}

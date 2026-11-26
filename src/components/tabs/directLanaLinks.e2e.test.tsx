@@ -240,12 +240,11 @@ function sellerOpensLanaOnline() {
   );
 }
 
-async function sellerMakesLink(amount = '10,00', invoice = '', note = '') {
+async function sellerMakesLink(amount = '10,00', note = '') {
   const view = sellerOpensLanaOnline();
   // The receipt step first (26 Nov 2026); these links are made without a photo.
   fireEvent.click(await screen.findByTestId('receipt-skip'));
   fireEvent.change(await screen.findByTestId('online-direct-amount'), { target: { value: amount } });
-  if (invoice) fireEvent.change(screen.getByTestId('online-direct-invoice'), { target: { value: invoice } });
   if (note) fireEvent.change(screen.getByLabelText(/Opomba/), { target: { value: note } });
   fireEvent.click(screen.getByTestId('online-direct-create'));
   const url = (await screen.findByTestId('online-direct-url')).textContent || '';
@@ -270,10 +269,11 @@ async function customerEntersKey(key = CARD_WIF) {
 
 describe('a payment link, from the till to the customer\'s card to a block', () => {
   it('made at the till, paid at home, in a block: both sides see it paid', async () => {
-    const { view, token } = await sellerMakesLink('10,00', 'R-21', 'Jajca za soboto');
+    const { view, token } = await sellerMakesLink('10,00', 'Jajca za soboto');
     // The seller's request was signed and named the sale; no card, no key.
     const made = requests.find(r => r.url === '/api/direct-lana/links' && r.method === 'POST')!;
-    expect(JSON.parse(made.body)).toEqual({ unit_id: UNIT, amount: '10.00', currency: 'EUR', invoice_number: 'R-21', note: 'Jajca za soboto' });
+    // No invoice number (a shop without a company has none): the note says what it is for.
+    expect(JSON.parse(made.body)).toEqual({ unit_id: UNIT, amount: '10.00', currency: 'EUR', note: 'Jajca za soboto' });
     view.unmount();
 
     // The customer opens the link.
@@ -282,7 +282,7 @@ describe('a payment link, from the till to the customer\'s card to a block', () 
     expect(flat(screen.getByTestId('pay-direct-total').textContent)).toBe('11,00 €');
     expect(screen.getByTestId('pay-direct-note').textContent).toContain('Jajca za soboto');
     expect(flat(screen.getByTestId('pay-direct-lana').textContent)).toBe('≈ 42,96875 LANA');
-    expect(screen.getByText('Račun R-21')).toBeTruthy();
+    expect(screen.queryByText(/^Račun /)).toBeNull();
 
     await customerEntersKey();
     // The exact LANA and the fee from the server's plan, checked on this page.

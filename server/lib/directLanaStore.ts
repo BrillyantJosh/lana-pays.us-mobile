@@ -52,6 +52,8 @@ export interface DirectRow {
   /** The sale's receipt photo (26 Nov 2026), or null: none was taken. Never in the plan or the record. */
   receipt_url: string | null;
   receipt_hash: string | null;
+  /** What was sold, in the seller's words (26 Nov 2026), or null. Never in the plan or the record. */
+  what_sold: string | null;
   plan_json: string;
   replaces_json: string;
   /** What a superseded attempt was before (JSON {status, reason}); null otherwise. */
@@ -171,6 +173,8 @@ export interface NewAttempt {
   replaces: string[];
   /** The sale's receipt photo, or null (none was taken). */
   receipt?: { url: string; hash: string | null } | null;
+  /** What was sold, in the seller's words, or null. */
+  whatSold?: string | null;
 }
 
 /**
@@ -196,14 +200,14 @@ export function insertQuote(db: Database.Database, a: NewAttempt, nowSec: number
         id, sale_id, unit_id, owner_hex, seller_hex, payer_address, payer_public_key, card_hex,
         payer_owner_hex, payer_wallet_type, recipient_wallet, recipient_hex, recipient_name,
         currency, invoice_cents, margin_percent, pay_cents, rate, rate_event_id,
-        amount_lanoshi, fee_lanoshi, invoice_number, description, receipt_url, receipt_hash, plan_json, replaces_json,
+        amount_lanoshi, fee_lanoshi, invoice_number, description, receipt_url, receipt_hash, what_sold, plan_json, replaces_json,
         status, sent, created_at, expires_at, status_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'quoted', 0, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'quoted', 0, ?, ?, ?)
     `).run(
       p.attempt_id, p.sale_id, p.unit_id, a.owner_hex, a.seller_hex, p.sender, p.public_key, p.card_hex,
       a.payer_owner_hex, a.payer_wallet_type, p.recipient, p.recipient_hex, p.unit_name,
       p.currency, p.invoice_cents, p.margin_percent, p.pay_cents, p.rate, p.rate_event_id,
-      p.amount, p.fee, p.invoice_number, a.description, a.receipt?.url ?? null, a.receipt?.hash ?? null,
+      p.amount, p.fee, p.invoice_number, a.description, a.receipt?.url ?? null, a.receipt?.hash ?? null, a.whatSold ?? null,
       JSON.stringify(p), JSON.stringify(a.replaces),
       p.created_at, p.expires, nowSec,
     );
@@ -416,6 +420,7 @@ export function attemptView(row: DirectRow) {
     amount_lanoshi: row.amount_lanoshi,
     fee_lanoshi: row.fee_lanoshi,
     invoice_number: row.invoice_number,
+    what_sold: row.what_sold ?? null,
     receipt_url: row.receipt_url ?? null,
     recipient_wallet: row.recipient_wallet,
     recipient_name: row.recipient_name,

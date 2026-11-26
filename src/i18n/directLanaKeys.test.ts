@@ -84,8 +84,10 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
     // 95 of the till's LANA neposredno, 22 of its payment links (25 Nov 2026),
     // 3 of the receipt photo (26 Nov 2026: paid already, on an open link, not
     // readable); less 3 that only "LANA direct" said of links ("send a link",
-    // "show the links", "make the link"): links are $Lana-online's (26 Nov 2026).
-    expect(keys.length).toBe(117);
+    // "show the links", "make the link"): links are $Lana-online's (26 Nov 2026);
+    // the invoice number's label and hint became "what did you sell? (optional)":
+    // a shop without a company has no invoice (26 Nov 2026).
+    expect(keys.length).toBe(116);
     for (const key of keys) {
       expect(typeof strings[key], `${name} is missing ${key}`).toBe('string');
       expect(strings[key].trim().length, `${name}:${key} is empty`).toBeGreaterThan(0);

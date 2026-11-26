@@ -1275,3 +1275,32 @@ describe('the receipt photo (Brilly, 26 Nov 2026: the same procedure as LANA, th
     expect(directDedupHit(db, UNIT, { receiptHash: R.receipt_hash })).toBe(null);
   });
 });
+
+describe('what was sold (Brilly, 26 Nov 2026: a shop without a company has no invoice, so no invoice number)', () => {
+  it('kept with the sale and shown to the seller; never in the signed plan nor the public record', async () => {
+    const { plan, s, r } = await paySent({ what_sold: 'Jajca, 10 kosov' });
+    expect(r.data.status).toBe('sent');
+    expect(row(plan.attempt_id)).toMatchObject({ what_sold: 'Jajca, 10 kosov', invoice_number: '' });
+    const seen = await get(`/api/direct-lana/sales/${plan.attempt_id}`);
+    expect(seen.data.what_sold).toBe('Jajca, 10 kosov');
+    expect(JSON.stringify(plan)).not.toContain('Jajca');
+    expect(JSON.stringify(s.record)).not.toContain('Jajca');
+  });
+
+  it('cleaned as a note: one line, at most 200 characters; anything but text is nothing', async () => {
+    const a = await quote({ what_sold: '  Jajca\n\tin mleko\u202e  ' });
+    expect(row(a.data.attempt_id).what_sold).toBe('Jajca in mleko');
+    const b = await quote({ what_sold: 'x'.repeat(300) }, CARD2);
+    expect(Array.from(row(b.data.attempt_id).what_sold!).length).toBe(200);
+    const c = await quote({ what_sold: { evil: true } });
+    expect(c.status).toBe(200);
+    expect(row(c.data.attempt_id).what_sold).toBeNull();
+  });
+
+  it('a sale started before keeps what it was started with', async () => {
+    const first = await quote({ what_sold: 'Jajca' });
+    const again = await quote({ sale_id: first.data.sale_id, what_sold: 'Something else' });
+    expect(again.status, JSON.stringify(again.data)).toBe(200);
+    expect(row(again.data.attempt_id).what_sold).toBe('Jajca');
+  });
+});

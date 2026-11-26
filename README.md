@@ -151,7 +151,9 @@ Since 26 Nov 2026 there is no switch (Brilly: no switch, it works everywhere). E
 
 ### The receipt photo
 
-Since 26 Nov 2026 a direct sale starts like a sale through the brain: with the receipt photo (`src/components/ReceiptStep.tsx`, at the till's "LANA direct" and at Lana-online of a shop without a company). It is uploaded (`/api/receipt/upload`), read for the amount and the invoice number (`/api/receipt/analyze`), and asked about (`/api/brain/purchase/check-dedup`, which now also asks this app's own direct sales). "No receipt" goes on without one.
+Since 26 Nov 2026 a direct sale starts like a sale through the brain: with the receipt photo (`src/components/ReceiptStep.tsx`, at the till's "LANA direct" and at Lana-online of a shop without a company). It is uploaded (`/api/receipt/upload`), read for the amount and for what was sold (`/api/receipt/analyze`), and asked about by its photo (`/api/brain/purchase/check-dedup`, which now also asks this app's own direct sales). "No receipt" goes on without one.
+
+A shop without a company has no invoices, so no invoice number is read or asked for. The till asks instead for "What did you sell? (optional)", filled in from the photo. It is sent as `what_sold`, cleaned as a note (one line, at most 200 characters), and kept on `direct_lana_sales.what_sold`, never in the plan or the public record. A link's note is its sale's `what_sold`.
 
 The till sends `receipt_url` and `receipt_hash` with a new sale's quote or with a payment link. The server keeps them on `direct_lana_sales` and `direct_lana_links`. They never go into the signed plan or the public KIND 9350 record. A sale started before keeps its own receipt, and a link's sale takes the link's. The same photo (its hash) is never paid twice in one shop: `RECEIPT_USED` at the quote and at the submit, `RECEIPT_HAS_LINK` for a second open link, and `RECEIPT_INVALID` for a receipt that does not read. The customer's page of a link shows the receipt, as the Lana-online page does.
 
