@@ -24,7 +24,7 @@ export const VAULT_STORAGE_KEY = 'lana.signer.v1';
 export type VaultProblem =
   | 'invalid_record' | 'invalid_key' | 'other_identity' | 'password_long' | 'password_weak' | 'password_mismatch'
   | 'storage_refused' | 'already_saved' | 'changed_elsewhere' | 'nothing_saved' | 'unlock_failed'
-  | 'passkey_unavailable' | 'passkey_no_prf' | 'passkey_cancelled' | 'verify_failed' | 'cancelled';
+  | 'passkey_unavailable' | 'passkey_no_prf' | 'passkey_cancelled' | 'verify_failed' | 'cancelled' | 'device_failed';
 
 export class VaultError extends Error {
   constructor(readonly code: VaultProblem) {
@@ -95,7 +95,13 @@ function readRecord(raw: string): VaultRecord {
 
 async function passwordKey(password: string, salt: Uint8Array): Promise<Uint8Array> {
   if (password.length > 1024) throw new VaultError('password_long');
-  return scryptAsync(password.normalize('NFKC'), salt, { N: 131072, r: 8, p: 1, dkLen: 32, maxmem: 256 * 1024 * 1024, asyncTick: 10 });
+  try {
+    return await scryptAsync(password.normalize('NFKC'), salt, { N: 131072, r: 8, p: 1, dkLen: 32, maxmem: 256 * 1024 * 1024, asyncTick: 10 });
+  } catch {
+    // The password is stretched with 128 MiB of memory. A phone that cannot give it right now is NOT a wrong
+    // password, and must not be told so (26. 11. 2026: an Android till said »napačno geslo«).
+    throw new VaultError('device_failed');
+  }
 }
 
 /** At least 14 characters, not only digits (the same rule as LetsBalance). */
@@ -181,6 +187,24 @@ export function passkeyAvailable(): boolean {
   return !!b.isSecureContext && !!b.PublicKeyCredential && !!b.navigator?.credentials;
 }
 
+/**
+ * Can this browser's passkeys give the PRF secret the key is encrypted with? true / false when the browser says so
+ * (PublicKeyCredential.getClientCapabilities), null when it cannot say. Some Android browsers create a passkey and
+ * then have no PRF: offering the passkey there only ends in an error, after a passkey was made for nothing.
+ */
+export async function passkeyPrfSupported(): Promise<boolean | null> {
+  if (!passkeyAvailable()) return false;
+  try {
+    const pkc = browser().PublicKeyCredential as { getClientCapabilities?: () => Promise<Record<string, boolean | undefined>> };
+    if (typeof pkc?.getClientCapabilities !== 'function') return null;
+    const caps = await pkc.getClientCapabilities();
+    const prf = caps?.['extension:prf'];
+    return typeof prf === 'boolean' ? prf : null;
+  } catch {
+    return null;
+  }
+}
+
 async function prf(credential: string, salt: string, signal?: AbortSignal): Promise<Uint8Array> {
   let result: PasskeyResult | null;
   try {
@@ -205,14 +229,19 @@ async function prf(credential: string, salt: string, signal?: AbortSignal): Prom
 // ---------------------------------------------------------------------------------------------------------------
 // the operations
 
+/** What a save wrote, and what it replaced — so a sign-in that then fails puts back exactly what was there. */
+export type SavedRecord = { raw: string; previous: string | null };
+
 /**
- * Save `wif` (already checked by the caller to be the key of `pubkey`) encrypted on this device. Returns the stored
- * record, so a caller whose sign-in then fails can take back exactly what it saved (discardSavedRecord).
+ * Save `wif` (already checked by the caller to be the key of `pubkey`) encrypted on this device. Returns what was
+ * stored and what it replaced, so a caller whose sign-in then fails can undo exactly that (discardSavedRecord).
+ * `replace`: a record of the SAME identity may be saved over — the person has just shown that identity's key, which
+ * is how a forgotten password is replaced (the same rule as LetsBalance). Another identity's record never is.
  * A passkey must be created right after the person's click: call this before any network wait.
  */
 export async function saveVault(
   wif: string, pubkey: string, method: VaultMethod, password = '', repeat?: string, signal?: AbortSignal, replace = false,
-): Promise<string> {
+): Promise<SavedRecord> {
   const original = readRaw();
   const existing = vaultInfo();
   if (original && (!existing || !replace || existing.pubkey !== pubkey)) throw new VaultError('already_saved');
@@ -259,15 +288,17 @@ export async function saveVault(
     if (readRaw() !== original) throw new VaultError('changed_elsewhere');
     const raw = JSON.stringify(record);
     writeRaw(raw);
-    return raw;
+    return { raw, previous: original };
   } finally {
     wrapping?.fill(0);
   }
 }
 
-/** Take back a record this tab has just saved — only while it is still exactly that record. */
-export function discardSavedRecord(raw: string): void {
-  if (readRaw() === raw) removeRaw();
+/** Take back a record this tab has just saved (and put back the one it replaced) — only while it is still exactly that record. */
+export function discardSavedRecord(saved: SavedRecord): void {
+  if (readRaw() !== saved.raw) return;
+  if (saved.previous) writeRaw(saved.previous);
+  else removeRaw();
 }
 
 /** Unlock the saved key (password, or the passkey's prompt). The WIF goes to the caller's memory, never to storage. */
@@ -281,7 +312,7 @@ export async function unlockVault(password = '', signal?: AbortSignal): Promise<
     const payload = await decryptRecord(r, wrapping);
     return { wif: payload.wif, pubkey: r.pubkey };
   } catch (error) {
-    if (error instanceof VaultError && (error.code === 'passkey_cancelled' || error.code === 'passkey_no_prf' || error.code === 'password_long')) throw error;
+    if (error instanceof VaultError && ['passkey_cancelled', 'passkey_no_prf', 'password_long', 'device_failed'].includes(error.code)) throw error;
     throw new VaultError('unlock_failed');
   } finally {
     wrapping?.fill(0);

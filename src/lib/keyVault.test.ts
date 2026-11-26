@@ -9,7 +9,6 @@ import {
 } from './keyVault';
 import { VAULT_IDLE_MS, forgetHeldKey, heldKeyFromVault, heldKeyHex, heldPrivateKey, holdKey, onHeldKeyChange, touchHeldKey } from './heldKey';
 
-
 /** A fresh random TEST key as a Lana WIF (0xb0, compressed), with the id this app derives from it. */
 async function generateNewWallet() {
   const key = crypto.getRandomValues(new Uint8Array(32));
@@ -24,6 +23,7 @@ async function generateNewWallet() {
   const ids = await convertWifToIds(privateKeyWIF);
   return { privateKeyWIF, nostrHexId: ids.nostrHexId, nostrPrivateKey: ids.privateKeyHex };
 }
+
 
 const PASSWORD = 'correct horse battery staple';
 let map: Map<string, string>;
@@ -95,12 +95,27 @@ describe('the encrypted key on this device', () => {
 
   it('takes back exactly what a failed sign-in had just saved', async () => {
     const w = await generateNewWallet();
-    const raw = await saveVault(w.privateKeyWIF, w.nostrHexId, 'password', PASSWORD, PASSWORD);
-    discardSavedRecord('something else');
+    const saved = await saveVault(w.privateKeyWIF, w.nostrHexId, 'password', PASSWORD, PASSWORD);
+    discardSavedRecord({ raw: 'something else', previous: null });
     expect(vaultInfo()).not.toBeNull();
-    discardSavedRecord(raw);
+    discardSavedRecord(saved);
     expect(vaultInfo()).toBeNull();
   }, 60_000);
+
+  it("a forgotten password: the same identity's key saves over it, and a failed sign-in puts the old one back", async () => {
+    const w = await generateNewWallet();
+    const other = await generateNewWallet();
+    const first = await saveVault(w.privateKeyWIF, w.nostrHexId, 'password', PASSWORD, PASSWORD);
+    const NEW = 'a brand new password, long';
+    // another identity never replaces it, even when asked to
+    expect(await code(saveVault(other.privateKeyWIF, other.nostrHexId, 'password', NEW, NEW, undefined, true))).toBe('already_saved');
+    const second = await saveVault(w.privateKeyWIF, w.nostrHexId, 'password', NEW, NEW, undefined, true);
+    expect(second.previous).toBe(first.raw);
+    expect((await unlockVault(NEW)).wif).toBe(w.privateKeyWIF);
+    expect(await code(unlockVault(PASSWORD))).toBe('unlock_failed');
+    discardSavedRecord(second);
+    expect((await unlockVault(PASSWORD)).wif).toBe(w.privateKeyWIF);
+  }, 120_000);
 
   it('asks for a real password, twice the same', () => {
     expect(() => checkNewPassword('short')).toThrow(VaultError);

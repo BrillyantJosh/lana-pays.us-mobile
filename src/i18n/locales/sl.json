@@ -920,7 +920,7 @@
   "directPay.reason.GENERIC": "plačila ni bilo mogoče pripraviti.",
   "directPay.reason.TOO_MANY_TRIES": "za to povezavo je bilo preveč poskusov. Poskusite čez nekaj minut.",
   "vault.savedTitle": "Ključ, shranjen na tej napravi",
-  "vault.unlockPasskey": "Odkleni s passkeyem",
+  "vault.unlockPasskey": "Vstopi s passkeyem",
   "vault.unlockPassword": "Odkleni",
   "vault.password": "Geslo shranjenega ključa",
   "vault.passwordPlaceholder": "Geslo shranjenega ključa",
@@ -930,8 +930,8 @@
   "vault.removeConfirm": "Odkleni in odstrani",
   "vault.cancel": "Prekliči",
   "vault.orOtherKey": "ali se prijavi s ključem",
-  "vault.saveLabel": "Shrani moj ključ šifrirano na tej napravi",
-  "vault.saveHint": "Naslednjič: odkleni s passkeyem (Face ID, Touch ID, iCloud Keychain) ali z geslom, brez kartice.",
+  "vault.saveLabel": "Zapomni si me na tej napravi (passkey)",
+  "vault.saveHint": "Naslednjič vstopiš s Face ID ali prstnim odtisom, brez kartice. Ključ je šifriran samo na tej napravi.",
   "vault.noSaveHint": "Ni shranjen: ključ ostane samo v tem zavihku, dokler ga ne zapreš ali se ne odjaviš.",
   "vault.methodPasskey": "Passkey (Face ID, Touch ID, iCloud Keychain)",
   "vault.methodPassword": "Geslo",
@@ -957,5 +957,9 @@
   "vault.error.passkey_no_prf": "Ta passkey ne more zaščititi ključa (brez PRF). Izberi geslo.",
   "vault.error.passkey_cancelled": "Passkey je bil preklican.",
   "vault.error.verify_failed": "Shranjevanja ni bilo mogoče preveriti; nič ni shranjeno.",
-  "vault.error.cancelled": "Preklicano."
+  "vault.error.cancelled": "Preklicano.",
+  "vault.forgotHint": "Ne veš gesla? Spodaj skeniraj ali vnesi svoj ključ in obkljukaj »Shrani moj ključ šifrirano na tej napravi« — shranjeni ključ se zamenja.",
+  "vault.tapToSave": "Tapni »Prijava«, da ključ shraniš s passkeyem.",
+  "vault.notSaved": "Prijava je uspela, ključ pa NI shranjen na tej napravi:",
+  "vault.error.device_failed": "Ta naprava gesla trenutno ni mogla preveriti (premalo pomnilnika). Zapri druge zavihke in poskusi znova ali se spodaj prijavi s ključem."
 }

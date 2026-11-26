@@ -701,7 +701,7 @@
   "directPay.reason.GENERIC": "nie udało się przygotować płatności.",
   "directPay.reason.TOO_MANY_TRIES": "było zbyt wiele prób dla tego linku. Spróbuj ponownie za kilka minut.",
   "vault.savedTitle": "Klucz zapisany na tym urządzeniu",
-  "vault.unlockPasskey": "Odblokuj kluczem dostępu",
+  "vault.unlockPasskey": "Zaloguj kluczem dostępu",
   "vault.unlockPassword": "Odblokuj",
   "vault.password": "Hasło zapisanego klucza",
   "vault.passwordPlaceholder": "Hasło zapisanego klucza",
@@ -711,8 +711,8 @@
   "vault.removeConfirm": "Odblokuj i usuń",
   "vault.cancel": "Anuluj",
   "vault.orOtherKey": "lub zaloguj się kluczem",
-  "vault.saveLabel": "Zapisz mój klucz zaszyfrowany na tym urządzeniu",
-  "vault.saveHint": "Następnym razem: odblokuj kluczem dostępu (Face ID, Touch ID, Pęk kluczy iCloud) lub hasłem, bez karty.",
+  "vault.saveLabel": "Zapamiętaj mnie na tym urządzeniu (klucz dostępu)",
+  "vault.saveHint": "Następnym razem zalogujesz się przez Face ID lub odcisk palca, bez karty. Klucz jest zaszyfrowany tylko na tym urządzeniu.",
   "vault.noSaveHint": "Niezapisany: klucz zostaje tylko w tej karcie, dopóki jej nie zamkniesz lub się nie wylogujesz.",
   "vault.methodPasskey": "Klucz dostępu (Face ID, Touch ID, Pęk kluczy iCloud)",
   "vault.methodPassword": "Hasło",
@@ -738,5 +738,9 @@
   "vault.error.passkey_no_prf": "Ten klucz dostępu nie może chronić klucza (brak PRF). Wybierz hasło.",
   "vault.error.passkey_cancelled": "Klucz dostępu został anulowany.",
   "vault.error.verify_failed": "Nie udało się sprawdzić zapisu; nic nie zapisano.",
-  "vault.error.cancelled": "Anulowano."
+  "vault.error.cancelled": "Anulowano.",
+  "vault.forgotHint": "Nie pamiętasz hasła? Poniżej zeskanuj lub wpisz swój klucz i zaznacz „Zapisz mój klucz zaszyfrowany na tym urządzeniu” — zapisany klucz zostanie zastąpiony.",
+  "vault.tapToSave": "Stuknij „Zaloguj”, aby zapisać klucz kluczem dostępu.",
+  "vault.notSaved": "Zalogowano, ale klucz NIE został zapisany na tym urządzeniu:",
+  "vault.error.device_failed": "To urządzenie nie mogło teraz sprawdzić hasła (za mało pamięci). Zamknij inne karty i spróbuj ponownie albo zaloguj się poniżej kluczem."
 }

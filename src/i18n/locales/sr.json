@@ -701,7 +701,7 @@
   "directPay.reason.GENERIC": "plaćanje nije bilo moguće pripremiti.",
   "directPay.reason.TOO_MANY_TRIES": "bilo je previše pokušaja za ovaj link. Pokušajte ponovo za nekoliko minuta.",
   "vault.savedTitle": "Ključ sačuvan na ovom uređaju",
-  "vault.unlockPasskey": "Otključaj passkey-jem",
+  "vault.unlockPasskey": "Prijava passkey-jem",
   "vault.unlockPassword": "Otključaj",
   "vault.password": "Lozinka sačuvanog ključa",
   "vault.passwordPlaceholder": "Lozinka sačuvanog ključa",
@@ -711,8 +711,8 @@
   "vault.removeConfirm": "Otključaj i ukloni",
   "vault.cancel": "Otkaži",
   "vault.orOtherKey": "ili se prijavi ključem",
-  "vault.saveLabel": "Sačuvaj moj ključ šifrovano na ovom uređaju",
-  "vault.saveHint": "Sledeći put: otključaj passkey-jem (Face ID, Touch ID, iCloud Keychain) ili lozinkom, bez kartice.",
+  "vault.saveLabel": "Zapamti me na ovom uređaju (passkey)",
+  "vault.saveHint": "Sledeći put ulaziš Face ID-jem ili otiskom prsta, bez kartice. Ključ je šifrovan samo na ovom uređaju.",
   "vault.noSaveHint": "Nije sačuvan: ključ ostaje samo u ovoj kartici dok je ne zatvoriš ili se ne odjaviš.",
   "vault.methodPasskey": "Passkey (Face ID, Touch ID, iCloud Keychain)",
   "vault.methodPassword": "Lozinka",
@@ -738,5 +738,9 @@
   "vault.error.passkey_no_prf": "Ovaj passkey ne može da zaštiti ključ (nema PRF). Izaberi lozinku.",
   "vault.error.passkey_cancelled": "Passkey je otkazan.",
   "vault.error.verify_failed": "Čuvanje nije bilo moguće proveriti; ništa nije sačuvano.",
-  "vault.error.cancelled": "Otkazano."
+  "vault.error.cancelled": "Otkazano.",
+  "vault.forgotHint": "Ne znaš lozinku? Dole skeniraj ili upiši svoj ključ i označi „Sačuvaj moj ključ šifrovano na ovom uređaju” — sačuvani ključ se zamenjuje.",
+  "vault.tapToSave": "Dodirni „Prijava” da sačuvaš ključ passkey-jem.",
+  "vault.notSaved": "Prijava je uspela, ali ključ NIJE sačuvan na ovom uređaju:",
+  "vault.error.device_failed": "Ovaj uređaj trenutno nije mogao da proveri lozinku (premalo memorije). Zatvori druge kartice i pokušaj ponovo ili se dole prijavi ključem."
 }

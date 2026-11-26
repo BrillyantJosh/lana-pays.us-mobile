@@ -701,7 +701,7 @@
   "directPay.reason.GENERIC": "die Zahlung konnte nicht vorbereitet werden.",
   "directPay.reason.TOO_MANY_TRIES": "es gab zu viele Versuche mit diesem Link. Versuchen Sie es in einigen Minuten erneut.",
   "vault.savedTitle": "Auf diesem Gerät gespeicherter Schlüssel",
-  "vault.unlockPasskey": "Mit Passkey entsperren",
+  "vault.unlockPasskey": "Mit Passkey anmelden",
   "vault.unlockPassword": "Entsperren",
   "vault.password": "Passwort des gespeicherten Schlüssels",
   "vault.passwordPlaceholder": "Passwort des gespeicherten Schlüssels",
@@ -711,8 +711,8 @@
   "vault.removeConfirm": "Entsperren und entfernen",
   "vault.cancel": "Abbrechen",
   "vault.orOtherKey": "oder mit einem Schlüssel anmelden",
-  "vault.saveLabel": "Meinen Schlüssel verschlüsselt auf diesem Gerät speichern",
-  "vault.saveHint": "Nächstes Mal: mit Passkey (Face ID, Touch ID, iCloud-Schlüsselbund) oder Passwort entsperren, ohne Karte.",
+  "vault.saveLabel": "Auf diesem Gerät merken (Passkey)",
+  "vault.saveHint": "Nächstes Mal meldest du dich mit Face ID oder Fingerabdruck an, ohne Karte. Der Schlüssel ist nur auf diesem Gerät verschlüsselt.",
   "vault.noSaveHint": "Nicht gespeichert: Der Schlüssel bleibt nur in diesem Tab, bis du ihn schließt oder dich abmeldest.",
   "vault.methodPasskey": "Passkey (Face ID, Touch ID, iCloud-Schlüsselbund)",
   "vault.methodPassword": "Passwort",
@@ -738,5 +738,9 @@
   "vault.error.passkey_no_prf": "Dieser Passkey kann keinen Schlüssel schützen (kein PRF). Wähle ein Passwort.",
   "vault.error.passkey_cancelled": "Der Passkey wurde abgebrochen.",
   "vault.error.verify_failed": "Das Speichern konnte nicht geprüft werden; nichts wurde gespeichert.",
-  "vault.error.cancelled": "Abgebrochen."
+  "vault.error.cancelled": "Abgebrochen.",
+  "vault.forgotHint": "Passwort vergessen? Scanne oder gib unten deinen Schlüssel ein und setze den Haken bei „Meinen Schlüssel verschlüsselt auf diesem Gerät speichern“ — der gespeicherte Schlüssel wird ersetzt.",
+  "vault.tapToSave": "Tippe auf „Anmelden“, um deinen Schlüssel mit Passkey zu speichern.",
+  "vault.notSaved": "Du bist angemeldet, aber dein Schlüssel wurde auf diesem Gerät NICHT gespeichert:",
+  "vault.error.device_failed": "Dieses Gerät konnte das Passwort gerade nicht prüfen (zu wenig Speicher). Schließe andere Tabs und versuche es erneut, oder melde dich unten mit deinem Schlüssel an."
 }

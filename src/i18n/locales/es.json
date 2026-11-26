@@ -701,7 +701,7 @@
   "directPay.reason.GENERIC": "no se pudo preparar el pago.",
   "directPay.reason.TOO_MANY_TRIES": "hubo demasiados intentos con este enlace. Inténtalo de nuevo en unos minutos.",
   "vault.savedTitle": "Clave guardada en este dispositivo",
-  "vault.unlockPasskey": "Desbloquear con passkey",
+  "vault.unlockPasskey": "Entrar con passkey",
   "vault.unlockPassword": "Desbloquear",
   "vault.password": "Contraseña de la clave guardada",
   "vault.passwordPlaceholder": "Contraseña de la clave guardada",
@@ -711,8 +711,8 @@
   "vault.removeConfirm": "Desbloquear y eliminar",
   "vault.cancel": "Cancelar",
   "vault.orOtherKey": "o inicia sesión con una clave",
-  "vault.saveLabel": "Guardar mi clave cifrada en este dispositivo",
-  "vault.saveHint": "La próxima vez: desbloquea con passkey (Face ID, Touch ID, Llavero de iCloud) o con contraseña, sin tu tarjeta.",
+  "vault.saveLabel": "Recordarme en este dispositivo (passkey)",
+  "vault.saveHint": "La próxima vez entras con Face ID o tu huella, sin tarjeta. La clave se cifra solo en este dispositivo.",
   "vault.noSaveHint": "No guardada: la clave permanece solo en esta pestaña hasta que la cierres o cierres sesión.",
   "vault.methodPasskey": "Passkey (Face ID, Touch ID, Llavero de iCloud)",
   "vault.methodPassword": "Contraseña",
@@ -738,5 +738,9 @@
   "vault.error.passkey_no_prf": "Esta passkey no puede proteger una clave (sin PRF). Elige una contraseña.",
   "vault.error.passkey_cancelled": "Se canceló la passkey.",
   "vault.error.verify_failed": "No se pudo comprobar el guardado; no se guardó nada.",
-  "vault.error.cancelled": "Cancelado."
+  "vault.error.cancelled": "Cancelado.",
+  "vault.forgotHint": "¿Olvidaste la contraseña? Abajo, escanea o escribe tu clave y marca «Guardar mi clave cifrada en este dispositivo»: la clave guardada se reemplaza.",
+  "vault.tapToSave": "Toca «Iniciar sesión» para guardar tu clave con passkey.",
+  "vault.notSaved": "Has iniciado sesión, pero tu clave NO se guardó en este dispositivo:",
+  "vault.error.device_failed": "Este dispositivo no pudo comprobar la contraseña ahora (memoria insuficiente). Cierra otras pestañas y vuelve a intentarlo, o inicia sesión abajo con tu clave."
 }

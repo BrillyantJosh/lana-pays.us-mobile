@@ -701,7 +701,7 @@
   "directPay.reason.GENERIC": "a fizetést nem sikerült előkészíteni.",
   "directPay.reason.TOO_MANY_TRIES": "túl sok próbálkozás történt ezzel a linkkel. Próbáld újra néhány perc múlva.",
   "vault.savedTitle": "Ezen az eszközön mentett kulcs",
-  "vault.unlockPasskey": "Feloldás passkey-jel",
+  "vault.unlockPasskey": "Belépés passkey-jel",
   "vault.unlockPassword": "Feloldás",
   "vault.password": "A mentett kulcs jelszava",
   "vault.passwordPlaceholder": "A mentett kulcs jelszava",
@@ -711,8 +711,8 @@
   "vault.removeConfirm": "Feloldás és eltávolítás",
   "vault.cancel": "Mégse",
   "vault.orOtherKey": "vagy jelentkezz be kulccsal",
-  "vault.saveLabel": "Kulcsom titkosított mentése ezen az eszközön",
-  "vault.saveHint": "Legközelebb: feloldás passkey-jel (Face ID, Touch ID, iCloud-kulcskarika) vagy jelszóval, kártya nélkül.",
+  "vault.saveLabel": "Emlékezz rám ezen az eszközön (passkey)",
+  "vault.saveHint": "Legközelebb Face ID-val vagy ujjlenyomattal lépsz be, kártya nélkül. A kulcs csak ezen az eszközön van, titkosítva.",
   "vault.noSaveHint": "Nincs mentve: a kulcs csak ebben a lapban marad, amíg be nem zárod vagy ki nem jelentkezel.",
   "vault.methodPasskey": "Passkey (Face ID, Touch ID, iCloud-kulcskarika)",
   "vault.methodPassword": "Jelszó",
@@ -738,5 +738,9 @@
   "vault.error.passkey_no_prf": "Ez a passkey nem tud kulcsot védeni (nincs PRF). Válassz jelszót.",
   "vault.error.passkey_cancelled": "A passkey megszakítva.",
   "vault.error.verify_failed": "A mentést nem lehetett ellenőrizni; semmi sem lett mentve.",
-  "vault.error.cancelled": "Megszakítva."
+  "vault.error.cancelled": "Megszakítva.",
+  "vault.forgotHint": "Elfelejtetted a jelszót? Lent olvasd be vagy írd be a kulcsodat, és jelöld be „Kulcsom titkosított mentése ezen az eszközön” — a mentett kulcs lecserélődik.",
+  "vault.tapToSave": "Koppints a „Bejelentkezés” gombra, hogy a kulcsodat passkey-jel mentsd.",
+  "vault.notSaved": "Bejelentkeztél, de a kulcsod NEM lett mentve ezen az eszközön:",
+  "vault.error.device_failed": "Ez az eszköz most nem tudta ellenőrizni a jelszót (kevés a memória). Zárj be más lapokat és próbáld újra, vagy jelentkezz be lent a kulcsoddal."
 }

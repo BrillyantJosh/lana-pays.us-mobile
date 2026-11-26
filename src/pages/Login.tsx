@@ -19,8 +19,8 @@ const Login = () => {
   const { t, i18n } = useTranslation();
   const { login, unlock, locked } = useAuth();
   const [vault, refreshVault] = useVaultInfo();
-  // Offered by default only while nothing is saved here yet (one saved key per device).
-  const saveKey = useSaveKeyChoice(!vault);
+  // Saving is asked for, never assumed (26. 11. 2026): a scan signs in straight away, as it always did.
+  const saveKey = useSaveKeyChoice(false);
   const explain = useVaultErrorText();
   const [scannerOpen, setScannerOpen] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -78,6 +78,19 @@ const Login = () => {
       setIsLoggingIn(false);
       refreshVault();
     }
+  };
+
+  // A passkey is only made right after a tap, and a scan is not one (Safari refuses, others ask oddly): with
+  // "passkey" ticked the scanned key goes into the field, and the cashier taps the arrow.
+  const [scanNote, setScanNote] = useState<string | null>(null);
+  const handleScanned = (data: string) => {
+    if (saveKey.choice?.method === 'passkey') {
+      setScannerOpen(false);
+      setManualWif(data);
+      setScanNote(t('vault.tapToSave'));
+      return;
+    }
+    void handleLogin(data);
   };
 
   const submitManualKey = () => {
@@ -230,6 +243,7 @@ const Login = () => {
                 <SaveKeyOptions state={saveKey} disabled={isLoggingIn} />
               </div>
               <p className="pl-security-note"><KeyRound /> {copy.secure}</p>
+              {scanNote && !error && <p className="pl-security-note">{scanNote}</p>}
               {error && <p className="pl-entry-error" role="alert">{error}</p>}
             </div>
 
@@ -255,7 +269,7 @@ const Login = () => {
       <QRScanner
         isOpen={scannerOpen}
         onClose={() => setScannerOpen(false)}
-        onScan={handleLogin}
+        onScan={handleScanned}
         title={t('login.scanTitle')}
         description={t('login.scanDescription')}
         onManualEntry={() => setScannerOpen(false)}

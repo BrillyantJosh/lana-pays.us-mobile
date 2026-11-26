@@ -920,7 +920,7 @@
   "directPay.reason.GENERIC": "the payment could not be prepared.",
   "directPay.reason.TOO_MANY_TRIES": "there were too many tries for this link. Try again in a few minutes.",
   "vault.savedTitle": "Key saved on this device",
-  "vault.unlockPasskey": "Unlock with passkey",
+  "vault.unlockPasskey": "Sign in with passkey",
   "vault.unlockPassword": "Unlock",
   "vault.password": "Password of the saved key",
   "vault.passwordPlaceholder": "Password of the saved key",
@@ -930,8 +930,8 @@
   "vault.removeConfirm": "Unlock and remove",
   "vault.cancel": "Cancel",
   "vault.orOtherKey": "or sign in with a key",
-  "vault.saveLabel": "Save my key encrypted on this device",
-  "vault.saveHint": "Next time: unlock with a passkey (Face ID, Touch ID, iCloud Keychain) or a password, without your card.",
+  "vault.saveLabel": "Remember me on this device (passkey)",
+  "vault.saveHint": "Next time you sign in with Face ID or your fingerprint, no card needed. The key is encrypted on this device only.",
   "vault.noSaveHint": "Not saved: the key stays only in this tab until you close it or sign out.",
   "vault.methodPasskey": "Passkey (Face ID, Touch ID, iCloud Keychain)",
   "vault.methodPassword": "Password",
@@ -957,5 +957,9 @@
   "vault.error.passkey_no_prf": "This passkey cannot protect a key (no PRF). Choose a password instead.",
   "vault.error.passkey_cancelled": "The passkey was cancelled.",
   "vault.error.verify_failed": "Saving could not be checked; nothing was saved.",
-  "vault.error.cancelled": "Cancelled."
+  "vault.error.cancelled": "Cancelled.",
+  "vault.forgotHint": "Forgot the password? Below, scan or type your key and tick “Save my key encrypted on this device” — the saved key is replaced.",
+  "vault.tapToSave": "Tap “Sign in” to save your key with a passkey.",
+  "vault.notSaved": "You are signed in, but your key was NOT saved on this device:",
+  "vault.error.device_failed": "This device could not check the password just now (not enough memory). Close other tabs and try again, or sign in with your key below."
 }

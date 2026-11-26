@@ -701,7 +701,7 @@
   "directPay.reason.GENERIC": "non è stato possibile preparare il pagamento.",
   "directPay.reason.TOO_MANY_TRIES": "ci sono stati troppi tentativi per questo link. Riprova tra qualche minuto.",
   "vault.savedTitle": "Chiave salvata su questo dispositivo",
-  "vault.unlockPasskey": "Sblocca con passkey",
+  "vault.unlockPasskey": "Accedi con passkey",
   "vault.unlockPassword": "Sblocca",
   "vault.password": "Password della chiave salvata",
   "vault.passwordPlaceholder": "Password della chiave salvata",
@@ -711,8 +711,8 @@
   "vault.removeConfirm": "Sblocca e rimuovi",
   "vault.cancel": "Annulla",
   "vault.orOtherKey": "oppure accedi con una chiave",
-  "vault.saveLabel": "Salva la mia chiave cifrata su questo dispositivo",
-  "vault.saveHint": "La prossima volta: sblocca con passkey (Face ID, Touch ID, Portachiavi iCloud) o con password, senza la carta.",
+  "vault.saveLabel": "Ricordami su questo dispositivo (passkey)",
+  "vault.saveHint": "La prossima volta entri con Face ID o l'impronta, senza carta. La chiave è cifrata solo su questo dispositivo.",
   "vault.noSaveHint": "Non salvata: la chiave resta solo in questa scheda finché non la chiudi o esci.",
   "vault.methodPasskey": "Passkey (Face ID, Touch ID, Portachiavi iCloud)",
   "vault.methodPassword": "Password",
@@ -738,5 +738,9 @@
   "vault.error.passkey_no_prf": "Questa passkey non può proteggere una chiave (niente PRF). Scegli una password.",
   "vault.error.passkey_cancelled": "La passkey è stata annullata.",
   "vault.error.verify_failed": "Non è stato possibile verificare il salvataggio; nulla è stato salvato.",
-  "vault.error.cancelled": "Annullato."
+  "vault.error.cancelled": "Annullato.",
+  "vault.forgotHint": "Password dimenticata? Qui sotto scansiona o digita la tua chiave e spunta «Salva la mia chiave cifrata su questo dispositivo»: la chiave salvata viene sostituita.",
+  "vault.tapToSave": "Tocca «Accedi» per salvare la chiave con passkey.",
+  "vault.notSaved": "Hai effettuato l'accesso, ma la chiave NON è stata salvata su questo dispositivo:",
+  "vault.error.device_failed": "Questo dispositivo non è riuscito a verificare la password ora (memoria insufficiente). Chiudi altre schede e riprova, oppure accedi qui sotto con la tua chiave."
 }

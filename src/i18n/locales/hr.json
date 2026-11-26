@@ -701,7 +701,7 @@
   "directPay.reason.GENERIC": "plaćanje nije bilo moguće pripremiti.",
   "directPay.reason.TOO_MANY_TRIES": "bilo je previše pokušaja za ovu poveznicu. Pokušajte ponovno za nekoliko minuta.",
   "vault.savedTitle": "Ključ spremljen na ovom uređaju",
-  "vault.unlockPasskey": "Otključaj passkeyem",
+  "vault.unlockPasskey": "Prijava passkeyem",
   "vault.unlockPassword": "Otključaj",
   "vault.password": "Lozinka spremljenog ključa",
   "vault.passwordPlaceholder": "Lozinka spremljenog ključa",
@@ -711,8 +711,8 @@
   "vault.removeConfirm": "Otključaj i ukloni",
   "vault.cancel": "Odustani",
   "vault.orOtherKey": "ili se prijavi ključem",
-  "vault.saveLabel": "Spremi moj ključ šifrirano na ovom uređaju",
-  "vault.saveHint": "Sljedeći put: otključaj passkeyem (Face ID, Touch ID, iCloud Keychain) ili lozinkom, bez kartice.",
+  "vault.saveLabel": "Zapamti me na ovom uređaju (passkey)",
+  "vault.saveHint": "Sljedeći put ulaziš Face ID-om ili otiskom prsta, bez kartice. Ključ je šifriran samo na ovom uređaju.",
   "vault.noSaveHint": "Nije spremljen: ključ ostaje samo u ovoj kartici dok je ne zatvoriš ili se ne odjaviš.",
   "vault.methodPasskey": "Passkey (Face ID, Touch ID, iCloud Keychain)",
   "vault.methodPassword": "Lozinka",
@@ -738,5 +738,9 @@
   "vault.error.passkey_no_prf": "Ovaj passkey ne može zaštititi ključ (nema PRF). Odaberi lozinku.",
   "vault.error.passkey_cancelled": "Passkey je otkazan.",
   "vault.error.verify_failed": "Spremanje nije bilo moguće provjeriti; ništa nije spremljeno.",
-  "vault.error.cancelled": "Otkazano."
+  "vault.error.cancelled": "Otkazano.",
+  "vault.forgotHint": "Ne znaš lozinku? Dolje skeniraj ili upiši svoj ključ i označi „Spremi moj ključ šifrirano na ovom uređaju” — spremljeni ključ se zamjenjuje.",
+  "vault.tapToSave": "Dodirni „Prijava” da spremiš ključ passkeyem.",
+  "vault.notSaved": "Prijava je uspjela, ali ključ NIJE spremljen na ovom uređaju:",
+  "vault.error.device_failed": "Ovaj uređaj trenutno nije mogao provjeriti lozinku (premalo memorije). Zatvori druge kartice i pokušaj ponovno ili se dolje prijavi ključem."
 }

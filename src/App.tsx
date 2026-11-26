@@ -13,14 +13,11 @@ import LanaOnlineHistory from "./pages/LanaOnlineHistory";
 import OnlinePayments from "./pages/OnlinePayments";
 import OrdersHistory from "./pages/OrdersHistory";
 import NotFound from "./pages/NotFound";
-import { LockedScreen } from "@/components/LockedScreen";
-import { useVaultInfo } from "@/components/KeyVaultPanel";
 
 const queryClient = new QueryClient();
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { session, locked, isLoading, unlock, logout } = useAuth();
-  const [vault] = useVaultInfo();
+  const { session, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -30,18 +27,8 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     );
   }
 
-  // Remembered here, key not in this tab, and saved encrypted on this device: unlock in place.
-  if (!session && locked && vault && vault.pubkey === locked.nostrHexId.toLowerCase()) {
-    return (
-      <LockedScreen
-        vault={vault}
-        label={locked.profileName || locked.profileDisplayName}
-        onUnlock={unlock}
-        onSignOut={logout}
-      />
-    );
-  }
-
+  // Without the key in this tab → the sign-in page, which offers »Sign in with passkey« when the key is remembered
+  // here (26. 11. 2026: one place to sign in, no separate unlock screen).
   if (!session) {
     return <Navigate to="/login" replace />;
   }

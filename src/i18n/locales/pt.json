@@ -701,7 +701,7 @@
   "directPay.reason.GENERIC": "não foi possível preparar o pagamento.",
   "directPay.reason.TOO_MANY_TRIES": "houve demasiadas tentativas com este link. Tente novamente dentro de alguns minutos.",
   "vault.savedTitle": "Chave guardada neste dispositivo",
-  "vault.unlockPasskey": "Desbloquear com passkey",
+  "vault.unlockPasskey": "Entrar com passkey",
   "vault.unlockPassword": "Desbloquear",
   "vault.password": "Palavra-passe da chave guardada",
   "vault.passwordPlaceholder": "Palavra-passe da chave guardada",
@@ -711,8 +711,8 @@
   "vault.removeConfirm": "Desbloquear e remover",
   "vault.cancel": "Cancelar",
   "vault.orOtherKey": "ou entre com uma chave",
-  "vault.saveLabel": "Guardar a minha chave cifrada neste dispositivo",
-  "vault.saveHint": "Da próxima vez: desbloqueie com passkey (Face ID, Touch ID, Porta-chaves iCloud) ou palavra-passe, sem o cartão.",
+  "vault.saveLabel": "Lembrar-me neste dispositivo (passkey)",
+  "vault.saveHint": "Da próxima vez entra com Face ID ou impressão digital, sem cartão. A chave fica cifrada só neste dispositivo.",
   "vault.noSaveHint": "Não guardada: a chave fica apenas neste separador até o fechar ou terminar sessão.",
   "vault.methodPasskey": "Passkey (Face ID, Touch ID, Porta-chaves iCloud)",
   "vault.methodPassword": "Palavra-passe",
@@ -738,5 +738,9 @@
   "vault.error.passkey_no_prf": "Esta passkey não consegue proteger uma chave (sem PRF). Escolha uma palavra-passe.",
   "vault.error.passkey_cancelled": "A passkey foi cancelada.",
   "vault.error.verify_failed": "Não foi possível verificar a gravação; nada foi guardado.",
-  "vault.error.cancelled": "Cancelado."
+  "vault.error.cancelled": "Cancelado.",
+  "vault.forgotHint": "Esqueceu a palavra-passe? Abaixo, leia ou escreva a sua chave e marque «Guardar a minha chave cifrada neste dispositivo» — a chave guardada é substituída.",
+  "vault.tapToSave": "Toque em «Entrar» para guardar a chave com passkey.",
+  "vault.notSaved": "Entrou, mas a sua chave NÃO foi guardada neste dispositivo:",
+  "vault.error.device_failed": "Este dispositivo não conseguiu verificar a palavra-passe agora (memória insuficiente). Feche outros separadores e tente de novo, ou entre abaixo com a sua chave."
 }
