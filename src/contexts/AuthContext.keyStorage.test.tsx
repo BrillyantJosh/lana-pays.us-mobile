@@ -1,6 +1,7 @@
 /**
  * Where the private key lives after a sign-in (Brilly, 25. 11. 2026 — the same as LetsBalance.world): in this tab's
- * memory, never in localStorage. Until that day the session kept it there in plain text for eight hours on the till; a session
+ * memory, never in localStorage; and since 26. 11. 2026 also kept ENCRYPTED on this device for the session's hours
+ * (lib/sessionKey.ts), so a reload, or the phone switching apps, does not sign the seller out. Until that day the session kept it there in plain text for eight hours on the till; a session
  * saved like that is rewritten without the key the first time this version reads it. Every key here is a fresh random
  * TEST key.
  */
@@ -26,6 +27,16 @@ vi.hoisted(() => {
 import { AuthProvider, useAuth } from './AuthContext';
 import { convertWifToIds } from '@/lib/crypto';
 import { forgetHeldKey, heldKeyHex } from '@/lib/heldKey';
+import { setSessionKeyStore, type SessionKeyRecord } from '@/lib/sessionKey';
+
+/** The browser's IndexedDB, as the kept session copy sees it (lib/sessionKey.ts); `null`: a browser without one. */
+let kept: { record?: SessionKeyRecord } | null = null;
+const useKeptStore = (on: boolean) => {
+  kept = on ? {} : null;
+  setSessionKeyStore(on
+    ? { get: async () => kept!.record, put: async (r) => { kept!.record = r; }, clear: async () => { if (kept) kept.record = undefined; } }
+    : { get: async () => { throw new Error('no IndexedDB'); }, put: async () => { throw new Error('no IndexedDB'); }, clear: async () => { throw new Error('no IndexedDB'); } });
+};
 
 const SESSION_KEY = 'lana_pays_session';
 
@@ -62,8 +73,8 @@ const Probe = () => {
 };
 const mount = () => render(<AuthProvider><Probe /></AuthProvider>);
 
-beforeEach(() => { localStorage.clear(); forgetHeldKey(); vi.stubGlobal('fetch', server); });
-afterEach(() => { vi.unstubAllGlobals(); forgetHeldKey(); });
+beforeEach(() => { localStorage.clear(); forgetHeldKey(); useKeptStore(true); vi.stubGlobal('fetch', server); });
+afterEach(() => { vi.unstubAllGlobals(); forgetHeldKey(); setSessionKeyStore(null); });
 
 describe('the private key after a sign-in', () => {
   it('is held in this tab, and the browser keeps only the public part', async () => {
@@ -80,16 +91,52 @@ describe('the private key after a sign-in', () => {
     expect(heldKeyHex()).toBe(w.nostrHexId);
   });
 
-  it('is gone after a reload: the merchant is remembered, locked', async () => {
+  it('after a reload (the phone switched apps) within the session\'s hours: still signed in, from the copy kept encrypted on this device (26 Nov 2026)', async () => {
     const w = await testWallet();
     const first = mount();
     await act(async () => { await auth.login(w.wif); });
+    expect(kept!.record?.hex).toBe(w.nostrHexId);
+    expect(kept!.record?.key.extractable).toBe(false);
     first.unmount();
     forgetHeldKey(); // a reload empties the tab's memory
 
     mount();
+    await waitFor(() => expect(screen.getByTestId('session')).toHaveTextContent(w.nostrHexId));
+    expect(auth.session?.privateKeyHex).toBe(w.privateKeyHex);
+    expect(screen.getByTestId('locked')).toHaveTextContent('none');
+    // The session holds for hours, and nothing readable of the key is in localStorage.
+    const stored = JSON.parse(localStorage.getItem(SESSION_KEY)!);
+    expect(stored.expiresAt - Date.now()).toBeGreaterThan(11 * 3_600_000);
+    for (let i = 0; i < localStorage.length; i++) expect(localStorage.getItem(localStorage.key(i)!)).not.toContain(w.privateKeyHex);
+  });
+
+  it('— a browser that cannot keep it: a reload locks, as before', async () => {
+    useKeptStore(false);
+    const w = await testWallet();
+    const first = mount();
+    await act(async () => { await auth.login(w.wif); });
+    expect(screen.getByTestId('session')).toHaveTextContent(w.nostrHexId);
+    first.unmount();
+    forgetHeldKey();
+
+    mount();
     await waitFor(() => expect(screen.getByTestId('locked')).toHaveTextContent(w.nostrHexId));
     expect(screen.getByTestId('session')).toHaveTextContent('none');
+  });
+
+  it('— past the session\'s hours: not signed in, and the kept copy is gone', async () => {
+    const w = await testWallet();
+    const first = mount();
+    await act(async () => { await auth.login(w.wif); });
+    first.unmount();
+    forgetHeldKey();
+    const stored = JSON.parse(localStorage.getItem(SESSION_KEY)!);
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ ...stored, expiresAt: Date.now() - 1 }));
+
+    mount();
+    await waitFor(() => expect(kept!.record).toBeUndefined());
+    expect(screen.getByTestId('session')).toHaveTextContent('none');
+    expect(screen.getByTestId('locked')).toHaveTextContent('none');
   });
 
   it('an old session with the key in plain text is rewritten without it at once', async () => {
@@ -107,14 +154,20 @@ describe('the private key after a sign-in', () => {
     expect(heldKeyHex()).toBe(w.nostrHexId);
   });
 
-  it('signing out takes the key out of memory too', async () => {
+  it('signing out takes the key out of memory and the kept copy off the device: a reload is not signed in', async () => {
     const w = await testWallet();
-    mount();
+    const first = mount();
     await act(async () => { await auth.login(w.wif); });
     act(() => auth.logout());
     expect(screen.getByTestId('session')).toHaveTextContent('none');
     expect(screen.getByTestId('locked')).toHaveTextContent('none');
     expect(heldKeyHex()).toBeNull();
     expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+    await waitFor(() => expect(kept!.record).toBeUndefined());
+    first.unmount();
+
+    mount();
+    await waitFor(() => expect(screen.getByTestId('session')).toHaveTextContent('none'));
+    expect(screen.getByTestId('locked')).toHaveTextContent('none');
   });
 });

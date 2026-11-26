@@ -7,6 +7,7 @@ import { ExcludedScreen } from '@/components/ExcludedScreen';
 import { holdKey, forgetHeldKey, onHeldKeyChange, heldKeyHex, heldPrivateKey } from '@/lib/heldKey';
 import { VaultError, checkNewPassword, discardSavedRecord, saveVault, unlockVault, type SavedRecord, type VaultMethod } from '@/lib/keyVault';
 import { tellKeyNotSaved } from '@/components/KeyVaultPanel';
+import { SESSION_HOURS, keepSessionKey, restoreSessionKey, dropSessionKey } from '@/lib/sessionKey';
 
 declare global {
   interface Document {
@@ -127,8 +128,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     }
     setExcluded(verdict);
-    // End the session: the door is closed, not merely covered over — and the key leaves this tab too.
+    // End the session: the door is closed, not merely covered over — and the key leaves this tab and this device too.
     forgetHeldKey();
+    void dropSessionKey();
     setSession(null);
     setLocked(null);
     try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
@@ -169,10 +171,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             writeStoredSession(parsedSession);
             const key = String((parsedSession as UserSession).privateKeyHex || '');
             try { holdKey(parsedSession.nostrHexId.toLowerCase(), key, false); } catch { return publicPart(parsedSession); }
+            void keepSessionKey(parsedSession.nostrHexId, key, parsedSession.expiresAt);
           }
           return parsedSession;
         } else {
           localStorage.removeItem(SESSION_KEY);
+          void dropSessionKey();
         }
       }
     } catch (error) {
@@ -181,24 +185,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return null;
   }, []);
 
+  /**
+   * The page came back (a reload, the phone brought the browser back, Chrome's
+   * Memory Saver): when this tab holds no key of the remembered person, the copy
+   * kept encrypted on this device for the session's hours brings it back
+   * (lib/sessionKey.ts, Brilly 26 Nov 2026). Then the session is adopted:
+   * signed in, or locked when nothing is kept.
+   */
+  const restoreAndAdopt = useCallback(async (loaded: UserSession | StoredSession) => {
+    const hex = String(loaded.nostrHexId).toLowerCase();
+    if (!('privateKeyHex' in loaded) && !heldPrivateKey(hex)) {
+      const key = await restoreSessionKey(hex);
+      if (key) {
+        try { holdKey(hex, key, false); } catch { /* not a key: stays locked */ }
+      }
+    }
+    adoptSession(loaded);
+  }, [adoptSession]);
+
   // Load session on mount
   useEffect(() => {
-    const loadedSession = loadSessionFromStorage();
-    if (loadedSession) {
-      adoptSession(loadedSession);
-    }
-    setIsLoading(false);
-  }, [loadSessionFromStorage, adoptSession]);
+    let cancelled = false;
+    void (async () => {
+      const loadedSession = loadSessionFromStorage();
+      if (loadedSession) await restoreAndAdopt(loadedSession);
+      else void dropSessionKey();
+      if (!cancelled) setIsLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [loadSessionFromStorage, restoreAndAdopt]);
 
   // Chrome Memory Saver recovery
   useEffect(() => {
     if (document.wasDiscarded) {
       const loadedSession = loadSessionFromStorage();
-      if (loadedSession) {
-        adoptSession(loadedSession);
-      }
+      if (loadedSession) void restoreAndAdopt(loadedSession);
     }
-  }, [loadSessionFromStorage, adoptSession]);
+  }, [loadSessionFromStorage, restoreAndAdopt]);
 
   // Save on background
   useEffect(() => {
@@ -254,8 +277,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearInterval(id);
   }, [enforceExclusion]);
 
-  // The held key went away by itself (lib/heldKey.ts: 15 minutes without use, page left, copy removed elsewhere):
-  // keep who it was, and lock — the till needs the key, so it waits behind the unlock screen.
+  // The held key went away (lib/heldKey.ts; on this till only by signing out or another tab's change, since every
+  // key is held for the session's hours): keep who it was, and lock — the till needs the key, so it waits for the
+  // sign-in page.
   useEffect(() => onHeldKeyChange(() => {
     const current = sessionRef.current;
     if (current && heldKeyHex() !== current.nostrHexId.toLowerCase()) {
@@ -291,8 +315,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     let signedIn = false;
     try {
-      // a key saved just now is held like an unlocked one: forgotten after 15 minutes without use
-      signedIn = await finishLogin(derivedIds, !!savedRecord);
+      signedIn = await finishLogin(derivedIds);
     } finally {
       if (savedRecord && !signedIn) discardSavedRecord(savedRecord);
     }
@@ -305,11 +328,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     opened.wif = '';
     // The record is bound to its id; a key that derives to another id is never used.
     if (derivedIds.nostrHexId !== opened.pubkey) throw new VaultError('other_identity');
-    await finishLogin(derivedIds, true);
+    await finishLogin(derivedIds);
   };
 
-  /** The sign-in itself; true when a session was set (false: refused by a commission decision). */
-  const finishLogin = async (derivedIds: Awaited<ReturnType<typeof convertWifToIds>>, fromVault: boolean): Promise<boolean> => {
+  /**
+   * The sign-in itself; true when a session was set (false: refused by a commission decision). However the key came
+   * (scanned, typed, or opened with the passkey), the till holds it for the session's hours, also across a reload
+   * (Brilly, 26 Nov 2026: not 15 minutes, and not lost when the phone switches apps).
+   */
+  const finishLogin = async (derivedIds: Awaited<ReturnType<typeof convertWifToIds>>): Promise<boolean> => {
     try {
 
       // Refuse a fresh sign-in too, so an excluded person never sees the
@@ -320,6 +347,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (standing) {
         setExcluded(standing);
         forgetHeldKey();
+        void dropSessionKey();
         setSession(null);
         setLocked(null);
         try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
@@ -367,6 +395,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (refusal) {
           setExcluded(refusal);
           forgetHeldKey();
+          void dropSessionKey();
           setSession(null);
           setLocked(null);
           try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
@@ -419,7 +448,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.warn('Failed to register user on backend:', e);
       }
 
-      const expiresAt = Date.now() + (8 * 60 * 60 * 1000); // 8 hours
+      const expiresAt = Date.now() + SESSION_HOURS * 60 * 60 * 1000;
 
       const userSession: UserSession = {
         walletId: derivedIds.walletId,
@@ -433,7 +462,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         expiresAt,
       };
 
-      holdKey(userSession.nostrHexId.toLowerCase(), userSession.privateKeyHex, fromVault);
+      holdKey(userSession.nostrHexId.toLowerCase(), userSession.privateKeyHex, false);
+      // Kept encrypted on this device for the session's hours: a reload, or the phone switching apps, does not
+      // sign the seller out (lib/sessionKey.ts). Waited for, so a phone that puts the page away right after the
+      // sign-in still finds it.
+      await keepSessionKey(userSession.nostrHexId, userSession.privateKeyHex, expiresAt);
       setSession(userSession);
       setLocked(null);
       writeStoredSession(userSession);
@@ -443,9 +476,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  /** Sign out: the key leaves this tab's memory. A copy saved encrypted on this device stays until removed there. */
+  /**
+   * Sign out: the key leaves this tab's memory and the session's copy on this device. A copy the person chose to
+   * keep with the passkey ("remember me") stays until removed there.
+   */
   const logout = () => {
     forgetHeldKey();
+    void dropSessionKey();
     setSession(null);
     setLocked(null);
     try { localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
