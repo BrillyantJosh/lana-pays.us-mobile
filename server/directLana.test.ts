@@ -207,9 +207,6 @@ function seedUnits() {
     unitEvent(COMPANY, OWNER_HEX, [['receiver_type', 'company'], ['lanapays_payout_wallet', SHOP_WALLET]]));
 }
 
-const setSwitch = (value: string) =>
-  db.prepare("INSERT INTO app_settings (key, value) VALUES ('direct_lana_units', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(value);
-
 // ── signed requests ──────────────────────────────────────────────────────────
 function auth(method: string, path: string, body: string | undefined, key: Uint8Array) {
   const tags = [['u', path], ['method', method], ['nonce', crypto.randomBytes(8).toString('hex')]];
@@ -275,7 +272,6 @@ beforeEach(() => {
   db.exec('DELETE FROM direct_lana_sales; DELETE FROM direct_lana_payees; DELETE FROM kind_38888; DELETE FROM business_units; DELETE FROM person_exclusions;');
   seedUnits();
   store38888();
-  setSwitch('*');
   chain.addresses.clear(); chain.raws.clear(); chain.mempool.clear(); chain.broadcasts.length = 0;
   chain.mode = 'accept'; chain.tipMoves = false; chain.height = 300; chain.reads = 0;
   fund(CARD_ADDRESS, [10_000_000_000n]);
@@ -320,18 +316,22 @@ describe('a shop with a company can never reach this path', () => {
   });
 });
 
-describe('the switch, OFF by default', () => {
-  it('a fresh database has it off; off refuses every shop, a list turns on only those', async () => {
+describe('no switch (Brilly, 26 Nov 2026): every shop without a company takes it', () => {
+  it('a fresh database has no switch, and the shop quotes with nothing set anywhere', async () => {
     const fresh = new Database(':memory:');
     initializeSchema(fresh);
-    expect((fresh.prepare("SELECT value FROM app_settings WHERE key = 'direct_lana_units'").get() as any).value).toBe('');
-    setSwitch('');
-    expect((await quote()).data.code).toBe('DIRECT_LANA_OFF');
-    expect(directLanaView(db, unitRow(db, UNIT), { pubkey: hexOfKey(PARAMS) })).toEqual({ enabled: false, reason: 'DIRECT_LANA_OFF' });
-    setSwitch('some-other-unit');
-    expect((await quote()).data.code).toBe('DIRECT_LANA_OFF');
-    setSwitch(`x, ${UNIT}`);
+    expect(fresh.prepare("SELECT value FROM app_settings WHERE key = 'direct_lana_units'").get()).toBeUndefined();
+    expect(db.prepare("SELECT value FROM app_settings WHERE key = 'direct_lana_units'").get()).toBeUndefined();
     expect((await quote()).status).toBe(200);
+    expect(directLanaView(db, unitRow(db, UNIT), { pubkey: hexOfKey(PARAMS) })).toEqual({ enabled: true, reason: null });
+  });
+
+  it('the old setting, left "off" in a database, turns nothing off: the next start drops it', async () => {
+    db.prepare("INSERT INTO app_settings (key, value) VALUES ('direct_lana_units', '')").run();
+    expect((await quote()).status).toBe(200);
+    expect(directLanaView(db, unitRow(db, UNIT), { pubkey: hexOfKey(PARAMS) })).toEqual({ enabled: true, reason: null });
+    initializeSchema(db);
+    expect(db.prepare("SELECT value FROM app_settings WHERE key = 'direct_lana_units'").get()).toBeUndefined();
   });
 });
 
@@ -823,9 +823,8 @@ async function hangingPayment(card = CARD) {
   return paid;
 }
 
-describe('a re-send is held to every check of a submit (review: it moved money past the switch, the shop and the price)', () => {
+describe('a re-send is held to every check of a submit (review: it moved money past the shop and the price)', () => {
   const cases: Array<[string, () => void, string]> = [
-    ['the switch turned off', () => setSwitch(''), 'DIRECT_LANA_OFF'],
     ['the shop suspended (KIND 30903)', () => db.prepare("UPDATE business_units SET suspension_status = 'suspended' WHERE unit_id = ?").run(UNIT), 'UNIT_BLOCKED'],
     ['the shop pending again', () => db.prepare("UPDATE business_units SET suspension_status = 'pending' WHERE unit_id = ?").run(UNIT), 'UNIT_BLOCKED'],
     ['the shop re-signed as a company unit', () => setUnitEvent([['receiver_type', 'company'], ['lanapays_payout_wallet', SHOP_WALLET]]), 'UNIT_NOT_DIRECT'],
@@ -1091,7 +1090,6 @@ describe('KIND 87058 at the quote and between the quote and the submit (review: 
 
 describe('the shop and the card between the quote and the submit (review: nothing pinned these)', () => {
   const cases: Array<[string, () => void, string]> = [
-    ['the switch turned off', () => setSwitch(''), 'DIRECT_LANA_OFF'],
     ['the shop re-signed as a company unit', () => setUnitEvent([['receiver_type', 'company'], ['lanapays_payout_wallet', SHOP_WALLET]]), 'UNIT_NOT_DIRECT'],
     ['the shop suspended', () => db.prepare("UPDATE business_units SET suspension_status = 'suspended' WHERE unit_id = ?").run(UNIT), 'UNIT_BLOCKED'],
     ['the shop\'s margin made unreadable', () => setUnitEvent([...OPTION_C.filter(t => t[0] !== 'margin_percent'), ['margin_percent', '25']]), 'MARGIN_INVALID'],

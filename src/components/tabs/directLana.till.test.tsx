@@ -189,7 +189,6 @@ beforeEach(async () => {
   db.exec('DELETE FROM direct_lana_sales; DELETE FROM direct_lana_payees; DELETE FROM business_units;');
   seedUnit();
   store38888();
-  db.prepare("UPDATE app_settings SET value = '*' WHERE key = 'direct_lana_units'").run();
   chain.reset();
   chain.fund(CARD_ADDRESS, [10_000_000_000n]);
   registrar.clear();

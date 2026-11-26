@@ -47,7 +47,7 @@ import { DuplicateNumberFix } from '@/components/DuplicateNumberFix';
 import { RequestNoteField } from '@/components/RequestNoteField';
 import { noteToSend } from '@/lib/requestNote';
 import { createDirectLink, fetchDirectLinks, markDirectLinksSeen, directLinkUrl, directReasonKey, answerCode } from '@/lib/directLanaApi';
-import { onlineRequestRail, closedReasonKey, isDirectAmount, DIRECT_LANA_OFF, type DirectLanaView } from '@/lib/onlineRequestRail';
+import { onlineRequestRail, closedReasonKey, isDirectAmount, type DirectLanaView } from '@/lib/onlineRequestRail';
 import type { DirectLink } from '@/components/tabs/DirectLanaTab';
 import lanaIcon from '@/assets/lana-icon.png';
 
@@ -105,14 +105,10 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex, noCompany, directLan
   // till did not yet (a switch on shop.lanapays.us reaches the till with its
   // next poll): from that answer on, this tab makes LANA neposredno links.
   const [directByServer, setDirectByServer] = useState(false);
-  // The server said no link can be made for this shop now (DIRECT_LANA_OFF):
-  // the tab says why instead of the form, until the till's view of the shop changes.
-  const [directClosed, setDirectClosed] = useState<string | null>(null);
   const rail = onlineRequestRail(noCompany === true || directByServer, noCompany === true ? directLana : undefined);
   const direct = rail.rail !== 'brain';
-  const closedReason = rail.rail === 'closed' ? rail.reason : directClosed;
+  const closedReason = rail.rail === 'closed' ? rail.reason : null;
   useEffect(() => { setDirectByServer(false); }, [unitId, noCompany]);
-  useEffect(() => { setDirectClosed(null); }, [unitId, noCompany, directLana?.enabled, directLana?.reason]);
 
   const [step, setStep] = useState<Step>('receipt');
 
@@ -322,9 +318,7 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex, noCompany, directLan
         fetchLinks();
         return;
       }
-      const code = answerCode(data) || 'GENERIC';
-      if (code === DIRECT_LANA_OFF) setDirectClosed(code);
-      else setCreateError(linkRefusedText(code));
+      setCreateError(linkRefusedText(answerCode(data) || 'GENERIC'));
     } catch {
       setCreateError(linkRefusedText('NETWORK'));
     }

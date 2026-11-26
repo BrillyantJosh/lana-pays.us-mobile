@@ -8,13 +8,13 @@
  * The "LANA neposredno" tile on the home screen (SPEC §4, phase 2).
  *
  * Only for a shop without a company (payout_account 'none') whose server
- * answer says its direct button is on (direct_lana.enabled: the switch, a
- * readable margin, a valid wallet, a LANA price; server/lib/directLanaUnit.ts).
- * Never beside the brain's LANA tiles, never for a shop with a company, not
- * greyed by Direct Fund capacity or by a Split. When it is off for a reason the
- * seller can fix, the reason is said; when the switch is simply off, nothing.
- * A switch on shop.lanapays.us or in the admin setting reaches the till with
- * the next poll, and an open direct tab is never taken away.
+ * answer says its direct button is on (direct_lana.enabled: a readable margin,
+ * a valid wallet, a LANA price; server/lib/directLanaUnit.ts; no switch since
+ * 26 Nov 2026). Never beside the brain's LANA tiles, never for a shop with a
+ * company, not greyed by Direct Fund capacity or by a Split. When it is off for
+ * a reason the seller can fix, the reason is said. A change on shop.lanapays.us
+ * reaches the till with the next poll, and an open direct tab is never taken
+ * away.
  *
  * The real Index page; every tab and the chrome around it are stubs.
  */
@@ -132,12 +132,12 @@ describe('the red number of paid payment links', () => {
     expect(badge()).toBeNull();
   });
 
-  it('a shop with a company, or one whose direct LANA is off: nothing is asked at all', async () => {
+  it('a shop with a company, or one that cannot take direct LANA now: nothing is asked at all', async () => {
     units = [companyUnit];
     render(<Index />);
     await screen.findByText('Kmetija Novak');
     await new Promise(r => setTimeout(r, 50));
     expect(unseenCalls).toBe(0);
-    units = [noCompany({ enabled: false, reason: 'DIRECT_LANA_OFF' })];
+    units = [noCompany({ enabled: false, reason: 'WALLET_INVALID' })];
   });
 });

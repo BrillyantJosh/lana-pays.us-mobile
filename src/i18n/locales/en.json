@@ -538,7 +538,6 @@
   "lanaOnline.noteOptional": "optional",
   "lanaOnline.notePlaceholder": "What is this payment for, or who is it for?",
   "lanaOnline.noteHint": "The customer also sees this note on the payment page.",
-  "lanaOnline.directOff": "LANA direct is not switched on for this shop yet, so no payment link can be made. The administrator switches it on at mobile.lanapays.us/admin. Until then the shop takes cash.",
   "home.orders": "Orders",
   "home.ordersSubtitle": "Online shop orders to ship",
   "home.foodCornerTitle": "Točka obilja orders: {{count}}",

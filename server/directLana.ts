@@ -38,7 +38,7 @@
  *
  * ORDER AT QUOTE AND AT SUBMIT, each fresh and failing closed: the seller's
  * signature; KIND 87058 for the seller, the owner, the card and the card's
- * registrar owner; the shop's settings and the switch; the verified KIND 38888
+ * registrar owner; the shop's settings (no switch since 26 Nov 2026); the verified KIND 38888
  * price; the registrar for the card (registered, not frozen, owner known, an
  * allowed type) and the shop's wallet (registered, not frozen, Main Wallet,
  * owned by the shop's owner, who signed the shop); the card's owner is not the
@@ -55,8 +55,8 @@
  * replaced only by one that spends at least one of the same coins, so at most
  * one of them can ever be mined (lib/directLanaStore.ts beginValidating).
  *
- * Behind a switch, OFF by default (lib/directLanaUnit.ts): app_settings
- * direct_lana_units = '' | '*' | unit ids.
+ * No switch (Brilly, 26 Nov 2026): every shop without a company takes it
+ * (lib/directLanaUnit.ts says which shop is one).
  */
 import type { Express, Request, Response } from 'express';
 import type Database from 'better-sqlite3';
@@ -125,7 +125,6 @@ const WORDS: Record<string, string> = {
   UNKNOWN_UNIT: 'This shop is not known here.',
   UNKNOWN_SALE: 'This payment is not known here.',
   UNIT_NOT_DIRECT: 'This shop does not take LANA directly.',
-  DIRECT_LANA_OFF: 'Direct LANA is not switched on for this shop yet.',
   UNIT_BLOCKED: 'This shop cannot take payments at the moment.',
   UNIT_AUTHOR_MISMATCH: 'This shop\'s settings were not signed by its owner.',
   MARGIN_INVALID: 'This shop\'s margin cannot be read. Fix it on shop.lanapays.us.',
@@ -953,7 +952,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
    * a payment link: only within RESEND_WINDOW_SECONDS of the card's signature,
    * never a new signature. A payment every server refused has in effect never
    * been sent, so a re-send is its first: it is held to every check of a
-   * submit, made afresh, in the same order (the shop and the switch, its wallet
+   * submit, made afresh, in the same order (the shop, its wallet
    * and owner, the register for the card and the shop's wallet, KIND 87058 for
    * the card and its owner as the register names them NOW, the card's owner not
    * the shop's, the same LANA price, nothing of the card's waiting for a block,
@@ -970,7 +969,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
     if (nowSec() - plan.created_at > RESEND_WINDOW_SECONDS) return no('RESEND_TOO_LATE');
 
     // The shop as it is now: an active unit of this app, exactly without a
-    // company, the switch on, not pending/suspended/rejected, signed by its
+    // company, not pending/suspended/rejected, signed by its
     // owner, and still paying into the wallet and the owner this plan names.
     const state = directUnitState(db, unitRow(db, row.unit_id));
     if (!state.ok) return no(state.code);
@@ -1205,7 +1204,7 @@ export function registerDirectLanaRoutes(app: Express, db: Database.Database, ov
    * POST /api/direct-lana/links { unit_id, amount, currency?, invoice_number?, note? }
    * A payment link for one sale: the invoice amount, the shop's margin as it is
    * now, the invoice number and a note the customer sees. Only where the till
-   * itself could take LANA neposredno now (the shop, the switch, a price).
+   * itself could take LANA neposredno now (the shop, a price).
    */
   app.post('/api/direct-lana/links', directLimiter, gateNames(db, req => ({ hex: [req.headers?.['x-lana-hex']], unit: [req.body?.unit_id] }), QUIET), (req: Request, res: Response) => {
     const body = req.body || {};

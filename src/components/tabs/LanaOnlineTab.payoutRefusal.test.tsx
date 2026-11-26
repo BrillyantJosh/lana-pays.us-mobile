@@ -28,6 +28,7 @@ vi.hoisted(() => {
 });
 import i18n from '@/i18n';
 import LanaOnlineTab from './LanaOnlineTab';
+import { directReasonKey } from '@/lib/directLanaApi';
 
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ session: { currency: 'EUR' } }) }));
 vi.mock('@/lib/compress-image', () => ({ compressImage: vi.fn(async (f: File) => ({ file: f })) }));
@@ -45,7 +46,7 @@ const json = (status: number, body: any) =>
 beforeEach(async () => {
   await i18n.changeLanguage('en');
   linkCalls = [];
-  linkAnswer = { status: 409, body: { success: false, code: 'DIRECT_LANA_OFF', error: 'Direct LANA is not switched on for this shop yet.' } };
+  linkAnswer = { status: 409, body: { success: false, code: 'WALLET_INVALID', error: 'This shop has no valid wallet for LANA. Fix it on shop.lanapays.us.' } };
   vi.stubGlobal('fetch', vi.fn((url: string, init?: any) => {
     if (url.startsWith('/api/payment-requests') && init?.method === 'POST') return json(createAnswer.status, createAnswer.body);
     if (url.startsWith('/api/payment-requests')) return json(200, { success: true, requests: [] });
@@ -70,14 +71,15 @@ describe('making a link', () => {
   it('refused for a shop without a bank account: the same press asks for a LANA neposredno link, never "no bank account"', async () => {
     createAnswer = { status: 409, body: { success: false, code: 'UNIT_NO_PAYOUT_ACCOUNT', error: WORDS, message: WORDS } };
     await createLink();
-    // LANA neposredno is not switched on for the shop: the plain reason, and who switches it on.
-    expect(await screen.findByText(i18n.t('lanaOnline.directOff'))).toBeInTheDocument();
+    // The shop lacks a wallet for LANA neposredno: the link's own words (there is no switch since 26 Nov 2026).
+    const { key, sentence } = directReasonKey('WALLET_INVALID');
+    expect(await screen.findByText(sentence ? i18n.t(key) : i18n.t('directLana.linkRefused', { reason: i18n.t(key) }))).toBeInTheDocument();
     expect(linkCalls).toEqual([{ unit_id: UNIT, amount: '12.50', currency: 'EUR', invoice_number: 'R-17' }]);
     expect(screen.queryByText(i18n.t('purchase.unitNoPayoutAccount'))).not.toBeInTheDocument();
     expect(screen.queryByText(WORDS)).not.toBeInTheDocument();
   });
 
-  it('— and when it is on for the shop, the link is made', async () => {
+  it('— and when the shop has what it needs, the link is made', async () => {
     createAnswer = { status: 409, body: { success: false, code: 'UNIT_NO_PAYOUT_ACCOUNT', error: WORDS, message: WORDS } };
     const token = 'A'.repeat(32);
     linkAnswer = {

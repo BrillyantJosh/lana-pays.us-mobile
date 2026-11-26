@@ -763,9 +763,9 @@ export function ensureDirectLanaTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_dll_unit_created ON direct_lana_links(unit_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_dll_status ON direct_lana_links(status);
   `);
-  // The switch, OFF for every shop until set (server/lib/directLanaUnit.ts):
-  // '' off, '*' every shop without a company, or unit ids joined by commas.
-  db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('direct_lana_units', '')").run();
+  // LANA neposredno's switch is gone (Brilly, 26 Nov 2026): every shop without
+  // a company takes it. Its old setting row would only mislead a reader.
+  db.prepare("DELETE FROM app_settings WHERE key = 'direct_lana_units'").run();
 }
 
 /**

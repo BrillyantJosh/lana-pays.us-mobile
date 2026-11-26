@@ -538,7 +538,6 @@
   "lanaOnline.noteOptional": "neobvezno",
   "lanaOnline.notePlaceholder": "Na kaj se plačilo nanaša ali komu je namenjeno?",
   "lanaOnline.noteHint": "To opombo vidi tudi kupec na strani za plačilo.",
-  "lanaOnline.directOff": "LANA neposredno za to trgovino še ni vklopljeno, zato povezave za plačilo ni mogoče ustvariti. Vklopi ga administrator na mobile.lanapays.us/admin. Do takrat trgovina sprejema gotovino.",
   "home.orders": "Naročila",
   "home.ordersSubtitle": "Naročila iz spletne trgovine za odpremo",
   "home.foodCornerTitle": "Naročila na Točki obilja: {{count}}",

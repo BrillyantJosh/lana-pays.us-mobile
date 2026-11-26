@@ -2,15 +2,15 @@
  * The "LANA neposredno" tile on the home screen (SPEC §4, phase 2).
  *
  * Only for a shop without a company (payout_account 'none') whose server
- * answer says its direct button is on (direct_lana.enabled: the switch, a
- * readable margin, a valid wallet, a LANA price; server/lib/directLanaUnit.ts).
- * Never beside the brain's LANA tiles, never for a shop with a company, not
- * greyed by Direct Fund capacity or by a Split. When it is off for a reason the
- * seller can fix, the reason is said; when the switch is simply off, nothing.
- * A switch on shop.lanapays.us or in the admin setting reaches the till with
- * the next poll, and an open direct tab is never taken away. The Lana-online
- * tile stays for such a shop (26 Nov 2026) and is handed the shop's direct view:
- * its request is a LANA neposredno link, or, with the switch off, the reason.
+ * answer says its direct button is on (direct_lana.enabled: a readable margin,
+ * a valid wallet, a LANA price; server/lib/directLanaUnit.ts). There is no
+ * switch any more (Brilly, 26 Nov 2026). Never beside the brain's LANA tiles,
+ * never for a shop with a company, not greyed by Direct Fund capacity or by a
+ * Split. When it is off for a reason the seller can fix, the reason is said.
+ * A change on shop.lanapays.us reaches the till with the next poll, and an open
+ * direct tab is never taken away. The Lana-online tile stays for such a shop
+ * (26 Nov 2026) and is handed the shop's direct view: its request is a LANA
+ * neposredno link, or, when the shop lacks something, the reason.
  *
  * The real Index page; every tab and the chrome around it are stubs.
  */
@@ -162,20 +162,20 @@ describe('a shop without a company whose direct button is on', () => {
   });
 });
 
-describe('off: a reason the seller can act on is said, a switch that is off says nothing', () => {
-  it('the switch is off: no tile and no notice, only the calm note, which says cash only', async () => {
+describe('off: a reason the seller can act on is said', () => {
+  it('an older server\'s "switch off" (there is no switch since 26 Nov 2026) reads as any other reason: cash only, the general notice', async () => {
     units = [noCompany({ enabled: false, reason: 'DIRECT_LANA_OFF' })];
     await open();
     // (Review: it used to say "… and accepts LANA directly" with no button to do so.)
     expect(await screen.findByTestId('no-company-note')).toHaveTextContent(i18n.t('home.noCompanyNoteCashOnly'));
     expect(screen.getByTestId('no-company-note')).not.toHaveTextContent(i18n.t('home.noCompanyNote'));
     expect(directTile()).not.toBeInTheDocument();
-    expect(directNotice()).not.toBeInTheDocument();
+    expect(directNotice()).toHaveTextContent(i18n.t('directLana.notice.OTHER'));
     expect(brainLanaTile()).not.toBeInTheDocument();
   });
 
-  it('the switch is off: Lana-online is there and its tab is told so (it says the administrator switches it on), never "no bank account"', async () => {
-    const OFF = { enabled: false, reason: 'DIRECT_LANA_OFF' };
+  it('what the shop lacks: Lana-online is there and its tab is handed the reason, never "no bank account"', async () => {
+    const OFF = { enabled: false, reason: 'WALLET_INVALID' };
     units = [noCompany(OFF)];
     await open();
     await screen.findByTestId('no-company-note');
@@ -234,9 +234,9 @@ describe('a change reaches the till by itself with the next poll', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
   }
 
-  it('switched on: the tile comes; the wallet frozen: the tile goes and the notice comes', async () => {
+  it('the wallet fixed: the tile comes; the wallet frozen: the tile goes and the notice comes', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    units = [noCompany({ enabled: false, reason: 'DIRECT_LANA_OFF' })];
+    units = [noCompany({ enabled: false, reason: 'WALLET_INVALID' })];
     await open();
     await screen.findByTestId('no-company-note');
     expect(directTile()).not.toBeInTheDocument();

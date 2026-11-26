@@ -1,5 +1,5 @@
 /**
- * Which shops may take LANA neposredno, and the switch that turns it on.
+ * Which shops may take LANA neposredno.
  *
  * ONLY a shop without a company and without a bank account (KIND 30901
  * payout_account "none", shop.lanapays.us option (c)), read strictly: one
@@ -18,76 +18,18 @@
  * and the shop must not be pending, suspended or rejected (KIND 30903), in one
  * of the three currencies KIND 38888 prices LANA in.
  *
- * THE SWITCH (app_settings.direct_lana_units, OFF by default) so it can go
- * live for one shop first:
- *   ''        off for every shop (the default)
- *   '*'       on for every shop without a company
- *   'a,b,c'   on for exactly these unit ids
- * Anything else reads as off.
+ * NO SWITCH (Brilly, 26 Nov 2026: "ne rabim stikala, naredi da povsod dela"):
+ * every shop that meets all of the above takes it, from the moment its record
+ * says so. Until then it was behind app_settings.direct_lana_units, off by
+ * default; that setting is gone (db/schema.ts drops its row).
  */
 import type Database from 'better-sqlite3';
-import type { Request } from 'express';
 import { SIMPLE_UNIT_SQL } from './unitOrigin.js';
 import { isStrictNoPayoutAccountUnit, unitMarginPercent, unitPayoutWallet } from './unitFlags.js';
 import { DIRECT_CURRENCIES, isAddress, clip, MAX_RECIPIENT_NAME } from './directLanaCore.js';
 import { readDirectParams } from './directLanaParams.js';
-import { verifyRequestSignature } from './nip98.js';
 
-export const DIRECT_LANA_SETTING = 'direct_lana_units';
 const BLOCKED = ['pending', 'suspended', 'rejected'];
-
-/**
- * May this admin request write the switch? Only with that admin's own NIP-98
- * signature, bound to the exact body. The switch opens a path that moves money
- * past the brain, and the admin header the other settings still take is a
- * public hex that anybody can send (Brilly, 2 Oct 2026: admin = signature). A
- * request that carries the switch without such a signature writes nothing at
- * all, not even its other settings. Null when it may.
- *
- * `adminHex` is the admin requireAdmin found for the request's header; the
- * signature must be that same person's.
- */
-export function directSwitchWriteRefusal(req: Request, adminHex: string): { status: number; body: Record<string, unknown> } | null {
-  const signed = verifyRequestSignature(req, { body: (req as any).rawBody ?? null });
-  if (!signed.ok) {
-    // (strictNullChecks is off in this tsconfig, which disables narrowing on `ok`.)
-    const { reason } = signed as { ok: false; reason: string };
-    return {
-      status: 401,
-      body: {
-        success: false,
-        code: 'SIGNATURE_REQUIRED',
-        reason,
-        error: 'LANA direct is switched only with your signature. Reload the admin page and try again.',
-      },
-    };
-  }
-  if (signed.hex !== String(adminHex || '').toLowerCase()) {
-    return { status: 403, body: { success: false, code: 'NOT_ADMIN', error: 'This signature is not the signed-in admin\'s.' } };
-  }
-  return null;
-}
-
-/** The setting as stored: '' (off), '*' (all) or unit ids joined by commas. Unreadable = off. */
-export function normalizeDirectLanaUnits(value: unknown): string {
-  const tokens = String(value ?? '').split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
-  if (tokens.includes('*')) return '*';
-  const ids = tokens.filter(s => /^[A-Za-z0-9_.:-]{1,100}$/.test(s));
-  return [...new Set(ids)].join(',');
-}
-
-/** Is the switch on for this unit? */
-export function directLanaSwitchedOn(db: Database.Database, unitId: string): boolean {
-  let value = '';
-  try {
-    value = String((db.prepare('SELECT value FROM app_settings WHERE key = ?').get(DIRECT_LANA_SETTING) as any)?.value ?? '');
-  } catch {
-    return false;
-  }
-  const setting = normalizeDirectLanaUnits(value);
-  if (setting === '*') return true;
-  return setting !== '' && setting.split(',').includes(unitId);
-}
 
 export interface DirectUnit {
   unit_id: string;
@@ -129,14 +71,12 @@ export function payeeMarkedFrozen(db: Database.Database, unitId: string, wallet:
 
 /**
  * Whether this unit may take a direct sale right now, by what this server has
- * stored, or why not. The switch is asked unless `ignoreSwitch` (the till's
- * view needs to know what the shop lacks even while the switch is off).
+ * stored, or why not.
  */
-export function directUnitState(db: Database.Database, row: any, opts: { ignoreSwitch?: boolean } = {}): DirectUnitState {
+export function directUnitState(db: Database.Database, row: any): DirectUnitState {
   if (!row) return { ok: false, code: 'UNKNOWN_UNIT' };
   // Exactly option (c), nothing of a company or a bank beside it (unitFlags.ts).
   if (!isStrictNoPayoutAccountUnit(row.raw_event)) return { ok: false, code: 'UNIT_NOT_DIRECT' };
-  if (!opts.ignoreSwitch && !directLanaSwitchedOn(db, row.unit_id)) return { ok: false, code: 'DIRECT_LANA_OFF' };
   if (BLOCKED.includes(String(row.suspension_status || 'active'))) return { ok: false, code: 'UNIT_BLOCKED' };
   let author = '';
   try {
@@ -176,8 +116,8 @@ export function directUnitState(db: Database.Database, row: any, opts: { ignoreS
  * shop; every other shop's answer has no such key. The button is never shown
  * for a reason the till cannot know: every payment is checked again from
  * scratch when it is quoted and when it is sent.
- *   enabled true   the switch is on and nothing stored says no
- *   reason         DIRECT_LANA_OFF (no notice), or what the shop lacks:
+ *   enabled true   nothing stored says no (there is no switch since 26 Nov 2026)
+ *   reason         what the shop lacks:
  *                  WALLET_INVALID, MARGIN_INVALID, PAYEE_FROZEN,
  *                  RATE_UNAVAILABLE / CURRENCY_UNSUPPORTED, UNIT_AUTHOR_MISMATCH
  */
@@ -186,7 +126,6 @@ export function directLanaView(
   row: any,
   opts: { pubkey?: string; nowSec?: number } = {},
 ): { enabled: boolean; reason: string | null } {
-  if (!row || !directLanaSwitchedOn(db, row.unit_id)) return { enabled: false, reason: 'DIRECT_LANA_OFF' };
   const state = directUnitState(db, row);
   if (!state.ok) return { enabled: false, reason: state.code };
   if (!readDirectParams(db, state.unit.currency, opts)?.rate) return { enabled: false, reason: 'RATE_UNAVAILABLE' };

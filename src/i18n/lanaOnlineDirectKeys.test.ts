@@ -1,9 +1,10 @@
 /**
  * The words of Lana-online for a shop without a company (26 Nov 2026), across
- * ALL 12 locales: the sentence for "LANA neposredno is not switched on for this
- * shop yet" is there, translated, says the administrator switches it on and
- * where, and never sends the seller to a bank. Every key the tab and its list
- * of links name exists in English (the other languages fall back to it).
+ * ALL 12 locales. LANA neposredno has no switch any more (Brilly, 26 Nov 2026),
+ * so the sentence "not switched on for this shop yet, the administrator
+ * switches it on" is gone from every language: no seller can be sent to an
+ * administrator for it. Every key the tab and its list of links name exists in
+ * English (the other languages fall back to it).
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
@@ -24,35 +25,14 @@ import { closedReasonKey } from '../lib/onlineRequestRail';
 
 const LOCALES: Record<string, Record<string, string>> = { en, sl, hu, it: it_, es, pl, pt, de, hr, sr, ru, zh };
 const EN = en as Record<string, string>;
-const KEY = 'lanaOnline.directOff';
-
-/** "bank", in the words each language uses for it. */
-const BANK: Record<string, RegExp> = {
-  en: /bank/i, sl: /bank|banč/i, de: /bank/i, es: /banc/i, hr: /bank/i, hu: /bank/i, it: /banc/i,
-  pl: /bank/i, pt: /banc/i, ru: /банк/i, sr: /bank/i, zh: /银行/,
-};
 
 describe.each(Object.keys(LOCALES))('locale %s', (name) => {
-  const strings = LOCALES[name];
-
-  it('has the sentence, translated', () => {
-    expect(typeof strings[KEY], `${name} is missing ${KEY}`).toBe('string');
-    expect(strings[KEY].trim().length).toBeGreaterThan(0);
-    if (name !== 'en') expect(strings[KEY], `${name}:${KEY} is still English`).not.toBe(EN[KEY]);
-    expect(strings[KEY].match(/\{\{\w+\}\}/g)).toBeNull();
-  });
-
-  it('says where the administrator switches it on, and never names a bank', () => {
-    expect(strings[KEY]).toContain('mobile.lanapays.us/admin');
-    expect(strings[KEY]).not.toMatch(BANK[name]);
-  });
-});
-
-describe('Slovenian', () => {
-  it('as it is shown', () => {
-    expect((sl as Record<string, string>)[KEY]).toBe(
-      'LANA neposredno za to trgovino še ni vklopljeno, zato povezave za plačilo ni mogoče ustvariti. Vklopi ga administrator na mobile.lanapays.us/admin. Do takrat trgovina sprejema gotovino.',
-    );
+  it('no longer has the "not switched on" sentence, nor any word of an admin switch for it', () => {
+    const strings = LOCALES[name];
+    expect(strings['lanaOnline.directOff']).toBeUndefined();
+    for (const [k, v] of Object.entries(strings)) {
+      if (k.startsWith('lanaOnline.') || k.startsWith('directLana.')) expect(String(v), `${name}:${k}`).not.toContain('mobile.lanapays.us/admin');
+    }
   });
 });
 
@@ -71,7 +51,7 @@ describe('every key the code names exists', () => {
 
   it('for every status a link can have and every reason the closed box can give', () => {
     for (const s of ['open', 'paying', 'paid', 'cancelled', 'expired']) expect(EN[`directLana.linkStatus.${s}`], s).toBeTruthy();
-    for (const r of ['DIRECT_LANA_OFF', 'WALLET_INVALID', 'PAYEE_FROZEN', 'RATE_UNAVAILABLE', 'MARGIN_INVALID', 'UNIT_AUTHOR_MISMATCH']) {
+    for (const r of ['WALLET_INVALID', 'PAYEE_FROZEN', 'RATE_UNAVAILABLE', 'MARGIN_INVALID', 'UNIT_AUTHOR_MISMATCH', 'UNIT_BLOCKED', null]) {
       expect(EN[closedReasonKey(r)], r).toBeTruthy();
     }
   });

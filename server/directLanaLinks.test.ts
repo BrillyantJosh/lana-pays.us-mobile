@@ -116,8 +116,6 @@ function seedUnits() {
     unitEvent(COMPANY, OWNER_HEX, [['receiver_type', 'company'], ['lanapays_payout_wallet', SHOP_WALLET]]));
 }
 const setUnitTags = (tags: string[][]) => db.prepare('UPDATE business_units SET raw_event = ? WHERE unit_id = ?').run(unitEvent(UNIT, OWNER_HEX, tags), UNIT);
-const setSwitch = (value: string) =>
-  db.prepare("INSERT INTO app_settings (key, value) VALUES ('direct_lana_units', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(value);
 const exclude = (hex: string) => db.prepare(`INSERT INTO person_exclusions (d_tag, person_hex, active, ground, since, event_id, event_created_at) VALUES (?, ?, 1, 'a ground', 1, 'ev', 1)`).run(`d-${hex}`, hex);
 
 // ── requests: the seller's are signed, the customer's are not ──────────────
@@ -195,7 +193,7 @@ beforeEach(() => {
   db.prepare("UPDATE app_settings SET value = '168' WHERE key = 'payment_request_expiry_hours'").run();
   seedUnits();
   store38888();
-  setSwitch('*');
+  db.prepare("DELETE FROM app_settings WHERE key = 'direct_lana_units'").run();
   chain.reset();
   chainReads = 0;
   chain.fund(CARD_ADDRESS, [10_000_000_000n]);
@@ -231,11 +229,11 @@ describe('the seller makes a link', () => {
     expect((db.prepare('SELECT COUNT(*) AS n FROM direct_lana_links').get() as any).n).toBe(0);
   });
 
-  it('only where the till could take LANA neposredno: a shop with a company and the switch off are refused', async () => {
+  it('only where the till could take LANA neposredno: a shop with a company is refused; without a LANA price, 503', async () => {
     expect((await makeLink({ unit_id: COMPANY })).data.code).toBe('UNIT_NOT_DIRECT');
-    setSwitch('');
-    expect((await makeLink()).data.code).toBe('DIRECT_LANA_OFF');
-    setSwitch('*');
+    // No switch since 26 Nov 2026: the old setting, left "off", refuses nothing.
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('direct_lana_units', '')").run();
+    expect((await makeLink()).status).toBe(201);
     db.prepare('DELETE FROM kind_38888').run();
     expect((await makeLink()).status).toBe(503);
   });
@@ -281,12 +279,9 @@ describe('the customer\'s page', () => {
     expect(text).not.toContain(STAFF_HEX);
   });
 
-  it('closed (without why) when the shop cannot take it now: switch off, shop blocked, the seller no longer staff or excluded', async () => {
+  it('closed (without why) when the shop cannot take it now: shop blocked, the seller no longer staff or excluded', async () => {
     const link = await newLink({}, );
     const byStaff = (await makeLink({}, STAFF)).data.link;
-    setSwitch('');
-    expect((await view(link.token)).data.link.status).toBe('closed');
-    setSwitch('*');
     db.prepare("UPDATE business_units SET suspension_status = 'suspended' WHERE unit_id = ?").run(UNIT);
     expect((await view(link.token)).data.link.status).toBe('closed');
     db.prepare("UPDATE business_units SET suspension_status = 'active', authorized_hex = ? WHERE unit_id = ?").run(JSON.stringify([OWNER_HEX]), UNIT);

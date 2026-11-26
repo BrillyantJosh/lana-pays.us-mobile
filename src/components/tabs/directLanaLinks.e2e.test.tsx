@@ -180,7 +180,6 @@ beforeEach(async () => {
   db.exec('DELETE FROM direct_lana_links; DELETE FROM direct_lana_sales; DELETE FROM direct_lana_payees; DELETE FROM business_units;');
   seedUnit();
   store38888();
-  db.prepare("UPDATE app_settings SET value = '*' WHERE key = 'direct_lana_units'").run();
   chain.reset();
   chain.fund(CARD_ADDRESS, [10_000_000_000n]);
   registrar.clear();
@@ -352,10 +351,10 @@ describe('a payment link, from the till to the customer\'s card to a block', () 
     for (const c of globalThis.__cards) expect(zeroed(c)).toBe(true);
   });
 
-  it('a link the shop cannot take now is shown closed, without asking for a key', async () => {
+  it('a link the shop cannot take now (suspended) is shown closed, without asking for a key', async () => {
     const { view, token } = await sellerMakesLink();
     view.unmount();
-    db.prepare("UPDATE app_settings SET value = '' WHERE key = 'direct_lana_units'").run();
+    db.prepare("UPDATE business_units SET suspension_status = 'suspended' WHERE unit_id = ?").run(UNIT);
     customerOpens(token);
     await screen.findByTestId('pay-direct-closed-closed');
     expect(screen.getByText('Ta trgovina trenutno ne sprejema plačil LANA neposredno.')).toBeTruthy();

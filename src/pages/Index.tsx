@@ -1197,8 +1197,8 @@ const Index = () => {
                     <div data-testid="no-company-note" className="rounded-2xl bg-primary/5 border border-primary/20 p-4 flex items-start gap-3">
                       <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
                       {/* "… and accepts LANA directly" only while this till can take it:
-                          with the switch off (the default) there is no such button,
-                          and a seller told otherwise improvises a transfer by hand. */}
+                          when the shop lacks something there is no such button, and
+                          a seller told otherwise improvises a transfer by hand. */}
                       <p className="text-sm font-medium text-foreground leading-snug">
                         {t(effectiveUnit?.direct_lana?.enabled === true ? 'home.noCompanyNote' : 'home.noCompanyNoteCashOnly')}
                       </p>
@@ -1231,8 +1231,7 @@ const Index = () => {
                       <span className="relative z-10 text-xs text-muted-foreground text-center leading-snug">{t('directLana.tileSubtitle')}</span>
                     </button>
                   )}
-                  {noCompanyUnit && effectiveUnit?.direct_lana && effectiveUnit.direct_lana.enabled !== true
-                    && effectiveUnit.direct_lana.reason !== 'DIRECT_LANA_OFF' && (
+                  {noCompanyUnit && effectiveUnit?.direct_lana && effectiveUnit.direct_lana.enabled !== true && (
                     <div data-testid="direct-lana-notice" className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-4 flex items-start gap-3">
                       <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                       <p className="text-sm font-medium text-foreground leading-snug">

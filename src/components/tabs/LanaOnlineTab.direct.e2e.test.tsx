@@ -117,7 +117,6 @@ function seedUnits() {
   }));
 }
 
-const switchTo = (value: string) => db.prepare("UPDATE app_settings SET value = ? WHERE key = 'direct_lana_units'").run(value);
 const linkRows = () => db.prepare('SELECT * FROM direct_lana_links ORDER BY created_at').all() as any[];
 const requestRows = () => db.prepare('SELECT * FROM payment_requests').all() as any[];
 
@@ -154,7 +153,6 @@ beforeEach(async () => {
   db.exec('DELETE FROM direct_lana_links; DELETE FROM direct_lana_sales; DELETE FROM payment_requests; DELETE FROM business_units;');
   seedUnits();
   store38888();
-  switchTo(NO_COMPANY);
   requests = [];
   globalThis.__session = { nostrHexId: OWNER_HEX, privateKeyHex: bytesToHex(OWNER), currency: 'EUR' };
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: any = {}) => {
@@ -174,7 +172,7 @@ afterEach(() => {
 });
 
 const ON = { enabled: true, reason: null };
-const OFF = { enabled: false, reason: 'DIRECT_LANA_OFF' };
+const LACKS_WALLET = { enabled: false, reason: 'WALLET_INVALID' };
 
 function openTab(props: { unitId: string; noCompany?: boolean; directLana?: any }) {
   return render(
@@ -193,7 +191,7 @@ async function fillDirect(amount: string, invoice = '', note = '') {
   fireEvent.click(screen.getByTestId('online-direct-create'));
 }
 
-describe('a shop without a company, LANA neposredno switched on for it', () => {
+describe('a shop without a company: LANA neposredno, no switch (Brilly, 26 Nov 2026)', () => {
   it('the form makes a LANA neposredno payment link with one signed call: invoice + margin, into the shop\'s wallet', async () => {
     openTab({ unitId: NO_COMPANY, noCompany: true, directLana: ON });
     // No photo is asked for: a direct link carries none.
@@ -263,14 +261,13 @@ describe('a shop without a company, LANA neposredno switched on for it', () => {
   });
 });
 
-describe('a shop without a company, LANA neposredno NOT switched on for it', () => {
-  beforeEach(() => { switchTo(''); });
-
-  it('the till knows: it says so at once, and that the administrator switches it on; no form, nothing sent', async () => {
-    openTab({ unitId: NO_COMPANY, noCompany: true, directLana: OFF });
+describe('a shop without a company that lacks something LANA neposredno needs', () => {
+  it('the till knows: it says what, at once; no form, nothing sent, never "no bank account"', async () => {
+    openTab({ unitId: NO_COMPANY, noCompany: true, directLana: LACKS_WALLET });
     const box = await screen.findByTestId('online-direct-closed');
-    expect(flat(box.textContent)).toBe(i18n.t('lanaOnline.directOff'));
-    expect(box.textContent).toContain('mobile.lanapays.us/admin');
+    expect(flat(box.textContent)).toBe(i18n.t('directLana.notice.WALLET_INVALID'));
+    // Nobody is sent to an administrator's switch: there is none.
+    expect(box.textContent).not.toContain('mobile.lanapays.us/admin');
     expect(screen.queryByTestId('online-direct-create')).toBeNull();
     expect(screen.queryByText(i18n.t('lanaOnline.createRequest'))).toBeNull();
     expect(document.body.textContent).not.toMatch(NO_BANK_WORDS);
@@ -279,24 +276,24 @@ describe('a shop without a company, LANA neposredno NOT switched on for it', () 
 
   it('— in Slovenian', async () => {
     await i18n.changeLanguage('sl');
-    openTab({ unitId: NO_COMPANY, noCompany: true, directLana: OFF });
-    expect(flat((await screen.findByTestId('online-direct-closed')).textContent))
-      .toBe('LANA neposredno za to trgovino še ni vklopljeno, zato povezave za plačilo ni mogoče ustvariti. Vklopi ga administrator na mobile.lanapays.us/admin. Do takrat trgovina sprejema gotovino.');
+    openTab({ unitId: NO_COMPANY, noCompany: true, directLana: LACKS_WALLET });
+    expect(flat((await screen.findByTestId('online-direct-closed')).textContent)).toBe(i18n.t('directLana.notice.WALLET_INVALID', { lng: 'sl' }));
   });
 
-  it('the till still thinks it is on: the server\'s DIRECT_LANA_OFF gives the same words, and no link is stored', async () => {
+  it('the till still thinks it can, the server says the shop is suspended: its words, framed as the link; no link stored', async () => {
+    db.prepare("UPDATE business_units SET suspension_status = 'suspended' WHERE unit_id = ?").run(NO_COMPANY);
     openTab({ unitId: NO_COMPANY, noCompany: true, directLana: ON });
     await fillDirect('12,50', 'R-7');
-    const box = await screen.findByTestId('online-direct-closed');
-    expect(flat(box.textContent)).toBe(i18n.t('lanaOnline.directOff'));
-    expect(sent('/api/direct-lana/links').length).toBe(1);
+    await waitFor(() => expect(sent('/api/direct-lana/links').length).toBe(1));
+    expect(await screen.findByText(i18n.t('directLana.linkRefused', { reason: i18n.t('directLana.reason.UNIT') }))).toBeInTheDocument();
+    expect(screen.queryByTestId('online-direct-closed')).toBeNull();
     expect(linkRows()).toEqual([]);
     expect(document.body.textContent).not.toMatch(NO_BANK_WORDS);
   });
 
   it('any other reason the shop lacks: the notice of the home screen', async () => {
-    openTab({ unitId: NO_COMPANY, noCompany: true, directLana: { enabled: false, reason: 'WALLET_INVALID' } });
-    expect(flat((await screen.findByTestId('online-direct-closed')).textContent)).toBe(i18n.t('directLana.notice.WALLET_INVALID'));
+    openTab({ unitId: NO_COMPANY, noCompany: true, directLana: { enabled: false, reason: 'PAYEE_FROZEN' } });
+    expect(flat((await screen.findByTestId('online-direct-closed')).textContent)).toBe(i18n.t('directLana.notice.PAYEE_FROZEN'));
   });
 });
 
@@ -316,20 +313,6 @@ describe('the shop switched to "without a company" a moment ago: the server know
     expect(JSON.parse(sent('/api/direct-lana/links')[0].body)).toMatchObject({ unit_id: NO_COMPANY, amount: '12.50', invoice_number: 'R-9' });
     expect(linkRows().length).toBe(1);
     expect(document.body.textContent).not.toMatch(NO_BANK_WORDS);
-  });
-
-  it('— with LANA neposredno off: the clear words, never "no bank account"', async () => {
-    switchTo('');
-    openTab({ unitId: NO_COMPANY, noCompany: false });
-    fireEvent.click(screen.getByText(i18n.t('cash.skipNoReceipt')));
-    fireEvent.change(await screen.findByPlaceholderText(i18n.t('cash.invoicePlaceholder')), { target: { value: 'R-9' } });
-    fireEvent.change(screen.getByPlaceholderText(i18n.t('cash.amountPlaceholder')), { target: { value: '12,50' } });
-    fireEvent.click(screen.getByText(i18n.t('lanaOnline.createRequest')));
-
-    expect(flat((await screen.findByTestId('online-direct-closed')).textContent)).toBe(i18n.t('lanaOnline.directOff'));
-    expect(document.body.textContent).not.toMatch(NO_BANK_WORDS);
-    expect(requestRows()).toEqual([]);
-    expect(linkRows()).toEqual([]);
   });
 });
 

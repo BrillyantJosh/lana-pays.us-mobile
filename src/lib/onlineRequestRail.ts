@@ -12,9 +12,10 @@
  *           makes (POST /api/direct-lana/links, server/directLana.ts). The
  *           customer pays it from home, from their own card, straight into the
  *           shop's Main Wallet, with the shop's margin.
- *   closed  such a shop whose LANA neposredno is not on (the switch in the admin
- *           does not name it, or what it lacks): no link can be made, and the
- *           seller is told why, never "no bank account".
+ *   closed  such a shop that lacks what LANA neposredno needs (a valid wallet,
+ *           a readable margin, a LANA price, ...): no link can be made, and the
+ *           seller is told why, never "no bank account". There is no switch
+ *           (Brilly, 26 Nov 2026): nothing else closes it.
  *
  * Nothing here moves or prices money: it only decides which existing server
  * route the form calls, and what the seller reads. The server decides again,
@@ -32,9 +33,6 @@ export type OnlineRequestRail =
   | { rail: 'direct' }
   | { rail: 'closed'; reason: string };
 
-/** The server's code for "the switch does not name this shop". */
-export const DIRECT_LANA_OFF = 'DIRECT_LANA_OFF';
-
 /**
  * `noCompany`: the shop has no company and no bank account. `directLana`: its
  * direct view, when the till has one. No view (an older server, or a shop the
@@ -51,11 +49,9 @@ const NOTICE_REASONS = ['WALLET_INVALID', 'PAYEE_FROZEN', 'RATE_UNAVAILABLE', 'M
 
 /**
  * What the seller reads when no link can be made for such a shop, as an i18n
- * key: the switch is off → "not switched on yet, the administrator switches it
- * on"; something the shop lacks → the notice the home screen shows for it.
+ * key: the notice the home screen shows for what the shop lacks.
  */
 export function closedReasonKey(reason: string | null | undefined): string {
-  if (reason === DIRECT_LANA_OFF) return 'lanaOnline.directOff';
   if (reason && NOTICE_REASONS.includes(reason)) return `directLana.notice.${reason}`;
   return 'directLana.notice.OTHER';
 }

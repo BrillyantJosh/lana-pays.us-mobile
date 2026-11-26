@@ -141,17 +141,11 @@ The last line must say `mode=refusing`. To turn it off, do the same with `=off`,
 
 A shop without a company and without a bank account (KIND 30901 `payout_account` = `none`) can take LANA straight from the customer's card into its owner's Main Wallet, with the shop's margin (0 to 20 %) on top. It does not go through the brain: no reward, no quota, no Direct Fund, no Lana.Discount. The customer's card key signs the payment and its public KIND 9350 record in the till's browser. This server checks everything again, keeps the exact bytes, sends them to two Electrum servers, and publishes the record once the payment is in a block (`server/directLana.ts`). A shop with a company can never use this path.
 
-### The switch
+### No switch
 
-`app_settings.direct_lana_units`, off until it is set:
+Since 26 Nov 2026 there is no switch (Brilly: no switch, it works everywhere). Every shop without a company takes LANA direct as soon as its KIND 30901 says so and nothing below is missing. The old setting `app_settings.direct_lana_units` is dropped at every start, and the admin route refuses it with `NO_SUCH_SETTING`. To stop LANA direct now takes a code change.
 
-- empty: off for every shop (the default);
-- `*`: on for every shop without a company;
-- unit ids separated by commas: on for exactly those shops.
-
-Set it on the admin page, in the section "LANA direct". The server writes it only with the admin's own signature. A request with the admin header alone is refused with `SIGNATURE_REQUIRED`, and nothing in it is written. Every change leaves a `[direct-lana] switch set by admin` line in the container log. The plan: off, then one shop, then a first real payment by Brilly, then every shop without a company.
-
-### Before turning it on
+### What a shop needs for it
 
 - KIND 38888 names at least two Electrum servers (port 5097), the relays, and an `fx` price for the shop's currency (EUR, GBP or USD). With fewer than two Electrum servers every direct sale is refused.
 - The registrar key of this app has room: each direct sale asks the registrar four times (the card and the shop's wallet, at the quote and at the submit), twice more for each re-send, and once more after the payment is in a block.
@@ -168,7 +162,7 @@ Table `direct_lana_sales` holds one row per attempt. It never holds a key. Its `
 - `refused`: with `sent` = 0 nothing went out; with `sent` = 1 every server refused it.
 - `superseded`: replaced by a payment that spends one of the same coins, so at most one of them can ever be in a block. If that replacement is refused before it was sent, the superseded row goes back to what it was (`superseded_from` keeps it): a payment that never left replaces nothing.
 
-A payment that is `unknown`, or `refused` with `sent` = 1, may be sent again with its identical bytes, only when the seller asks, only within 30 minutes of the card's signature (`RESEND_TOO_LATE` after that), and only when every check of a submit passes again: the switch, the shop, its wallet, the register, KIND 87058, the same LANA price, nothing of the card's waiting for a block. Otherwise the seller pays again with the same card, which spends one of the same coins.
+A payment that is `unknown`, or `refused` with `sent` = 1, may be sent again with its identical bytes, only when the seller asks, only within 30 minutes of the card's signature (`RESEND_TOO_LATE` after that), and only when every check of a submit passes again: the shop, its wallet, the register, KIND 87058, the same LANA price, nothing of the card's waiting for a block. Otherwise the seller pays again with the same card, which spends one of the same coins.
 
 The record is published only for `paid` rows. Read it the way the checks above are read, for example:
 
