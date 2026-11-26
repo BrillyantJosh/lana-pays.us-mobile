@@ -359,8 +359,6 @@
   "login.tooManyRequests": "Trenutno je previše zahteva. Sačekajte minut i prijavite se ponovo — vaš profil je u redu.",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Daljinsko LANA plaćanje putem linka",
-  "home.noCompanyNote": "Ova prodavnica prodaje za gotovinu i prima LANA direktno.",
-  "home.noCompanyNoteCashOnly": "Ova prodavnica prodaje za gotovinu.",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Napravite link za zahtev za plaćanje",
   "lanaOnline.entrySubtitle": "Unesite račun i iznos za zahtev",

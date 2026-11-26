@@ -26,7 +26,6 @@ const LOCALES: Record<string, Record<string, string>> = { en, sl, hu, it: it_, e
 const EN = en as Record<string, string>;
 
 const KEYS = [
-  'home.noCompanyNote',
   'home.cashLimitReachedDetailNoCompany',
   'split.happening.bodyNoCompany',
   'cash.monthlyCashLimitReachedNoCompany',
@@ -46,9 +45,7 @@ const KEYS = [
   'purchase.noPayoutAccount',
   'purchase.rewardWalletInvalid',
   'pay.closedNoPayoutAccount',
-  // Review fixes (23 Nov 2026): a sale sent but never confirmed, and the note
-  // while the till cannot take LANA directly.
-  'home.noCompanyNoteCashOnly',
+  // Review fixes (23 Nov 2026): a sale sent but never confirmed.
   'cash.saleAlreadyRecorded',
   'cash.salePendingNotRecorded',
   'cash.salePendingUnknown',
@@ -99,13 +96,17 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
     expect(strings['cash.saleNumberLabel']).toContain('{{number}}');
   });
 
-  it('a sale sent but not confirmed is named by its number and what was sold, and the cash-only note says no LANA', () => {
+  it('a sale sent but not confirmed is named by its number and what was sold', () => {
     for (const k of ['cash.saleAlreadyRecorded', 'cash.salePendingNotRecorded', 'cash.salePendingUnknown']) {
       expect(strings[k], k).toContain('{{number}}');
       expect(strings[k], k).toContain('{{description}}');
     }
     expect(strings['cash.saleLockedHint']).toContain('{{number}}');
-    expect(strings['home.noCompanyNoteCashOnly']).not.toMatch(/\bLAN[AEOI]\b|LANA/i);
+  });
+
+  it('no note between the tiles any more (Brilly, 26 Nov 2026: it "had nothing to do there")', () => {
+    expect(strings['home.noCompanyNote']).toBeUndefined();
+    expect(strings['home.noCompanyNoteCashOnly']).toBeUndefined();
   });
 
   it('the payout refusals that ask for a fix name where it is fixed', () => {
@@ -115,12 +116,6 @@ describe.each(Object.keys(LOCALES))('locale %s', (name) => {
 });
 
 describe('Slovenian, as Brilly wrote it', () => {
-  it('the calm note on the home screen', () => {
-    expect((sl as Record<string, string>)['home.noCompanyNote']).toBe('Ta trgovina prodaja za gotovino in sprejema LANE neposredno.');
-  });
-  it('the note while the till cannot take LANA directly says only cash', () => {
-    expect((sl as Record<string, string>)['home.noCompanyNoteCashOnly']).toBe('Ta trgovina prodaja za gotovino.');
-  });
   it('the question at the cash till', () => {
     expect((sl as Record<string, string>)['cash.whatDidYouSell']).toBe('Kaj ste prodali?');
   });

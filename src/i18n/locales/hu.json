@@ -359,8 +359,6 @@
   "login.tooManyRequests": "Jelenleg túl sok a kérés. Várj egy percet, és jelentkezz be újra — a profiloddal minden rendben.",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Távoli LANA-fizetés linken keresztül",
-  "home.noCompanyNote": "Ez az üzlet készpénzért árul, és LANA-t közvetlenül fogad el.",
-  "home.noCompanyNoteCashOnly": "Ez az üzlet készpénzért árul.",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Fizetési kérelem link létrehozása",
   "lanaOnline.entrySubtitle": "Add meg a számlaszámot és az összeget a kérelemhez",

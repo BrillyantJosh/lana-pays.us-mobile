@@ -359,8 +359,6 @@
   "login.tooManyRequests": "Troppe richieste in questo momento. Attendi un minuto e accedi di nuovo — il tuo profilo è a posto.",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Pagamento LANA a distanza tramite link",
-  "home.noCompanyNote": "Questo negozio vende in contanti e accetta LANA direttamente.",
-  "home.noCompanyNoteCashOnly": "Questo negozio vende in contanti.",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Crea un link di richiesta di pagamento",
   "lanaOnline.entrySubtitle": "Inserisci la fattura e l'importo per la richiesta",

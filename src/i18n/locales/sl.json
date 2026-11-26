@@ -504,8 +504,6 @@
   "login.tooManyRequests": "Trenutno je preveč zahtevkov. Počakajte minuto in se znova prijavite — z vašim profilom je vse v redu.",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Oddaljeno plačilo z LANO prek povezave",
-  "home.noCompanyNote": "Ta trgovina prodaja za gotovino in sprejema LANE neposredno.",
-  "home.noCompanyNoteCashOnly": "Ta trgovina prodaja za gotovino.",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Ustvari povezavo z zahtevkom za plačilo",
   "lanaOnline.entrySubtitle": "Vnesite račun in znesek zahtevka",

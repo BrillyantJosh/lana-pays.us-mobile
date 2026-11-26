@@ -105,6 +105,9 @@ const directTile = () => screen.queryByTestId('direct-lana-tile');
 const directNotice = () => screen.queryByTestId('direct-lana-notice');
 const brainLanaTile = () => screen.queryByText(i18n.t('home.payWithLana'));
 const lanaOnlineTile = () => screen.queryByText(i18n.t('home.payLanaOnline'));
+// Which kind of shop the tiles are for: no note says it on screen any more (Brilly, 26 Nov 2026).
+const shopKind = () => screen.queryByTestId('till-actions')?.getAttribute('data-shop-kind') ?? null;
+const noCompanyShown = () => waitFor(() => expect(shopKind()).toBe('no-company'));
 
 async function open() {
   render(<Index />);
@@ -130,18 +133,20 @@ describe('a shop without a company whose direct button is on', () => {
     expect(screen.queryByText('LANA-TAB')).not.toBeInTheDocument();
   });
 
-  it('the calm note says the shop also takes LANA directly, only now (Slovenian: the SPEC sentence)', async () => {
+  it('no note between the tiles: the cash and LANA direct tiles say it themselves (Brilly, 26 Nov 2026)', async () => {
     await i18n.changeLanguage('sl');
     await open();
-    expect(await screen.findByTestId('no-company-note')).toHaveTextContent('Ta trgovina prodaja za gotovino in sprejema LANE neposredno.');
+    await screen.findByTestId('direct-lana-tile');
+    expect(screen.queryByTestId('no-company-note')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('Ta trgovina prodaja za gotovino');
   });
 
-  it('a reason the seller can act on: the note says cash only, beside the notice', async () => {
+  it('a reason the seller can act on: only its notice, no note beside it', async () => {
     units = [noCompany({ enabled: false, reason: 'WALLET_INVALID' })];
     await i18n.changeLanguage('sl');
     await open();
-    expect(await screen.findByTestId('no-company-note')).toHaveTextContent('Ta trgovina prodaja za gotovino.');
-    expect(screen.getByTestId('no-company-note')).not.toHaveTextContent('LANE');
+    expect(await screen.findByTestId('direct-lana-notice')).toHaveTextContent(i18n.t('directLana.notice.WALLET_INVALID'));
+    expect(screen.queryByTestId('no-company-note')).not.toBeInTheDocument();
   });
 
   it('in Slovenian: "LANA neposredno"', async () => {
@@ -163,12 +168,10 @@ describe('a shop without a company whose direct button is on', () => {
 });
 
 describe('off: a reason the seller can act on is said', () => {
-  it('an older server\'s "switch off" (there is no switch since 26 Nov 2026) reads as any other reason: cash only, the general notice', async () => {
+  it('an older server\'s "switch off" (there is no switch since 26 Nov 2026) reads as any other reason: the general notice', async () => {
     units = [noCompany({ enabled: false, reason: 'DIRECT_LANA_OFF' })];
     await open();
-    // (Review: it used to say "… and accepts LANA directly" with no button to do so.)
-    expect(await screen.findByTestId('no-company-note')).toHaveTextContent(i18n.t('home.noCompanyNoteCashOnly'));
-    expect(screen.getByTestId('no-company-note')).not.toHaveTextContent(i18n.t('home.noCompanyNote'));
+    await noCompanyShown();
     expect(directTile()).not.toBeInTheDocument();
     expect(directNotice()).toHaveTextContent(i18n.t('directLana.notice.OTHER'));
     expect(brainLanaTile()).not.toBeInTheDocument();
@@ -178,7 +181,7 @@ describe('off: a reason the seller can act on is said', () => {
     const OFF = { enabled: false, reason: 'WALLET_INVALID' };
     units = [noCompany(OFF)];
     await open();
-    await screen.findByTestId('no-company-note');
+    await noCompanyShown();
     fireEvent.click(lanaOnlineTile()!);
     expect(await screen.findByText(`LANA-ONLINE-TAB noCompany=true direct=${JSON.stringify(OFF)}`)).toBeInTheDocument();
     expect(screen.queryByTestId('no-company-lana-closed')).not.toBeInTheDocument();
@@ -223,7 +226,7 @@ describe('never both LANA buttons, never for a shop with a company', () => {
     void direct_lana;
     units = [older];
     await open();
-    expect(await screen.findByTestId('no-company-note')).toBeInTheDocument();
+    await noCompanyShown();
     expect(directTile()).not.toBeInTheDocument();
     expect(directNotice()).not.toBeInTheDocument();
   });
@@ -238,7 +241,7 @@ describe('a change reaches the till by itself with the next poll', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     units = [noCompany({ enabled: false, reason: 'WALLET_INVALID' })];
     await open();
-    await screen.findByTestId('no-company-note');
+    await noCompanyShown();
     expect(directTile()).not.toBeInTheDocument();
 
     units = [noCompany(ON)];

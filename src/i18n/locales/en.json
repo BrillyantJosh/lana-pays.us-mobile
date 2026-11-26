@@ -504,8 +504,6 @@
   "login.tooManyRequests": "Too many requests right now. Wait a minute and sign in again — your profile is fine.",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Remote LANA payment via link",
-  "home.noCompanyNote": "This shop sells for cash and accepts LANA directly.",
-  "home.noCompanyNoteCashOnly": "This shop sells for cash.",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Create a payment request link",
   "lanaOnline.entrySubtitle": "Enter the invoice and amount for the request",

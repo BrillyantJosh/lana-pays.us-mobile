@@ -359,8 +359,6 @@
   "login.tooManyRequests": "Zu viele Anfragen im Moment. Warten Sie eine Minute und melden Sie sich erneut an — Ihr Profil ist in Ordnung.",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "LANA-Fernzahlung per Link",
-  "home.noCompanyNote": "Dieser Shop verkauft gegen Bargeld und nimmt LANA direkt an.",
-  "home.noCompanyNoteCashOnly": "Dieser Shop verkauft gegen Bargeld.",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Zahlungsanforderungs-Link erstellen",
   "lanaOnline.entrySubtitle": "Rechnung und Betrag für die Anforderung eingeben",

@@ -359,8 +359,6 @@
   "login.tooManyRequests": "Zbyt wiele żądań w tej chwili. Odczekaj minutę i zaloguj się ponownie — Twój profil jest w porządku.",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Zdalna płatność LANA przez link",
-  "home.noCompanyNote": "Ten sklep sprzedaje za gotówkę i przyjmuje LANA bezpośrednio.",
-  "home.noCompanyNoteCashOnly": "Ten sklep sprzedaje za gotówkę.",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Utwórz link z żądaniem płatności",
   "lanaOnline.entrySubtitle": "Podaj numer faktury i kwotę żądania",

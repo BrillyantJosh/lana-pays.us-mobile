@@ -113,7 +113,8 @@ const personShop = { ...noCompanyUnit, unit_id: PERSON, name: 'Kmetija Novak', d
 const lanaTile = () => screen.queryByText(i18n.t('home.payWithLana'));
 const lanaOnlineTile = () => screen.queryByText(i18n.t('home.payLanaOnline'));
 const directTile = () => screen.queryByTestId('direct-lana-tile');
-const note = () => screen.queryByTestId('no-company-note');
+// Which kind of shop the tiles are for (no note says it on screen any more, Brilly 26 Nov 2026).
+const shopKind = () => screen.queryByTestId('till-actions')?.getAttribute('data-shop-kind') ?? null;
 const back = () => fireEvent.click(screen.getByText(i18n.t('common.back')));
 
 describe('one seller with a company shop and a shop without a company', () => {
@@ -124,12 +125,12 @@ describe('one seller with a company shop and a shop without a company', () => {
     await screen.findByText('Podjetje d.o.o.');
 
     for (let round = 0; round < 2; round++) {
-      // The company shop: both brain LANA tiles, no note, no direct LANA; its cash sale as always.
+      // The company shop: both brain LANA tiles, no direct LANA; its cash sale as always.
       fireEvent.click(screen.getByText('Podjetje d.o.o.'));
       await waitFor(() => expect(lanaTile()).toBeInTheDocument());
       expect(lanaOnlineTile()).toBeInTheDocument();
       expect(directTile()).not.toBeInTheDocument();
-      expect(note()).not.toBeInTheDocument();
+      expect(shopKind()).toBe('company');
       fireEvent.click(screen.getByText(i18n.t('home.cashPayment')));
       expect(await screen.findByText(`CASH-TAB unit=${COMPANY} noCompany=false`)).toBeInTheDocument();
       back();
@@ -137,10 +138,11 @@ describe('one seller with a company shop and a shop without a company', () => {
       expect(await screen.findByText(`LANA-ONLINE-TAB unit=${COMPANY} noCompany=false`)).toBeInTheDocument();
       back();
 
-      // The shop without a company: the note and LANA neposredno, no brain LANA tile; cash with its own numbers.
+      // The shop without a company: LANA neposredno, no brain LANA tile, no note; cash with its own numbers.
       fireEvent.click(await screen.findByText('Kmetija Novak'));
       await waitFor(() => expect(directTile()).toBeInTheDocument());
-      expect(note()).toBeInTheDocument();
+      expect(shopKind()).toBe('no-company');
+      expect(screen.queryByTestId('no-company-note')).not.toBeInTheDocument();
       expect(lanaTile()).not.toBeInTheDocument();
       // Lana-online stays, and for this shop it makes a LANA neposredno link.
       expect(lanaOnlineTile()).toBeInTheDocument();

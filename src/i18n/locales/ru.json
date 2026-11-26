@@ -359,8 +359,6 @@
   "login.tooManyRequests": "Слишком много запросов. Подождите минуту и войдите снова — с вашим профилем всё в порядке.",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "Удалённый платёж LANA по ссылке",
-  "home.noCompanyNote": "Этот магазин продаёт за наличные и принимает LANA напрямую.",
-  "home.noCompanyNoteCashOnly": "Этот магазин продаёт за наличные.",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "Создайте ссылку на запрос платежа",
   "lanaOnline.entrySubtitle": "Введите номер счёта и сумму для запроса",

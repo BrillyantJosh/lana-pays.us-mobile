@@ -99,8 +99,9 @@ afterEach(() => {
 
 const lanaTile = () => screen.queryByText(i18n.t('home.payWithLana'));
 const lanaOnlineTile = () => screen.queryByText(i18n.t('home.payLanaOnline'));
-// The calm note of a shop without a company (its words depend on the direct-LANA switch, Index.directLana.test).
-const note = () => screen.queryByTestId('no-company-note');
+// Which kind of shop the tiles are for: no note says it on screen any more (Brilly, 26 Nov 2026).
+const shopKind = () => screen.queryByTestId('till-actions')?.getAttribute('data-shop-kind') ?? null;
+const noCompanyShown = () => waitFor(() => expect(shopKind()).toBe('no-company'));
 
 async function open() {
   render(<Index />);
@@ -112,7 +113,7 @@ describe('a shop with a company: the home screen as before', () => {
     await open();
     await waitFor(() => expect(lanaTile()).toBeInTheDocument());
     expect(lanaOnlineTile()).toBeInTheDocument();
-    expect(note()).not.toBeInTheDocument();
+    expect(shopKind()).toBe('company');
   });
 
   it('missing bank details still grey LANA and say so', async () => {
@@ -123,12 +124,13 @@ describe('a shop with a company: the home screen as before', () => {
 });
 
 describe('a shop without a company and without a bank account', () => {
-  it('no brain LANA tile, the calm note instead; the Lana-online tile stays', async () => {
+  it('no brain LANA tile and no note between the tiles; the Lana-online tile stays', async () => {
     units = [noCompanyUnit];
     await open();
-    // No direct-LANA button in this answer (an older server, or the switch off): the note says cash only.
-    expect(await screen.findByText(i18n.t('home.noCompanyNoteCashOnly'))).toBeInTheDocument();
-    expect(screen.queryByText(i18n.t('home.noCompanyNote'))).not.toBeInTheDocument();
+    await noCompanyShown();
+    // No note says "this shop sells for cash": the tiles say it (Brilly, 26 Nov 2026).
+    expect(screen.queryByTestId('no-company-note')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/sells for cash/i);
     expect(lanaTile()).not.toBeInTheDocument();
     // Lana-online makes a LANA neposredno link for it (26 Nov 2026), not the brain's request.
     expect(lanaOnlineTile()).toBeInTheDocument();
@@ -136,12 +138,12 @@ describe('a shop without a company and without a bank account', () => {
     expect(screen.getByText(i18n.t('home.cashPayment'))).toBeInTheDocument();
   });
 
-  it('the note keeps its own height: the tiles grow, the note does not (26 Nov 2026)', async () => {
-    // In the equal-row grid every row was as tall as a tile, so the one-line note
+  it('a notice between the tiles keeps its own height: the tiles grow, the notice does not (26 Nov 2026)', async () => {
+    // In the equal-row grid every row was as tall as a tile, so a one-line notice
     // stood in a big empty box between the tiles and looked like a broken button.
-    units = [noCompanyUnit];
+    units = [{ ...noCompanyUnit, direct_lana: { enabled: false, reason: 'WALLET_INVALID' } }];
     await open();
-    const n = await screen.findByTestId('no-company-note');
+    const n = await screen.findByTestId('direct-lana-notice');
     const column = screen.getByTestId('till-actions');
     expect(n.parentElement).toBe(column);
     expect(column.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-col']));
@@ -158,7 +160,7 @@ describe('a shop without a company and without a bank account', () => {
   it('Lana-online opens the form of the shop without a company, never the "no bank account" panel', async () => {
     units = [noCompanyUnit];
     await open();
-    await screen.findByTestId('no-company-note');
+    await noCompanyShown();
     // Not greyed by Direct Fund capacity or a missing bank account: neither is used.
     expect(lanaOnlineTile()!.closest('button')).not.toBeDisabled();
     fireEvent.click(lanaOnlineTile()!);
@@ -177,7 +179,7 @@ describe('a shop without a company and without a bank account', () => {
   it('is never asked for bank details, whatever the payout fields say', async () => {
     units = [{ ...noCompanyUnit, payout_configured: false, payout_problems: ['ACCOUNT_MISSING'], payout_advice: ['RECEIVER_NOT_CHOSEN'] }];
     await open();
-    await screen.findByTestId('no-company-note');
+    await noCompanyShown();
     expect(screen.queryByText(i18n.t('home.lanaPayoutNotConfigured'))).not.toBeInTheDocument();
     expect(screen.queryByText(i18n.t('payoutCheck.titleBlocking'))).not.toBeInTheDocument();
     expect(screen.queryByText(i18n.t('payoutCheck.titleAdvice'))).not.toBeInTheDocument();
@@ -210,7 +212,7 @@ describe('a shop without a company and without a bank account', () => {
   it('the cash till is told it is a shop without a company', async () => {
     units = [noCompanyUnit];
     await open();
-    await screen.findByTestId('no-company-note');
+    await noCompanyShown();
     fireEvent.click(screen.getByText(i18n.t('home.cashPayment')));
     expect(await screen.findByText('CASH-TAB noCompany=true')).toBeInTheDocument();
   });
@@ -229,7 +231,7 @@ describe('a switch on shop.lanapays.us reaches the till by itself', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
   }
 
-  it('company → without a company: the brain LANA tile goes, the note comes, no reload (the single unit is auto-selected)', async () => {
+  it('company → without a company: the brain LANA tile goes, no reload (the single unit is auto-selected)', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     await open();
     await waitFor(() => expect(lanaTile()).toBeInTheDocument());
@@ -237,7 +239,7 @@ describe('a switch on shop.lanapays.us reaches the till by itself', () => {
     units = [noCompanyUnit];
     await nextPoll();
 
-    await waitFor(() => expect(note()).toBeInTheDocument());
+    await noCompanyShown();
     expect(lanaTile()).not.toBeInTheDocument();
     // Lana-online stays: for this shop it now makes a LANA neposredno link.
     expect(lanaOnlineTile()).toBeInTheDocument();
@@ -262,13 +264,13 @@ describe('a switch on shop.lanapays.us reaches the till by itself', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     units = [noCompanyUnit];
     await open();
-    await waitFor(() => expect(note()).toBeInTheDocument());
+    await noCompanyShown();
 
     units = [companyUnit];
     await nextPoll();
 
     await waitFor(() => expect(lanaTile()).toBeInTheDocument());
-    expect(note()).not.toBeInTheDocument();
+    expect(shopKind()).toBe('company');
   });
 
   it('a LANA tab already open stays open when the switch arrives; back home, the tiles are gone', async () => {
@@ -286,7 +288,7 @@ describe('a switch on shop.lanapays.us reaches the till by itself', () => {
     expect(screen.queryByTestId('no-company-lana-closed')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText(i18n.t('common.back')));
-    await waitFor(() => expect(note()).toBeInTheDocument());
+    await noCompanyShown();
     expect(lanaTile()).not.toBeInTheDocument();
   });
 });

@@ -1063,11 +1063,12 @@ const Index = () => {
             {/* ─── Action column, ONE tile per row (Brilly, 3.9.2026): Orders (only
                     for online sellers) + payment buttons OR blocked-status panel.
                     A flex column, not an equal-row grid: the tiles (flex-1) share
-                    the height equally as before, while a note between them keeps
+                    the height equally as before, while a notice between them keeps
                     its own height. In the grid every row was as tall as a tile, so
-                    "This shop sells for cash." stood in a big empty box that looked
-                    like a broken button (Brilly, 26 Nov 2026). ─── */}
-            <div data-testid="till-actions" className="flex-1 flex flex-col gap-4">
+                    a one-line notice stood in a big empty box that looked like a
+                    broken button (Brilly, 26 Nov 2026). data-shop-kind says which
+                    kind of shop the tiles are for (tests read it). ─── */}
+            <div data-testid="till-actions" data-shop-kind={noCompanyUnit ? 'no-company' : 'company'} className="flex-1 flex flex-col gap-4">
             {/* Orders — FIRST, shown only when this merchant sells online (see
                 ordersVisible), and otherwise gated ONLY on the session: a
                 suspended or quota-blocked merchant still owes delivery for orders
@@ -1191,19 +1192,11 @@ const Index = () => {
 
                   {/* A shop without a company: cash through this till, LANA only
                       directly. The brain's LANA tile is not shown (the server
-                      refuses that rail for it too); a calm note says why. Its
-                      Lana-online tile below makes a LANA neposredno link. */}
-                  {noCompanyUnit && (
-                    <div data-testid="no-company-note" className="rounded-2xl bg-primary/5 border border-primary/20 p-4 flex items-start gap-3">
-                      <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
-                      {/* "… and accepts LANA directly" only while this till can take it:
-                          when the shop lacks something there is no such button, and
-                          a seller told otherwise improvises a transfer by hand. */}
-                      <p className="text-sm font-medium text-foreground leading-snug">
-                        {t(effectiveUnit?.direct_lana?.enabled === true ? 'home.noCompanyNote' : 'home.noCompanyNoteCashOnly')}
-                      </p>
-                    </div>
-                  )}
+                      refuses that rail for it too). No note says so: the tiles
+                      say it themselves (Brilly, 26 Nov 2026: the note "had nothing
+                      to do there"). What the shop lacks for LANA direct is said
+                      by the notice below. Its Lana-online tile makes a LANA
+                      neposredno link. */}
 
                   {/* LANA neposredno: the customer's card pays the owner's wallet,
                       with the shop's margin, NOT through the brain (server/

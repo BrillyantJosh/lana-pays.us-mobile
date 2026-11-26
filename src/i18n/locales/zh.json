@@ -359,8 +359,6 @@
   "login.tooManyRequests": "当前请求过多。请稍等一分钟后重新登录——您的资料没有问题。",
   "home.payLanaOnline": "$Lana-online",
   "home.lanaOnlinePayment": "通过链接远程支付 LANA",
-  "home.noCompanyNote": "该店铺以现金销售，并直接接受 LANA。",
-  "home.noCompanyNoteCashOnly": "该店铺以现金销售。",
   "lanaOnline.title": "Lana-online",
   "lanaOnline.subtitle": "创建付款请求链接",
   "lanaOnline.entrySubtitle": "输入请求的发票号和金额",
