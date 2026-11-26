@@ -136,6 +136,25 @@ describe('a shop without a company and without a bank account', () => {
     expect(screen.getByText(i18n.t('home.cashPayment'))).toBeInTheDocument();
   });
 
+  it('the note keeps its own height: the tiles grow, the note does not (26 Nov 2026)', async () => {
+    // In the equal-row grid every row was as tall as a tile, so the one-line note
+    // stood in a big empty box between the tiles and looked like a broken button.
+    units = [noCompanyUnit];
+    await open();
+    const n = await screen.findByTestId('no-company-note');
+    const column = screen.getByTestId('till-actions');
+    expect(n.parentElement).toBe(column);
+    expect(column.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-col']));
+    expect(column.className).not.toMatch(/\bgrid\b|auto-rows-fr/);
+    expect(n.className.split(/\s+/)).not.toContain('flex-1');
+    const cashTile = screen.getByText(i18n.t('home.cashPayment')).closest('button')!;
+    const onlineTile = lanaOnlineTile()!.closest('button')!;
+    expect(cashTile.parentElement).toBe(column);
+    expect(onlineTile.parentElement).toBe(column);
+    expect(cashTile.className.split(/\s+/)).toContain('flex-1');
+    expect(onlineTile.className.split(/\s+/)).toContain('flex-1');
+  });
+
   it('Lana-online opens the form of the shop without a company, never the "no bank account" panel', async () => {
     units = [noCompanyUnit];
     await open();

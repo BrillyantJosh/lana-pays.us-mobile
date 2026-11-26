@@ -1061,8 +1061,13 @@ const Index = () => {
             <FoodCornerNotice data={foodCorner} />
 
             {/* ─── Action column, ONE tile per row (Brilly, 3.9.2026): Orders (only
-                    for online sellers) + payment buttons OR blocked-status panel ─── */}
-            <div className="flex-1 grid grid-cols-1 gap-4 auto-rows-fr">
+                    for online sellers) + payment buttons OR blocked-status panel.
+                    A flex column, not an equal-row grid: the tiles (flex-1) share
+                    the height equally as before, while a note between them keeps
+                    its own height. In the grid every row was as tall as a tile, so
+                    "This shop sells for cash." stood in a big empty box that looked
+                    like a broken button (Brilly, 26 Nov 2026). ─── */}
+            <div data-testid="till-actions" className="flex-1 flex flex-col gap-4">
             {/* Orders — FIRST, shown only when this merchant sells online (see
                 ordersVisible), and otherwise gated ONLY on the session: a
                 suspended or quota-blocked merchant still owes delivery for orders
@@ -1072,7 +1077,7 @@ const Index = () => {
             <button
               onClick={openOrders}
               disabled={!session}
-              className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+              className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 flex-1 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
             >
               {pendingOrderCount > 0 && (
                 <span className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
@@ -1140,7 +1145,7 @@ const Index = () => {
                   <button
                     onClick={() => setActiveView("cash")}
                     disabled={cashPayDisabled || cashQuotaBlocked || splitHappening}
-                    className={`relative overflow-hidden rounded-3xl border-2 shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:pointer-events-none ${
+                    className={`relative overflow-hidden rounded-3xl border-2 shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 flex-1 active:scale-[0.98] transition-transform disabled:pointer-events-none ${
                       splitHappening
                         ? 'bg-destructive/10 border-destructive/50'  // Split in progress: keep the notice fully readable (no dim)
                         : 'bg-card border-border disabled:opacity-40'
@@ -1211,7 +1216,7 @@ const Index = () => {
                       data-testid="direct-lana-tile"
                       onClick={() => setActiveView("direct-lana")}
                       disabled={noShopSelected}
-                      className="relative overflow-hidden rounded-3xl bg-card border-2 border-primary/40 shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                      className="relative overflow-hidden rounded-3xl bg-card border-2 border-primary/40 shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 flex-1 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                     >
                       {unseenLinks > 0 && (
                         <span data-testid="direct-links-badge" className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
@@ -1242,7 +1247,7 @@ const Index = () => {
                   <button
                     onClick={() => openLanaView("lana")}
                     disabled={lanaPayDisabled || lanaPayoutMissing}
-                    className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                    className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 flex-1 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {/* Mandala background mesh */}
                     <img
@@ -1271,7 +1276,7 @@ const Index = () => {
                   <button
                     onClick={openLanaOnline}
                     disabled={noCompanyUnit ? noShopSelected : (lanaPayDisabled || lanaPayoutMissing)}
-                    className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
+                    className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 flex-1 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {unseenPaidCount > 0 && (
                       <span className="absolute top-3 right-3 z-20 min-w-7 h-7 px-2 rounded-full bg-destructive text-destructive-foreground text-sm font-bold flex items-center justify-center shadow">
