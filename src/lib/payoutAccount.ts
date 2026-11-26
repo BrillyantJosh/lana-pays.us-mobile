@@ -4,8 +4,9 @@
  *
  * Through this till such a shop sells for CASH only. A LANA sale through the
  * brain pays the shop's invoice to a bank account, which this shop does not
- * have, so the till shows no LANA and no Lana-online tile for it, and the server
- * refuses those sales anyway (server/lib/noPayoutAccount.ts). It issues no
+ * have, so the till shows no brain LANA tile for it, its Lana-online makes a
+ * LANA neposredno payment link instead (lib/onlineRequestRail.ts, 26 Nov 2026),
+ * and the server refuses brain sales anyway (server/lib/noPayoutAccount.ts). It issues no
  * invoices either: the seller says what was sold, and the till adds the unit's
  * next sale number (server/saleNumbers.ts).
  *

@@ -393,6 +393,7 @@
   "lanaOnline.noteOptional": "可选",
   "lanaOnline.notePlaceholder": "这笔付款是做什么用的，或是给谁的？",
   "lanaOnline.noteHint": "客户在付款页面上也能看到此备注。",
+  "lanaOnline.directOff": "该店铺尚未开启 LANA 直接付款，因此无法创建付款链接。管理员可在 mobile.lanapays.us/admin 开启。在此之前，该店铺收取现金。",
   "home.orders": "订单",
   "home.ordersSubtitle": "待发货的网店订单",
   "home.foodCornerTitle": "Točka obilja 订单：{{count}}",

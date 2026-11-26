@@ -393,6 +393,7 @@
   "lanaOnline.noteOptional": "необязательно",
   "lanaOnline.notePlaceholder": "За что этот платёж или для кого он?",
   "lanaOnline.noteHint": "Покупатель тоже видит это примечание на странице оплаты.",
+  "lanaOnline.directOff": "LANA напрямую для этого магазина ещё не включено, поэтому ссылку на оплату создать нельзя. Его включает администратор на mobile.lanapays.us/admin. До тех пор магазин принимает наличные.",
   "home.orders": "Заказы",
   "home.ordersSubtitle": "Заказы из интернет-магазина к отправке",
   "home.foodCornerTitle": "Заказы на Točka obilja: {{count}}",

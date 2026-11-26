@@ -393,6 +393,7 @@
   "lanaOnline.noteOptional": "optional",
   "lanaOnline.notePlaceholder": "Wofür ist diese Zahlung oder für wen?",
   "lanaOnline.noteHint": "Der Kunde sieht diese Notiz auch auf der Zahlungsseite.",
+  "lanaOnline.directOff": "LANA direkt ist für diesen Shop noch nicht eingeschaltet, daher kann kein Zahlungslink erstellt werden. Der Administrator schaltet es unter mobile.lanapays.us/admin ein. Bis dahin nimmt der Shop Bargeld an.",
   "home.orders": "Bestellungen",
   "home.ordersSubtitle": "Onlineshop-Bestellungen zum Versand",
   "home.foodCornerTitle": "Bestellungen auf Točka obilja: {{count}}",

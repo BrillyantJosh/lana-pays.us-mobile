@@ -8,7 +8,9 @@
  * greyed by Direct Fund capacity or by a Split. When it is off for a reason the
  * seller can fix, the reason is said; when the switch is simply off, nothing.
  * A switch on shop.lanapays.us or in the admin setting reaches the till with
- * the next poll, and an open direct tab is never taken away.
+ * the next poll, and an open direct tab is never taken away. The Lana-online
+ * tile stays for such a shop (26 Nov 2026) and is handed the shop's direct view:
+ * its request is a LANA neposredno link, or, with the switch off, the reason.
  *
  * The real Index page; every tab and the chrome around it are stubs.
  */
@@ -39,7 +41,9 @@ vi.mock('@/components/MenuDrawer', () => ({ default: () => null }));
 vi.mock('@/components/MobileQuotaPanel', () => ({ default: () => null }));
 vi.mock('@/components/tabs/CashTab', () => ({ default: () => <div>CASH-TAB</div> }));
 vi.mock('@/components/tabs/LanaTab', () => ({ default: () => <div>LANA-TAB</div> }));
-vi.mock('@/components/tabs/LanaOnlineTab', () => ({ default: () => <div>LANA-ONLINE-TAB</div> }));
+vi.mock('@/components/tabs/LanaOnlineTab', () => ({
+  default: (p: any) => <div>LANA-ONLINE-TAB noCompany={String(p.noCompany)} direct={JSON.stringify(p.directLana ?? null)}</div>,
+}));
 vi.mock('@/components/tabs/DirectLanaTab', () => ({
   default: (p: any) => <div>DIRECT-LANA-TAB unit={p.unit.unit_id} wallet={p.unit.lanapays_payout_wallet} owner={p.unit.owner_hex}</div>,
 }));
@@ -108,12 +112,15 @@ async function open() {
 }
 
 describe('a shop without a company whose direct button is on', () => {
-  it('the "LANA direct" tile, and neither brain LANA tile', async () => {
+  it('the "LANA direct" tile, no brain LANA tile; Lana-online stays and makes a LANA neposredno link', async () => {
     await open();
     expect(await screen.findByTestId('direct-lana-tile')).toHaveTextContent(i18n.t('directLana.tileTitle'));
     expect(brainLanaTile()).not.toBeInTheDocument();
-    expect(lanaOnlineTile()).not.toBeInTheDocument();
+    expect(lanaOnlineTile()).toBeInTheDocument();
     expect(directNotice()).not.toBeInTheDocument();
+    fireEvent.click(lanaOnlineTile()!);
+    expect(await screen.findByText(`LANA-ONLINE-TAB noCompany=true direct=${JSON.stringify(ON)}`)).toBeInTheDocument();
+    expect(screen.queryByTestId('no-company-lana-closed')).not.toBeInTheDocument();
   });
 
   it('opens the direct till for this shop, with its wallet and its owner', async () => {
@@ -165,6 +172,17 @@ describe('off: a reason the seller can act on is said, a switch that is off says
     expect(directTile()).not.toBeInTheDocument();
     expect(directNotice()).not.toBeInTheDocument();
     expect(brainLanaTile()).not.toBeInTheDocument();
+  });
+
+  it('the switch is off: Lana-online is there and its tab is told so (it says the administrator switches it on), never "no bank account"', async () => {
+    const OFF = { enabled: false, reason: 'DIRECT_LANA_OFF' };
+    units = [noCompany(OFF)];
+    await open();
+    await screen.findByTestId('no-company-note');
+    fireEvent.click(lanaOnlineTile()!);
+    expect(await screen.findByText(`LANA-ONLINE-TAB noCompany=true direct=${JSON.stringify(OFF)}`)).toBeInTheDocument();
+    expect(screen.queryByTestId('no-company-lana-closed')).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('purchase.unitNoPayoutAccount'))).not.toBeInTheDocument();
   });
 
   for (const reason of ['WALLET_INVALID', 'PAYEE_FROZEN', 'RATE_UNAVAILABLE', 'MARGIN_INVALID']) {

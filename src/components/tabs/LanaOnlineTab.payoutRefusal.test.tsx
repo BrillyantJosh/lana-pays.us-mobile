@@ -1,7 +1,10 @@
 /**
  * Lana-online, when the server refuses to make a link because the shop has no
- * bank account (UNIT_NO_PAYOUT_ACCOUNT, 23 Nov 2026): the seller reads why, in
- * their language, not the raw answer. Every other refusal reads as before.
+ * bank account (UNIT_NO_PAYOUT_ACCOUNT, 23 Nov 2026): the seller does not read
+ * the raw answer. Since 26 Nov 2026 such a shop's online payment request is a
+ * LANA neposredno link, so the same press makes that link instead
+ * (LanaOnlineTab.direct.e2e.test.tsx runs it against the real routes), and
+ * "no bank account" is never shown. Every other refusal reads as before.
  */
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -32,15 +35,25 @@ vi.mock('@/lib/compress-image', () => ({ compressImage: vi.fn(async (f: File) =>
 const UNIT = '8d20dd51c92f4f0ba003d33e66e23d3f';
 const WORDS = 'This shop has no bank account, so it cannot be paid with LANA this way. Cash works as usual.';
 let createAnswer: { status: number; body: any };
+/** What POST /api/direct-lana/links answers (the LANA neposredno link made instead). */
+let linkAnswer: { status: number; body: any };
+let linkCalls: any[] = [];
 
 const json = (status: number, body: any) =>
   Promise.resolve({ ok: status >= 200 && status < 300, status, json: async () => body } as Response);
 
 beforeEach(async () => {
   await i18n.changeLanguage('en');
+  linkCalls = [];
+  linkAnswer = { status: 409, body: { success: false, code: 'DIRECT_LANA_OFF', error: 'Direct LANA is not switched on for this shop yet.' } };
   vi.stubGlobal('fetch', vi.fn((url: string, init?: any) => {
     if (url.startsWith('/api/payment-requests') && init?.method === 'POST') return json(createAnswer.status, createAnswer.body);
     if (url.startsWith('/api/payment-requests')) return json(200, { success: true, requests: [] });
+    if (url === '/api/direct-lana/links' && init?.method === 'POST') {
+      linkCalls.push(JSON.parse(init.body));
+      return json(linkAnswer.status, linkAnswer.body);
+    }
+    if (url.startsWith('/api/direct-lana/links')) return json(200, { success: true, links: [] });
     return json(404, {});
   }) as any);
 });
@@ -54,10 +67,33 @@ async function createLink() {
 }
 
 describe('making a link', () => {
-  it('refused for a shop without a bank account: the reason in words', async () => {
+  it('refused for a shop without a bank account: the same press asks for a LANA neposredno link, never "no bank account"', async () => {
     createAnswer = { status: 409, body: { success: false, code: 'UNIT_NO_PAYOUT_ACCOUNT', error: WORDS, message: WORDS } };
     await createLink();
-    expect(await screen.findByText(i18n.t('purchase.unitNoPayoutAccount'))).toBeInTheDocument();
+    // LANA neposredno is not switched on for the shop: the plain reason, and who switches it on.
+    expect(await screen.findByText(i18n.t('lanaOnline.directOff'))).toBeInTheDocument();
+    expect(linkCalls).toEqual([{ unit_id: UNIT, amount: '12.50', currency: 'EUR', invoice_number: 'R-17' }]);
+    expect(screen.queryByText(i18n.t('purchase.unitNoPayoutAccount'))).not.toBeInTheDocument();
+    expect(screen.queryByText(WORDS)).not.toBeInTheDocument();
+  });
+
+  it('— and when it is on for the shop, the link is made', async () => {
+    createAnswer = { status: 409, body: { success: false, code: 'UNIT_NO_PAYOUT_ACCOUNT', error: WORDS, message: WORDS } };
+    const token = 'A'.repeat(32);
+    linkAnswer = {
+      status: 201,
+      body: {
+        success: true,
+        link: {
+          id: `dll_${'0'.repeat(32)}`, token, path: `/pay-direct/${token}`, sale_id: `dls_${'0'.repeat(32)}`, unit_id: UNIT,
+          unit_name: 'Kmetija Novak', currency: 'EUR', invoice_cents: '1250', margin_percent: 0, pay_cents: '1250',
+          invoice_number: 'R-17', note: null, status: 'open', created_at: 1795674872, expires_at: 1796279672, payment: null,
+        },
+      },
+    };
+    await createLink();
+    expect((await screen.findByTestId('online-direct-url')).textContent).toBe(`${window.location.origin}/pay-direct/${token}`);
+    expect(screen.queryByText(WORDS)).not.toBeInTheDocument();
   });
 
   it('every other refusal reads as before', async () => {

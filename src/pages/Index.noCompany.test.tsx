@@ -3,9 +3,11 @@
  * (KIND 30901 payout_account "none", Brilly 23 Nov 2026).
  *
  * Such a shop sells for cash through this till and takes LANA only directly,
- * never through the brain. So: no LANA tile, no Lana-online tile, no notice
- * asking for bank details, a calm note instead, and the Split and monthly-limit
- * texts do not send the seller to LANA. A shop that switches on
+ * never through the brain. So: no brain LANA tile, no notice asking for bank
+ * details, a calm note instead, and the Split and monthly-limit texts do not
+ * send the seller to LANA. Its Lana-online tile stays (26 Nov 2026): there the
+ * online payment request is a LANA neposredno payment link, never the brain's
+ * request (LanaOnlineTab.direct.e2e.test.tsx). A shop that switches on
  * shop.lanapays.us reaches the till by itself with the next poll (the selected
  * unit used to keep its old payout fields until a reload), but a LANA tab that
  * is already open is never taken away: its answer may be the only place the
@@ -41,7 +43,9 @@ vi.mock('@/components/MenuDrawer', () => ({ default: () => null }));
 vi.mock('@/components/MobileQuotaPanel', () => ({ default: () => null }));
 vi.mock('@/components/tabs/CashTab', () => ({ default: (p: any) => <div>CASH-TAB noCompany={String(p.noCompany)}</div> }));
 vi.mock('@/components/tabs/LanaTab', () => ({ default: () => <div>LANA-TAB</div> }));
-vi.mock('@/components/tabs/LanaOnlineTab', () => ({ default: () => <div>LANA-ONLINE-TAB</div> }));
+vi.mock('@/components/tabs/LanaOnlineTab', () => ({
+  default: (p: any) => <div>LANA-ONLINE-TAB noCompany={String(p.noCompany)} direct={JSON.stringify(p.directLana ?? null)}</div>,
+}));
 vi.mock('@/components/tabs/WalletsTab', () => ({ default: () => <div>WALLETS-TAB</div> }));
 vi.mock('@/components/tabs/OrdersTab', () => ({ default: () => <div>ORDERS-TAB</div> }));
 vi.mock('@/components/tabs/RegularCustomersTab', () => ({ default: () => <div>REGULARS-TAB</div> }));
@@ -119,16 +123,36 @@ describe('a shop with a company: the home screen as before', () => {
 });
 
 describe('a shop without a company and without a bank account', () => {
-  it('no LANA tile, no Lana-online tile, the calm note instead', async () => {
+  it('no brain LANA tile, the calm note instead; the Lana-online tile stays', async () => {
     units = [noCompanyUnit];
     await open();
     // No direct-LANA button in this answer (an older server, or the switch off): the note says cash only.
     expect(await screen.findByText(i18n.t('home.noCompanyNoteCashOnly'))).toBeInTheDocument();
     expect(screen.queryByText(i18n.t('home.noCompanyNote'))).not.toBeInTheDocument();
     expect(lanaTile()).not.toBeInTheDocument();
-    expect(lanaOnlineTile()).not.toBeInTheDocument();
+    // Lana-online makes a LANA neposredno link for it (26 Nov 2026), not the brain's request.
+    expect(lanaOnlineTile()).toBeInTheDocument();
     // The cash tile is there as for every shop.
     expect(screen.getByText(i18n.t('home.cashPayment'))).toBeInTheDocument();
+  });
+
+  it('Lana-online opens the form of the shop without a company, never the "no bank account" panel', async () => {
+    units = [noCompanyUnit];
+    await open();
+    await screen.findByTestId('no-company-note');
+    // Not greyed by Direct Fund capacity or a missing bank account: neither is used.
+    expect(lanaOnlineTile()!.closest('button')).not.toBeDisabled();
+    fireEvent.click(lanaOnlineTile()!);
+    expect(await screen.findByText('LANA-ONLINE-TAB noCompany=true direct=null')).toBeInTheDocument();
+    expect(screen.queryByTestId('no-company-lana-closed')).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('purchase.unitNoPayoutAccount'))).not.toBeInTheDocument();
+  });
+
+  it('— a shop with a company opens Lana-online as before', async () => {
+    await open();
+    await waitFor(() => expect(lanaTile()).toBeInTheDocument());
+    fireEvent.click(lanaOnlineTile()!);
+    expect(await screen.findByText('LANA-ONLINE-TAB noCompany=false direct=null')).toBeInTheDocument();
   });
 
   it('is never asked for bank details, whatever the payout fields say', async () => {
@@ -186,7 +210,7 @@ describe('a switch on shop.lanapays.us reaches the till by itself', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
   }
 
-  it('company → without a company: the LANA tiles go, the note comes, no reload (the single unit is auto-selected)', async () => {
+  it('company → without a company: the brain LANA tile goes, the note comes, no reload (the single unit is auto-selected)', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     await open();
     await waitFor(() => expect(lanaTile()).toBeInTheDocument());
@@ -196,7 +220,23 @@ describe('a switch on shop.lanapays.us reaches the till by itself', () => {
 
     await waitFor(() => expect(note()).toBeInTheDocument());
     expect(lanaTile()).not.toBeInTheDocument();
-    expect(lanaOnlineTile()).not.toBeInTheDocument();
+    // Lana-online stays: for this shop it now makes a LANA neposredno link.
+    expect(lanaOnlineTile()).toBeInTheDocument();
+  });
+
+  it('a Lana-online tab already open when the switch arrives learns it, and makes a LANA neposredno link from then on', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await open();
+    await waitFor(() => expect(lanaTile()).toBeInTheDocument());
+    fireEvent.click(lanaOnlineTile()!);
+    expect(await screen.findByText('LANA-ONLINE-TAB noCompany=false direct=null')).toBeInTheDocument();
+
+    units = [noCompanyUnit];
+    await nextPoll();
+
+    // The same tab, told: no "no bank account" panel takes it away.
+    expect(await screen.findByText('LANA-ONLINE-TAB noCompany=true direct=null')).toBeInTheDocument();
+    expect(screen.queryByTestId('no-company-lana-closed')).not.toBeInTheDocument();
   });
 
   it('without a company → company: the LANA tiles come back', async () => {

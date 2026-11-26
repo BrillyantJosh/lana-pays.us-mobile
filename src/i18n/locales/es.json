@@ -393,6 +393,7 @@
   "lanaOnline.noteOptional": "opcional",
   "lanaOnline.notePlaceholder": "¿A qué corresponde este pago o para quién es?",
   "lanaOnline.noteHint": "El cliente también ve esta nota en la página de pago.",
+  "lanaOnline.directOff": "LANA directo aún no está activado para esta tienda, así que no se puede crear un enlace de pago. El administrador lo activa en mobile.lanapays.us/admin. Hasta entonces, la tienda acepta efectivo.",
   "home.orders": "Pedidos",
   "home.ordersSubtitle": "Pedidos de la tienda online por enviar",
   "home.foodCornerTitle": "Pedidos en Točka obilja: {{count}}",

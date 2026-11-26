@@ -393,6 +393,7 @@
   "lanaOnline.noteOptional": "opcjonalnie",
   "lanaOnline.notePlaceholder": "Czego dotyczy ta płatność lub dla kogo jest?",
   "lanaOnline.noteHint": "Klient również widzi tę notatkę na stronie płatności.",
+  "lanaOnline.directOff": "LANA bezpośrednio nie jest jeszcze włączone dla tego sklepu, więc nie można utworzyć linku do płatności. Włącza je administrator na mobile.lanapays.us/admin. Do tego czasu sklep przyjmuje gotówkę.",
   "home.orders": "Zamówienia",
   "home.ordersSubtitle": "Zamówienia ze sklepu online do wysyłki",
   "home.foodCornerTitle": "Zamówienia w Točka obilja: {{count}}",

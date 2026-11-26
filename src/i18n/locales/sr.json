@@ -393,6 +393,7 @@
   "lanaOnline.noteOptional": "neobavezno",
   "lanaOnline.notePlaceholder": "Na šta se plaćanje odnosi ili kome je namenjeno?",
   "lanaOnline.noteHint": "Ovu napomenu vidi i kupac na stranici za plaćanje.",
+  "lanaOnline.directOff": "LANA direktno za ovu prodavnicu još nije uključeno, pa link za plaćanje nije moguće napraviti. Uključuje ga administrator na mobile.lanapays.us/admin. Do tada prodavnica prima gotovinu.",
   "home.orders": "Porudžbine",
   "home.ordersSubtitle": "Porudžbine iz online prodavnice za slanje",
   "home.foodCornerTitle": "Porudžbine na Točki obilja: {{count}}",

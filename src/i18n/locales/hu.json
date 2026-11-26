@@ -393,6 +393,7 @@
   "lanaOnline.noteOptional": "nem kötelező",
   "lanaOnline.notePlaceholder": "Mire vonatkozik ez a fizetés, vagy kinek szól?",
   "lanaOnline.noteHint": "Ezt a megjegyzést a vásárló is látja a fizetési oldalon.",
+  "lanaOnline.directOff": "A LANA közvetlenül ennél az üzletnél még nincs bekapcsolva, ezért fizetési linket nem lehet létrehozni. Az adminisztrátor kapcsolja be a mobile.lanapays.us/admin oldalon. Addig az üzlet készpénzt fogad el.",
   "home.orders": "Rendelések",
   "home.ordersSubtitle": "Webshop-rendelések feladásra",
   "home.foodCornerTitle": "Točka obilja rendelések: {{count}}",

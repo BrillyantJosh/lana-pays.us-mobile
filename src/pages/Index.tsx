@@ -494,9 +494,14 @@ const Index = () => {
     });
   }, []);
 
-  /** Open a LANA view, deciding once whether this shop may sell for LANA here. */
+  /**
+   * Open a LANA view, deciding once whether this shop may sell for LANA here.
+   * Lana-online is never closed: for a shop without a company it makes a LANA
+   * neposredno payment link instead of the brain's request (LanaOnlineTab,
+   * lib/onlineRequestRail.ts; Brilly, 26 Nov 2026).
+   */
   const openLanaView = (view: "lana" | "lana-online") => {
-    setLanaViewClosed(noCompanyUnit);
+    setLanaViewClosed(view === "lana" && noCompanyUnit);
     setActiveView(view);
   };
 
@@ -1180,8 +1185,9 @@ const Index = () => {
                   </button>
 
                   {/* A shop without a company: cash through this till, LANA only
-                      directly. Neither LANA tile is shown (the server refuses
-                      both rails for it too); a calm note says why. */}
+                      directly. The brain's LANA tile is not shown (the server
+                      refuses that rail for it too); a calm note says why. Its
+                      Lana-online tile below makes a LANA neposredno link. */}
                   {noCompanyUnit && (
                     <div data-testid="no-company-note" className="rounded-2xl bg-primary/5 border border-primary/20 p-4 flex items-start gap-3">
                       <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
@@ -1256,11 +1262,15 @@ const Index = () => {
 
                   {/* Lana-online — remote payment request. Same gates as the LANA
                       button (payout data required; splitHappening never blocks the
-                      LANA rail). Red badge = paid requests not yet seen. */}
-                  {!noCompanyUnit && (
+                      LANA rail). Red badge = paid requests not yet seen.
+                      A shop without a company has it too (Brilly, 26 Nov 2026): its
+                      request is a LANA neposredno payment link into the shop's own
+                      wallet, not through the brain, so neither a bank account nor
+                      Direct Fund capacity gates it; when LANA neposredno is not on
+                      for the shop, the tab says why (LanaOnlineTab). */}
                   <button
                     onClick={openLanaOnline}
-                    disabled={lanaPayDisabled || lanaPayoutMissing}
+                    disabled={noCompanyUnit ? noShopSelected : (lanaPayDisabled || lanaPayoutMissing)}
                     className="relative overflow-hidden rounded-3xl bg-card border-2 border-border shadow-lg flex flex-col items-center justify-center gap-3 p-5 min-h-44 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:pointer-events-none"
                   >
                     {unseenPaidCount > 0 && (
@@ -1282,7 +1292,6 @@ const Index = () => {
                     <span className="relative z-10 text-xl font-bold text-foreground text-center leading-tight">{t('home.payLanaOnline')}</span>
                     <span className="relative z-10 text-xs text-muted-foreground text-center leading-snug">{t('home.lanaOnlinePayment')}</span>
                   </button>
-                  )}
 
                   {noFunds && !noShopSelected && (
                     <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
@@ -1478,7 +1487,15 @@ const Index = () => {
               <LanaTab paymentRequest={lanaPaymentRequest} onClearRequest={() => setLanaPaymentRequest(null)} unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} />
             )}
             {activeView === "lana-online" && !lanaViewClosed && (
-              <LanaOnlineTab unitCurrency={effectiveUnit?.currency} unitId={effectiveUnit?.unit_id} merchantHex={session?.nostrHexId} />
+              <LanaOnlineTab
+                unitCurrency={effectiveUnit?.currency}
+                unitId={effectiveUnit?.unit_id}
+                merchantHex={session?.nostrHexId}
+                noCompany={noCompanyUnit}
+                directLana={noCompanyUnit ? effectiveUnit?.direct_lana ?? null : null}
+                unitName={effectiveUnit?.name}
+                onLinksSeen={linksSeen}
+              />
             )}
             {/* Keyed by the shop: another shop starts from nothing, and the
                 card key of an unfinished sale is zeroed as the tab closes. */}

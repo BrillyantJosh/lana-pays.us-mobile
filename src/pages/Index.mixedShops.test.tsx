@@ -3,17 +3,19 @@
  * shop with a company and a shop of a person without a company. The till
  * follows the shop chosen on the home screen, by itself: the company shop gets
  * both brain LANA tiles and its cash sale as always; the shop without a company
- * gets the calm note, "LANA neposredno" and the cash sale with its own sale
- * numbers. Switching back and forth changes it every time.
+ * gets the calm note, "LANA neposredno", the cash sale with its own sale
+ * numbers, and a Lana-online that makes a LANA neposredno link (26 Nov 2026).
+ * Switching back and forth changes it every time.
  * (The harness is the one of Index.noCompany.test.tsx, described below.)
  *
  * The home screen for a shop without a company and without a bank account
  * (KIND 30901 payout_account "none", Brilly 23 Nov 2026).
  *
  * Such a shop sells for cash through this till and takes LANA only directly,
- * never through the brain. So: no LANA tile, no Lana-online tile, no notice
- * asking for bank details, a calm note instead, and the Split and monthly-limit
- * texts do not send the seller to LANA. A shop that switches on
+ * never through the brain. So: no brain LANA tile, no notice asking for bank
+ * details, a calm note instead, and the Split and monthly-limit texts do not
+ * send the seller to LANA; its Lana-online makes a LANA neposredno link
+ * (26 Nov 2026). A shop that switches on
  * shop.lanapays.us reaches the till by itself with the next poll (the selected
  * unit used to keep its old payout fields until a reload), but a LANA tab that
  * is already open is never taken away: its answer may be the only place the
@@ -49,7 +51,7 @@ vi.mock('@/components/MenuDrawer', () => ({ default: () => null }));
 vi.mock('@/components/MobileQuotaPanel', () => ({ default: () => null }));
 vi.mock('@/components/tabs/CashTab', () => ({ default: (p: any) => <div>CASH-TAB unit={p.unitId} noCompany={String(p.noCompany)}</div> }));
 vi.mock('@/components/tabs/LanaTab', () => ({ default: () => <div>LANA-TAB</div> }));
-vi.mock('@/components/tabs/LanaOnlineTab', () => ({ default: (p: any) => <div>LANA-ONLINE-TAB unit={p.unitId}</div> }));
+vi.mock('@/components/tabs/LanaOnlineTab', () => ({ default: (p: any) => <div>LANA-ONLINE-TAB unit={p.unitId} noCompany={String(p.noCompany)}</div> }));
 vi.mock('@/components/tabs/DirectLanaTab', () => ({ default: (p: any) => <div>DIRECT-LANA-TAB unit={p.unit.unit_id}</div> }));
 vi.mock('@/components/tabs/WalletsTab', () => ({ default: () => <div>WALLETS-TAB</div> }));
 vi.mock('@/components/tabs/OrdersTab', () => ({ default: () => <div>ORDERS-TAB</div> }));
@@ -131,15 +133,22 @@ describe('one seller with a company shop and a shop without a company', () => {
       fireEvent.click(screen.getByText(i18n.t('home.cashPayment')));
       expect(await screen.findByText(`CASH-TAB unit=${COMPANY} noCompany=false`)).toBeInTheDocument();
       back();
+      fireEvent.click(lanaOnlineTile()!);
+      expect(await screen.findByText(`LANA-ONLINE-TAB unit=${COMPANY} noCompany=false`)).toBeInTheDocument();
+      back();
 
       // The shop without a company: the note and LANA neposredno, no brain LANA tile; cash with its own numbers.
       fireEvent.click(await screen.findByText('Kmetija Novak'));
       await waitFor(() => expect(directTile()).toBeInTheDocument());
       expect(note()).toBeInTheDocument();
       expect(lanaTile()).not.toBeInTheDocument();
-      expect(lanaOnlineTile()).not.toBeInTheDocument();
+      // Lana-online stays, and for this shop it makes a LANA neposredno link.
+      expect(lanaOnlineTile()).toBeInTheDocument();
       fireEvent.click(screen.getByText(i18n.t('home.cashPayment')));
       expect(await screen.findByText(`CASH-TAB unit=${PERSON} noCompany=true`)).toBeInTheDocument();
+      back();
+      fireEvent.click(await screen.findByText(i18n.t('home.payLanaOnline')));
+      expect(await screen.findByText(`LANA-ONLINE-TAB unit=${PERSON} noCompany=true`)).toBeInTheDocument();
       back();
       fireEvent.click(await screen.findByTestId('direct-lana-tile'));
       expect(await screen.findByText(`DIRECT-LANA-TAB unit=${PERSON}`)).toBeInTheDocument();

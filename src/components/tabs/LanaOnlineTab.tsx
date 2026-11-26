@@ -10,6 +10,18 @@
  * Below the flow: the unit's last 10 requests with live status
  * (pending/paid/cancelled/expired, 15s poll while the tab is open) and a
  * link to the full history page (/lana-online/history).
+ *
+ * A SHOP WITHOUT A COMPANY AND WITHOUT A BANK ACCOUNT (KIND 30901
+ * payout_account "none", Brilly 26 Nov 2026): the brain pays a shop's invoice
+ * to a bank account, which this shop does not have, so the brain's request is
+ * never made for it. Its online payment request is a LANA neposredno payment
+ * link instead, made by the same signed call as the till's "Send a payment
+ * link" (POST /api/direct-lana/links): the customer pays it from home, from
+ * their own card, straight into the shop's Main Wallet, with the shop's margin
+ * (lib/onlineRequestRail.ts). No receipt photo is taken (a direct link carries
+ * none), and the list shows the shop's payment links. When LANA neposredno is
+ * not on for the shop, the tab says so, and that the administrator switches it
+ * on; it never says "no bank account".
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -18,7 +30,7 @@ import { withCallerHex, withCallerField } from '@/lib/callerIdentity';
 import { Link } from 'react-router-dom';
 import {
   Loader2, Camera, CheckCircle, CheckCircle2, ImagePlus, Globe,
-  Copy, Check, Share2, History, ChevronRight,
+  Copy, Check, Share2, History, ChevronRight, Info,
 } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { compressImage } from '@/lib/compress-image';
@@ -27,13 +39,23 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
 import { currencySymbol as symbolFor } from '@/lib/format';
-import { payoutRefusalKey } from '@/lib/payoutAccount';
+import { payoutRefusalKey, isUnitNoPayoutAccount } from '@/lib/payoutAccount';
 import { PaymentRequestList, payUrlFor, type PaymentRequestRow } from '@/components/PaymentRequestList';
+import { DirectLinkRequestList, linkMoney } from '@/components/DirectLinkRequestList';
 import { freshReceiptFields, checkDedup, canContinueAfterHit, type DedupHit } from '@/lib/receiptDedup';
 import { DuplicateNumberFix } from '@/components/DuplicateNumberFix';
 import { RequestNoteField } from '@/components/RequestNoteField';
 import { noteToSend } from '@/lib/requestNote';
+import { createDirectLink, fetchDirectLinks, markDirectLinksSeen, directLinkUrl, directReasonKey, answerCode } from '@/lib/directLanaApi';
+import { onlineRequestRail, closedReasonKey, isDirectAmount, DIRECT_LANA_OFF, type DirectLanaView } from '@/lib/onlineRequestRail';
+import type { DirectLink } from '@/components/tabs/DirectLanaTab';
 import lanaIcon from '@/assets/lana-icon.png';
+
+/** A payment link as the seller's routes answer (server lib/directLanaLinks.ts sellerLinkView). */
+type SellerLink = DirectLink & { seen?: boolean; unit_name?: string };
+
+/** The longest invoice number a direct link takes (server lib/directLanaCore.ts MAX_INVOICE_NUMBER). */
+const DIRECT_INVOICE_MAX = 64;
 
 /** Same own-dedup-screenshot heuristic as LanaTab/CashTab. */
 const OWN_DEDUP_PHRASES = [
@@ -55,19 +77,42 @@ interface LanaOnlineTabProps {
   unitCurrency?: string;
   unitId?: string;
   merchantHex?: string;
+  /** A shop without a company and without a bank account: its request is a LANA neposredno link. */
+  noCompany?: boolean;
+  /** Such a shop's LANA neposredno, as GET /api/business-units has it (absent: the server decides). */
+  directLana?: DirectLanaView | null;
+  /** The shop's name, for the text a shared link goes with. */
+  unitName?: string;
+  /** The shop's paid links were shown here: the home screen's notice of them goes. */
+  onLinksSeen?: (unitId: string) => void;
 }
 
 type Step = 'receipt' | 'entry' | 'created';
 
-const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps) => {
+const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex, noCompany, directLana, unitName, onLinksSeen }: LanaOnlineTabProps) => {
   const { t, i18n } = useTranslation();
   const { session } = useAuth();
   const currency = unitCurrency || session?.currency || 'GBP';
   const sym = symbolFor(currency);
   const hex = merchantHex || session?.nostrHexId || '';
+  const locale = i18n.language || 'en';
 
   const unitIdRef = useRef(unitId);
   unitIdRef.current = unitId;
+
+  // ── Which rail (lib/onlineRequestRail.ts) ────────────────────────────────
+  // The server already had this shop as one without a bank account when the
+  // till did not yet (a switch on shop.lanapays.us reaches the till with its
+  // next poll): from that answer on, this tab makes LANA neposredno links.
+  const [directByServer, setDirectByServer] = useState(false);
+  // The server said no link can be made for this shop now (DIRECT_LANA_OFF):
+  // the tab says why instead of the form, until the till's view of the shop changes.
+  const [directClosed, setDirectClosed] = useState<string | null>(null);
+  const rail = onlineRequestRail(noCompany === true || directByServer, noCompany === true ? directLana : undefined);
+  const direct = rail.rail !== 'brain';
+  const closedReason = rail.rail === 'closed' ? rail.reason : directClosed;
+  useEffect(() => { setDirectByServer(false); }, [unitId, noCompany]);
+  useEffect(() => { setDirectClosed(null); }, [unitId, noCompany, directLana?.enabled, directLana?.reason]);
 
   const [step, setStep] = useState<Step>('receipt');
 
@@ -96,10 +141,15 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
   // Created step state
   const [createdRequest, setCreatedRequest] = useState<PaymentRequestRow | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  // A shop without a company: the LANA neposredno link just made.
+  const [createdLink, setCreatedLink] = useState<SellerLink | null>(null);
 
   // Requests list (last 10, 15s poll while the tab is open)
   const [requests, setRequests] = useState<PaymentRequestRow[]>([]);
   const [listLoading, setListLoading] = useState(true);
+  // A shop without a company: its payment links instead (signed, newest first).
+  const [links, setLinks] = useState<SellerLink[]>([]);
+  const linksSeenSent = useRef<string | null>(null);
 
   const fetchRequests = useCallback(async () => {
     const unit = unitIdRef.current;
@@ -112,11 +162,40 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
     setListLoading(false);
   }, [hex]);
 
+  // Read through refs: the list's poll must not restart (and read again) on
+  // every render that hands over a new session object or callback.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const onLinksSeenRef = useRef(onLinksSeen);
+  onLinksSeenRef.current = onLinksSeen;
+
+  const fetchLinks = useCallback(async () => {
+    const unit = unitIdRef.current;
+    if (!unit) { setLinks([]); setListLoading(false); return; }
+    try {
+      const { status, data } = await fetchDirectLinks(sessionRef.current, unit);
+      if (status === 200 && Array.isArray(data?.links)) {
+        const fresh = data.links as SellerLink[];
+        setLinks(fresh);
+        // The link on the screen follows its payment.
+        setCreatedLink(prev => (prev ? fresh.find(l => l.id === prev.id) ?? prev : prev));
+        // Paid links shown here are seen, once per shop while the tab is open
+        // (as when the "LANA direct" tab lists them).
+        if (linksSeenSent.current !== unit && fresh.some(l => l.status === 'paid' && l.seen === false)) {
+          linksSeenSent.current = unit;
+          void markDirectLinksSeen(sessionRef.current, unit).then(() => onLinksSeenRef.current?.(unit)).catch(() => {});
+        }
+      }
+    } catch { /* keep previous list */ }
+    setListLoading(false);
+  }, []);
+
   useEffect(() => {
-    fetchRequests();
-    const interval = setInterval(fetchRequests, 15_000);
+    const read = direct ? fetchLinks : fetchRequests;
+    read();
+    const interval = setInterval(read, 15_000);
     return () => clearInterval(interval);
-  }, [fetchRequests, unitId]);
+  }, [fetchRequests, fetchLinks, direct, unitId]);
 
   // ── Receipt upload/analyze/dedup — same pipeline as LanaTab ──────────────
   const handleReceiptFile = async (rawFile: File) => {
@@ -208,8 +287,68 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
     setStep('entry');
   };
 
+  // ── A shop without a company: the LANA neposredno payment link ───────────
+  /** "The link could not be created: …", or a whole sentence this app already has. */
+  const linkRefusedText = (code: string) => {
+    const { key, sentence } = directReasonKey(code);
+    return sentence ? t(key) : t('directLana.linkRefused', { reason: t(key) });
+  };
+
+  /**
+   * The till's own link call (POST /api/direct-lana/links, signed): the invoice
+   * amount, the invoice number if there is one, the note. The server fixes the
+   * shop's margin of now and refuses what the till's "LANA direct" would refuse.
+   */
+  const createDirect = async () => {
+    const text = amount.trim();
+    if (!isDirectAmount(text)) {
+      setCreateError(linkRefusedText('AMOUNT_INVALID'));
+      return;
+    }
+    const invoice = invoiceNumber.trim();
+    const noteText = noteToSend(note);
+    try {
+      const { status, data } = await createDirectLink(session, {
+        unit_id: unitIdRef.current || '',
+        amount: text.replace(',', '.'),
+        currency,
+        ...(invoice ? { invoice_number: invoice } : {}),
+        ...(noteText ? { note: noteText } : {}),
+      });
+      if (status === 201 && data?.success && data.link) {
+        setCreatedLink(data.link);
+        setLinkCopied(false);
+        setStep('created');
+        fetchLinks();
+        return;
+      }
+      const code = answerCode(data) || 'GENERIC';
+      if (code === DIRECT_LANA_OFF) setDirectClosed(code);
+      else setCreateError(linkRefusedText(code));
+    } catch {
+      setCreateError(linkRefusedText('NETWORK'));
+    }
+  };
+
+  // A second tap before the button greys out must not make a second link: a
+  // link without an invoice number has nothing the server could refuse it by.
+  const creatingDirect = useRef(false);
+
   // ── Create the payment request ────────────────────────────────────────────
   const handleCreate = async () => {
+    if (direct) {
+      if (creatingDirect.current) return;
+      creatingDirect.current = true;
+      setIsCreating(true);
+      setCreateError(null);
+      try {
+        await createDirect();
+      } finally {
+        creatingDirect.current = false;
+        setIsCreating(false);
+      }
+      return;
+    }
     const fiat = parseFloat(amount.replace(',', '.'));
     if (!invoiceNumber.trim() || isNaN(fiat) || fiat <= 0) return;
     setIsCreating(true);
@@ -235,8 +374,14 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
       if (!res.ok || !json.success) {
         if (res.status === 409 && json?.error === 'DUPLICATE_INVOICE') {
           setCreateError(t('cash.duplicateInvoice', { date: '' }));
+        } else if (isUnitNoPayoutAccount(json)) {
+          // The server has this shop as one without a bank account already; the
+          // till has not heard yet. Nothing was stored for this request: the
+          // shop's online payment is a LANA neposredno link, made now instead.
+          setDirectByServer(true);
+          await createDirect();
         } else if (payoutRefusalKey(json)) {
-          // A shop without a bank account takes no LANA through a link.
+          // Another refusal about the shop's payout settings, in the seller's words.
           setCreateError(t(payoutRefusalKey(json)!));
         } else {
           setCreateError(json?.error || t('lana.purchaseFailed'));
@@ -267,6 +412,7 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
     setNote('');
     setCreateError(null);
     setCreatedRequest(null);
+    setCreatedLink(null);
     setLinkCopied(false);
   };
 
@@ -277,6 +423,29 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
     } catch { /* ignore */ }
+  };
+
+  const copyDirectLink = async () => {
+    if (!createdLink) return;
+    try {
+      await navigator.clipboard.writeText(directLinkUrl(createdLink));
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch { /* ignore */ }
+  };
+
+  const shareDirectLink = async () => {
+    if (!createdLink) return;
+    try {
+      await navigator.share({
+        title: t('directLana.linkShareTitle'),
+        text: t('directLana.linkShareText', {
+          amount: linkMoney(createdLink.pay_cents, createdLink.currency, locale),
+          unit: createdLink.unit_name || unitName || '',
+        }),
+        url: directLinkUrl(createdLink),
+      });
+    } catch { /* user cancelled / unsupported */ }
   };
 
   const shareCreatedLink = async () => {
@@ -295,26 +464,194 @@ const LanaOnlineTab = ({ unitCurrency, unitId, merchantHex }: LanaOnlineTabProps
   };
 
   // ── The recent-requests block (rendered under receipt/entry steps) ────────
+  // A shop without a company: its payment links (the history page lists the
+  // brain's requests only, so it is not offered).
   const RecentBlock = () => (
     <div className="flex flex-col gap-3 pt-2">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
           <History className="w-4 h-4 text-muted-foreground" />
-          {t('lanaOnline.recentRequests')}
+          {direct ? t('directLana.linksTitle') : t('lanaOnline.recentRequests')}
         </h3>
-        <Link to="/lana-online/history"
-          className="text-xs text-primary font-medium flex items-center gap-0.5 hover:underline">
-          {t('lanaOnline.fullHistory')}
-          <ChevronRight className="w-3.5 h-3.5" />
-        </Link>
+        {!direct && (
+          <Link to="/lana-online/history"
+            className="text-xs text-primary font-medium flex items-center gap-0.5 hover:underline">
+            {t('lanaOnline.fullHistory')}
+            <ChevronRight className="w-3.5 h-3.5" />
+          </Link>
+        )}
       </div>
       {listLoading ? (
         <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+      ) : direct ? (
+        <DirectLinkRequestList links={links.slice(0, 10)} onChanged={fetchLinks} />
       ) : (
         <PaymentRequestList rows={requests} merchantHex={hex} onCancelled={fetchRequests} />
       )}
     </div>
   );
+
+  // ─── A shop without a company: the LANA neposredno link ──────────────────
+  const directHeader = (
+    <div className="flex items-center gap-4">
+      <div className="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center shrink-0">
+        <Globe className="w-7 h-7 text-primary" />
+      </div>
+      <div>
+        <h2 className="font-display text-xl font-bold text-foreground">{t('lanaOnline.title')}</h2>
+        <p className="text-muted-foreground text-sm">{t('directLana.sendLinkHint')}</p>
+      </div>
+    </div>
+  );
+
+  /** The margin of a link, as the server's two exact amounts give it; a dash when they do not read. */
+  const marginMoney = (l: SellerLink) => {
+    try {
+      return linkMoney((BigInt(l.pay_cents) - BigInt(l.invoice_cents)).toString(), l.currency, locale);
+    } catch {
+      return '–';
+    }
+  };
+
+  if (direct && step === 'created' && createdLink) {
+    const l = createdLink;
+    const url = directLinkUrl(l);
+    const live = l.status === 'open' || l.status === 'paying';
+    return (
+      <div className="flex flex-col gap-5 px-6 py-4">
+        <div className="flex flex-col items-center gap-3 py-4">
+          <CheckCircle2 className="w-12 h-12 text-primary" />
+          <h2 className="font-display text-xl font-bold text-foreground">{t('directLana.linkCreated')}</h2>
+          <p data-testid="online-direct-total" className="text-2xl font-bold text-foreground">{linkMoney(l.pay_cents, l.currency, locale)}</p>
+          {l.margin_percent > 0 && (
+            <p data-testid="online-direct-margin" className="text-xs text-muted-foreground text-center">
+              {t('directLana.invoiceAmount')} {linkMoney(l.invoice_cents, l.currency, locale)}
+              {' · '}{t('directLana.marginLine', { percent: l.margin_percent })} +{marginMoney(l)}
+            </p>
+          )}
+          {l.invoice_number && <p className="text-sm text-muted-foreground">{t('cash.invoiceLabel', { number: l.invoice_number })}</p>}
+          {l.note && (
+            <p className="text-sm text-foreground/85 text-center break-words max-w-full" data-testid="created-note">
+              <span className="text-muted-foreground">{t('lanaOnline.noteLabel')}: </span>{l.note}
+            </p>
+          )}
+          <p data-testid="online-direct-status" className="text-sm font-semibold text-primary">{t(`directLana.linkStatus.${l.status}`)}</p>
+        </div>
+
+        {live && (
+          <div className="glass-card rounded-2xl border p-5 space-y-4">
+            <p className="text-xs text-muted-foreground">{t('lanaOnline.linkLabel')}</p>
+            <p data-testid="online-direct-url" className="text-sm font-mono text-foreground break-all bg-secondary rounded-xl p-3">{url}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Button onClick={copyDirectLink} variant="outline" className="h-12 rounded-xl gap-2">
+                {linkCopied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                {linkCopied ? t('lanaOnline.linkCopied') : t('lanaOnline.copyLink')}
+              </Button>
+              {typeof navigator.share === 'function' ? (
+                <Button onClick={shareDirectLink} className="h-12 rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
+                  <Share2 className="w-4 h-4" />
+                  {t('lanaOnline.shareLink')}
+                </Button>
+              ) : (
+                <Button onClick={copyDirectLink} className="h-12 rounded-xl gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
+                  <Copy className="w-4 h-4" />
+                  {t('lanaOnline.copyLink')}
+                </Button>
+              )}
+            </div>
+            <div className="flex flex-col items-center gap-2 pt-2">
+              <div className="bg-white p-3 rounded-xl">
+                <QRCode value={url} size={168} />
+              </div>
+              <p className="text-xs text-muted-foreground text-center">{t('lanaOnline.qrHint')}</p>
+            </div>
+            {l.expires_at && (
+              <p className="text-xs text-muted-foreground text-center">
+                {t('lanaOnline.expiresNote', { date: new Date(l.expires_at * 1000).toLocaleString(locale) })}
+              </p>
+            )}
+          </div>
+        )}
+
+        <Button onClick={resetForNew} variant="outline" className="w-full h-12 rounded-2xl text-sm font-semibold">
+          {t('lanaOnline.newRequest')}
+        </Button>
+
+        <RecentBlock />
+      </div>
+    );
+  }
+
+  if (direct && step !== 'created') {
+    // No receipt photo: a direct link carries none. Straight to the form, or
+    // to why there is none for this shop now.
+    return (
+      <div className="flex flex-col gap-5 px-6 py-4">
+        {directHeader}
+
+        {closedReason ? (
+          <div data-testid="online-direct-closed" className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-5 flex items-start gap-3">
+            <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-base font-medium text-foreground leading-relaxed">{t(closedReasonKey(closedReason))}</p>
+          </div>
+        ) : (
+          <>
+            <div className="glass-card rounded-2xl p-5 space-y-4">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-foreground">{t('directLana.invoiceNumberLabel')}</Label>
+                <Input
+                  data-testid="online-direct-invoice"
+                  placeholder={t('cash.invoicePlaceholder')}
+                  value={invoiceNumber}
+                  maxLength={DIRECT_INVOICE_MAX}
+                  onChange={(e) => setInvoiceNumber(e.target.value)}
+                  className="h-12 rounded-xl bg-background border-input"
+                />
+                <p className="text-xs text-muted-foreground">{t('directLana.invoiceNumberHint')}</p>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-foreground">
+                  {t('directLana.amountLabel', { symbol: sym })} <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  data-testid="online-direct-amount"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={t('cash.amountPlaceholder')}
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ''))}
+                  className="h-12 rounded-xl bg-background border-input"
+                />
+              </div>
+              <RequestNoteField value={note} onChange={setNote} />
+              <p className="text-xs text-muted-foreground">{t('directLana.linkPriceNote')}</p>
+            </div>
+
+            {createError && (
+              <div data-testid="online-direct-error" className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
+                <p className="text-sm text-destructive text-center">{createError}</p>
+              </div>
+            )}
+
+            <Button
+              data-testid="online-direct-create"
+              onClick={handleCreate}
+              disabled={!isDirectAmount(amount) || isCreating}
+              className="w-full h-14 rounded-2xl text-base font-semibold gap-3 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 disabled:opacity-50"
+            >
+              {isCreating ? (
+                <><Loader2 className="w-5 h-5 animate-spin" />{t('lanaOnline.creating')}</>
+              ) : (
+                t('lanaOnline.createRequest')
+              )}
+            </Button>
+          </>
+        )}
+
+        <RecentBlock />
+      </div>
+    );
+  }
 
   // ─── STEP: Created — the link to send ─────────────────────────────────────
   if (step === 'created' && createdRequest) {
