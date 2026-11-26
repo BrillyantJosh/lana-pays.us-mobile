@@ -1,7 +1,8 @@
 /**
- * The admin page's switch for LANA neposredno: it shows what is stored, and it
- * saves SIGNED with the admin's session key (NIP-98 bound to the exact body),
- * only that one setting. The server's own verifier judges what the page sent.
+ * The admin page has no switch for LANA neposredno any more (Brilly, 26 Nov
+ * 2026: "ne rabim stikala, naredi da povsod dela"): every shop without a
+ * company takes it. The page neither shows nor sends the old setting, and its
+ * other settings are saved as before.
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,7 +26,6 @@ vi.hoisted(() => {
 import { MemoryRouter } from 'react-router-dom';
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import i18n from '@/i18n';
-import { verifyNip98, forgetSpentTokens } from '../../server/lib/nip98';
 
 declare global {
   var __session: any;
@@ -44,7 +44,6 @@ const json = (status: number, body: unknown) =>
 
 beforeEach(async () => {
   await i18n.changeLanguage('en');
-  forgetSpentTokens();
   const sk = generateSecretKey();
   globalThis.__session = { nostrHexId: getPublicKey(sk), privateKeyHex: toHex(sk) };
   puts = [];
@@ -68,59 +67,26 @@ afterEach(() => vi.unstubAllGlobals());
 
 async function open() {
   render(<MemoryRouter><Admin /></MemoryRouter>);
-  return screen.findByTestId('admin-direct-lana');
+  // The page is up once its limits section is there.
+  await screen.findAllByText(i18n.t('common.save'));
 }
 
-describe('the LANA direct switch on the admin page', () => {
-  it('shows what is stored: off, and a unit list', async () => {
+describe('no LANA direct switch on the admin page', () => {
+  it('neither the section nor its words, whatever the server still has stored', async () => {
+    stored = '';
     await open();
-    expect((screen.getByTestId('admin-direct-lana-units') as HTMLInputElement).value).toBe('');
-    expect(screen.getByTestId('admin-direct-lana')).toHaveTextContent('Off by default');
+    expect(screen.queryByTestId('admin-direct-lana')).toBeNull();
+    expect(screen.queryByTestId('admin-direct-lana-units')).toBeNull();
+    expect(document.body.textContent).not.toContain('LANA direct (shops without a company)');
   });
 
-  it('saves only this setting, signed for exactly this body; the server\'s verifier accepts it', async () => {
-    await open();
-    fireEvent.change(screen.getByTestId('admin-direct-lana-units'), { target: { value: ' unit-1 ' } });
-    fireEvent.click(screen.getByTestId('admin-direct-lana-save'));
-    await waitFor(() => expect(screen.getByTestId('admin-direct-lana-state')).toHaveTextContent('Saved: on for unit-1.'));
-    expect(puts.length).toBe(1);
-    const sent = puts[0];
-    expect(JSON.parse(sent.body)).toEqual({ settings: { direct_lana_units: 'unit-1' } });
-    expect(sent.headers['x-admin-hex-id']).toBe(globalThis.__session.nostrHexId);
-    const verdict = verifyNip98(sent.headers.Authorization, 'PUT', '/api/admin/settings', { body: Buffer.from(sent.body, 'utf8') });
-    expect(verdict).toMatchObject({ ok: true, hex: globalThis.__session.nostrHexId });
-    // The token is bound to the body: the same token for another value is no good.
-    forgetSpentTokens();
-    const other = JSON.stringify({ settings: { direct_lana_units: '*' } });
-    expect(verifyNip98(sent.headers.Authorization, 'PUT', '/api/admin/settings', { body: Buffer.from(other, 'utf8') })).toMatchObject({ ok: false, reason: 'PAYLOAD_MISMATCH' });
-  });
-
-  it('empty switches it off for every shop; * for every shop without a company', async () => {
+  it('the other settings are saved as before, without the old setting in their body', async () => {
     stored = 'unit-1';
     await open();
-    await waitFor(() => expect((screen.getByTestId('admin-direct-lana-units') as HTMLInputElement).value).toBe('unit-1'));
-    fireEvent.change(screen.getByTestId('admin-direct-lana-units'), { target: { value: '' } });
-    fireEvent.click(screen.getByTestId('admin-direct-lana-save'));
-    await waitFor(() => expect(screen.getByTestId('admin-direct-lana-state')).toHaveTextContent('Saved: off for every shop.'));
-    fireEvent.change(screen.getByTestId('admin-direct-lana-units'), { target: { value: '*' } });
-    fireEvent.click(screen.getByTestId('admin-direct-lana-save'));
-    await waitFor(() => expect(screen.getByTestId('admin-direct-lana-state')).toHaveTextContent('Saved: on for every shop without a company.'));
-  });
-
-  it('a refusal (no valid signature) is said, and nothing reads as saved', async () => {
-    answer = { status: 401, body: { success: false, code: 'SIGNATURE_REQUIRED', reason: 'STALE' } };
-    await open();
-    fireEvent.change(screen.getByTestId('admin-direct-lana-units'), { target: { value: '*' } });
-    fireEvent.click(screen.getByTestId('admin-direct-lana-save'));
-    await waitFor(() => expect(screen.getByTestId('admin-direct-lana-state')).toHaveTextContent('Not saved'));
-  });
-
-  it('the other settings are saved as before, without the switch in their body', async () => {
-    await open();
-    // The limits section's Save, the first "Save" on the page (the Split date and the switch have their own).
     fireEvent.click(screen.getAllByText(i18n.t('common.save'))[0].closest('button')!);
     await waitFor(() => expect(puts.length).toBe(1));
     const body = JSON.parse(puts[0].body);
     expect(Object.keys(body.settings).sort()).toEqual(['customer_window_days', 'default_max_tx_amount']);
+    expect(puts[0].body).not.toContain('direct_lana_units');
   });
 });
