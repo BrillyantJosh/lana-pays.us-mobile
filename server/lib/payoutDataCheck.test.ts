@@ -52,6 +52,27 @@ describe('the bank file rules, read from the signed unit', () => {
     expect(c.problems).toEqual([]);
     expect(c.advice.sort()).toEqual(['BIC_INVALID', 'COUNTRY_UNCLEAR', 'HOLDER_DIFFERS', 'RECEIVER_NOT_CHOSEN', 'ZIP_MISSING']);
   });
+  it('a BIC of another country or another bank than the IBAN (two Halcom files made again, 25 and 26 Nov)', () => {
+    // Made-up IBANs with right check digits: an OTP (04) and an NLB (02) account.
+    const otp = { iban: 'SI79 0400 0000 0000 012', account_holder: 'Ana Novak' };
+    const nlb = { iban: 'SI16 0200 0000 0000 012', account_holder: 'Ana Novak' };
+    expect(checkPayoutData(unit({}, { ...otp, bic: 'KBMACI2X' }))).toEqual({ problems: [], advice: ['BIC_COUNTRY_MISMATCH'] });
+    expect(checkPayoutData(unit({}, { ...nlb, bic: 'BACXSI22' }))).toEqual({ problems: [], advice: ['BIC_BANK_MISMATCH'] });
+    expect(checkPayoutData(unit({}, { ...otp, bic: 'KBMASI2X' }))).toEqual({ problems: [], advice: [] });
+    expect(checkPayoutData(unit({}, { ...nlb, bic: 'LJBASI2X' }))).toEqual({ problems: [], advice: [] });
+    // The older bank_swift tag is read too, and the word "IBAN" in front does not hide it.
+    expect(checkPayoutData(unit({ bank_swift: 'BACXSI22' }, nlb)).advice).toEqual(['BIC_BANK_MISMATCH']);
+    expect(checkPayoutData(unit({}, { ...nlb, iban: `IBAN ${nlb.iban}`, bic: 'BACXSI22' })).advice).toEqual(['IBAN_HAS_WORD', 'BIC_BANK_MISMATCH']);
+    // No BIC is fine; a wrong IBAN is told first, the BIC is not held against it.
+    expect(checkPayoutData(unit({}, { ...nlb, bic: '' })).advice).toEqual([]);
+    expect(checkPayoutData(unit({}, { iban: 'SI16 0200 0000 0000 013', bic: 'BACXSI22', account_holder: 'Ana Novak' }))).toEqual({ problems: ['IBAN_INVALID'], advice: [] });
+  });
+  it("the receiver's name: a web or e-mail address, or none", () => {
+    expect(checkPayoutData(unit({ receiver_name: 'Www.example.si' }, { iban: GOOD_IBAN }))).toEqual({ problems: [], advice: ['RECEIVER_NOT_A_NAME'] });
+    expect(checkPayoutData(unit({ receiver_name: 'info@example.si' }, { iban: GOOD_IBAN })).advice).toEqual(['RECEIVER_NOT_A_NAME']);
+    expect(checkPayoutData(unit({ receiver_name: '' }, { iban: GOOD_IBAN })).advice).toEqual(['RECEIVER_NAME_MISSING']);
+    expect(checkPayoutData(unit({ receiver_name: 'Booking.com B.V.' }, { iban: GOOD_IBAN })).advice).toEqual([]);
+  });
   it('BIC shapes', () => {
     expect(validBic('LJBASI2X')).toBe(true);
     expect(validBic('HDELSI22XXX')).toBe(true);

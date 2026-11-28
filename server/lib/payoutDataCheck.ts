@@ -2,7 +2,7 @@
  * Are a unit's payout details complete enough for the bank? Read from its
  * signed KIND 30901 tags. Pure; the same file lives in four places (keep them
  * alike): lana-pays-shop server/lib + src/lib, lana-pays-simple server/lib,
- * lana-pays.us-mobile server/lib.
+ * lana-pays.us-mobile server/lib — each beside its copy of payoutFit.ts.
  *
  * The rules are direct.lana.fund's for a payment in the bank file
  * (server/lib/bankExport.ts transferProblems / transferFor, 16 Nov 2026):
@@ -28,6 +28,20 @@
  *     COUNTRY_UNCLEAR      the receiver's country is not a two-letter code
  *                          (the bank file then uses the IBAN's country)
  *     BIC_INVALID          a BIC that is not one (the bank file leaves it out)
+ *     BIC_COUNTRY_MISMATCH a BIC of another country than the IBAN's ("KBMACI2X"
+ *                          on a Slovenian account, 26 Nov 2026)
+ *     BIC_BANK_MISMATCH    a Slovenian IBAN with another bank's BIC (UniCredit's
+ *                          on an NLB account, 25 Nov 2026). Each was in a
+ *                          Halcom file that had to be made again; since 28 Nov
+ *                          the bank file leaves such a BIC out (direct.lana.fund),
+ *                          but a financer paying by hand still copies it
+ *                          (payoutFit.ts)
+ *     RECEIVER_NAME_MISSING no receiver's name: the payout then carries the
+ *                          shop's name, which the funder's bank compares with
+ *                          the account holder
+ *     RECEIVER_NOT_A_NAME  a web or e-mail address typed as the receiver's name
+ *                          ("Www.<the farm>.si", 25 Nov 2026): the funder's
+ *                          bank compares it with the account holder — no match
  *     IBAN_HAS_WORD        a right IBAN with the word "IBAN" typed in front of
  *                          it ("IBAN SI56 …"): the bank file drops the word
  *                          (direct.lana.fund compactIban, Brilly 21 Nov), but
@@ -35,8 +49,11 @@
  *     ZIP_MISSING          no post code
  */
 
+import { checkBicAgainstIban, receiverIsAddress } from './payoutFit.js';
+
 export type PayoutProblem = 'ACCOUNT_MISSING' | 'IBAN_IS_CARD' | 'IBAN_INVALID' | 'STREET_MISSING' | 'TOWN_MISSING';
-export type PayoutAdvice = 'RECEIVER_NOT_CHOSEN' | 'HOLDER_DIFFERS' | 'COUNTRY_UNCLEAR' | 'BIC_INVALID' | 'IBAN_HAS_WORD' | 'ZIP_MISSING';
+export type PayoutAdvice = 'RECEIVER_NOT_CHOSEN' | 'HOLDER_DIFFERS' | 'COUNTRY_UNCLEAR' | 'BIC_INVALID' | 'IBAN_HAS_WORD' | 'ZIP_MISSING'
+  | 'BIC_COUNTRY_MISMATCH' | 'BIC_BANK_MISMATCH' | 'RECEIVER_NAME_MISSING' | 'RECEIVER_NOT_A_NAME';
 
 export interface PayoutCheck {
   problems: PayoutProblem[];
@@ -109,13 +126,23 @@ export function checkPayoutData(tags: unknown): PayoutCheck {
   if (scheme === 'EU.IBAN' || (!scheme && (field('iban') || tag('bank_account')))) {
     const iban = field('iban') || tag('bank_account');
     const compact = compactIban(iban);
+    // The IBAN as the bank file reads it, when it is a right one: only then
+    // can a BIC be held against it.
+    let readIban = '';
     if (compact.length <= 4) problems.push('ACCOUNT_MISSING');
     else if (!validSepaIban(iban)) {
-      if (compact.startsWith('IBAN') && validSepaIban(compact.slice(4).replace(/^:/, ''))) advice.push('IBAN_HAS_WORD');
-      else problems.push(looksLikeCardNumber(compact) ? 'IBAN_IS_CARD' : 'IBAN_INVALID');
-    }
+      if (compact.startsWith('IBAN') && validSepaIban(compact.slice(4).replace(/^:/, ''))) {
+        advice.push('IBAN_HAS_WORD');
+        readIban = compact.slice(4).replace(/^:/, '');
+      } else problems.push(looksLikeCardNumber(compact) ? 'IBAN_IS_CARD' : 'IBAN_INVALID');
+    } else readIban = compact;
     const bic = field('bic') || tag('bank_swift');
     if (bic && !validBic(bic)) advice.push('BIC_INVALID');
+    else if (bic && readIban) {
+      const fit = checkBicAgainstIban(readIban, bic);
+      if (fit === 'country_mismatch') advice.push('BIC_COUNTRY_MISMATCH');
+      else if (fit === 'bank_mismatch') advice.push('BIC_BANK_MISMATCH');
+    }
   } else if (!scheme || !Object.values(fields).some(v => String(v ?? '').trim() && v !== fields.account_holder)) {
     problems.push('ACCOUNT_MISSING');
   }
@@ -124,6 +151,8 @@ export function checkPayoutData(tags: unknown): PayoutCheck {
   if (!tag('receiver_city')) problems.push('TOWN_MISSING');
 
   if (!tag('receiver_type')) advice.push('RECEIVER_NOT_CHOSEN');
+  if (!tag('receiver_name')) advice.push('RECEIVER_NAME_MISSING');
+  else if (receiverIsAddress(tag('receiver_name'))) advice.push('RECEIVER_NOT_A_NAME');
   const holder = field('account_holder');
   if (holder && tag('receiver_name') && letters(holder) !== letters(tag('receiver_name'))) advice.push('HOLDER_DIFFERS');
   if (!/^[A-Z]{2}$/.test(tag('receiver_country'))) advice.push('COUNTRY_UNCLEAR');
